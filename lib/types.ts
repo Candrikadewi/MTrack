@@ -1,0 +1,234 @@
+// Core domain types for M-TRACK — Manpower Tracking Application
+// See MTRACK_SPEC.md §3 for the conceptual data model this mirrors.
+
+export type StatusKontrak = "Permanen" | "Kontrak 1.1" | "Kontrak 1.2" | "Kontrak 2" | "AKTI";
+
+export type Gender = "L" | "P";
+
+export type MpStatusKategori = "Vokasi" | "PKWT" | "Permanen" | "AKTI";
+
+// ---------------------------------------------------------------------------
+// 3.1 / 3.2 — ZPAR Snapshot & Employee Record
+// ---------------------------------------------------------------------------
+
+export interface EmployeeRecord {
+  noreg: string;
+  nama: string;
+  labor_type: string;
+  tgl_masuk: string; // ISO date
+  status_kontrak: StatusKontrak;
+  eg: string; // employment group, filtered to "Active" at parse time
+  directorat: string;
+  division: string;
+  dept: string;
+  section: string;
+  line: string;
+  tgl_lahir: string;
+  gender: Gender;
+  plant: string; // derived from division
+}
+
+export interface ZparSnapshot {
+  id: string;
+  period: string; // YYYY-MM
+  filename: string;
+  uploadDate: string; // ISO datetime
+  isActive: boolean;
+  employees: EmployeeRecord[];
+}
+
+// ---------------------------------------------------------------------------
+// 3.3 — Vokasi Record (cumulative, cross-snapshot)
+// ---------------------------------------------------------------------------
+
+export type VokasiStatusSaatIni = "Active" | "Overlapping" | "Need Replace" | "Ended";
+
+export interface VokasiRecord {
+  id: string;
+  noreg: string;
+  nama: string;
+  batch: string;
+  div: string;
+  dept: string; // shop/dept
+  lokasi: string;
+  tgl_masuk: string; // tanggal masuk vokasi
+  tgl_ended: string;
+  utilisasi: string;
+  status_saat_ini: VokasiStatusSaatIni;
+  gender: Gender;
+  uploadDate: string; // metadata: when this batch record was uploaded
+}
+
+// ---------------------------------------------------------------------------
+// 3.4 — PKWT Review (generated per period from EmployeeRecord)
+// ---------------------------------------------------------------------------
+
+export type ReviewResult = "" | "Continue" | "Terminate";
+
+export interface PkwtReview {
+  id: string;
+  noreg: string;
+  nama: string;
+  status_kontrak: StatusKontrak;
+  div: string;
+  dept: string;
+  tgl_masuk: string;
+  tgl_review: string; // computed
+  review_result: ReviewResult;
+  demand_id?: string; // set once Terminate creates a Demand
+}
+
+// ---------------------------------------------------------------------------
+// 3.5 — Demand (centralized need pool)
+// ---------------------------------------------------------------------------
+
+export type DemandCategory = "Vokasi" | "PKWT";
+
+export type DemandOriginType =
+  | "VokasiEnded"
+  | "PkwtTerminate"
+  | "Project"
+  | "TaktUp"
+  | "Resign"
+  | "Pension"
+  | "GST"
+  | "Unfit"
+  | "Manual";
+
+export type DemandStatus = "Open" | "Fulfilled";
+
+export type FsStatus = "Need FS" | "No Need FS" | "";
+
+export interface Demand {
+  id: string;
+  category: DemandCategory;
+  origin_type: DemandOriginType;
+  origin_ref: string; // id of source record (project/takt/pkwt review/vokasi record)
+  origin_label?: string; // human readable label for the origin (project name etc.)
+
+  outgoing_noreg: string;
+  outgoing_nama: string;
+  outgoing_label: string; // used INSTEAD of noreg/nama for Project/TaktUp origins
+
+  div: string;
+  dept: string;
+
+  tgl_masuk_outgoing: string;
+  tgl_ended_outgoing: string; // vokasi ended date OR pkwt review date
+
+  fulfill_date: string; // target date replacement should start
+
+  replacement_noreg: string;
+  replacement_nama: string;
+  replacement_batch: string;
+  replacement_tgl_masuk: string;
+  replacement_dept: string; // department of the vokasi replacement (for fs_status)
+
+  fs_status: FsStatus; // PKWT only, computed
+
+  status: DemandStatus;
+
+  createdAt: string;
+}
+
+// ---------------------------------------------------------------------------
+// 3.6 — Project
+// ---------------------------------------------------------------------------
+
+export type ProjectStatus = "Ongoing" | "Finish";
+
+export interface ProjectMpNeedRow {
+  id: string;
+  division: string;
+  dept: string;
+  status_mp: MpStatusKategori;
+  qty: number;
+  fulfill_date: string;
+}
+
+export interface Project {
+  id: string;
+  name: string;
+  start_date: string;
+  end_date: string;
+  status: ProjectStatus;
+  rows: ProjectMpNeedRow[];
+  demand_ids: string[];
+}
+
+// ---------------------------------------------------------------------------
+// 3.7 — Takt Case
+// ---------------------------------------------------------------------------
+
+export type Plant = "Plant 1" | "Plant 2";
+export type TaktCategory = "up" | "down";
+
+export interface TaktDownPerson {
+  noreg: string;
+  nama: string;
+  type: MpStatusKategori;
+  dept: string;
+}
+
+export interface TaktCase {
+  id: string;
+  plant: Plant;
+  date: string;
+  category: TaktCategory;
+  takt_before: number;
+  takt_after: number;
+  // "up" inputs
+  needRows?: ProjectMpNeedRow[];
+  demand_ids: string[];
+  // "down" inputs
+  releasedPersons?: TaktDownPerson[];
+  released_pool_ids: string[];
+}
+
+// ---------------------------------------------------------------------------
+// 3.8 — Utilization Pool Entry
+// ---------------------------------------------------------------------------
+
+export type UtilPoolSource = "ProjectFinish" | "TaktDown";
+export type UtilPoolStatus = "Open" | "Assigned" | "Released";
+
+export interface UtilPoolEntry {
+  id: string;
+  noreg: string;
+  nama: string;
+  type: MpStatusKategori;
+  source: UtilPoolSource;
+  source_label: string;
+  prev_dept: string;
+  entered_pool_date: string;
+  contract_end: string | null; // null if Permanen
+  status: UtilPoolStatus;
+  action_note: string;
+}
+
+// ---------------------------------------------------------------------------
+// 3.9 — Handover Form
+// ---------------------------------------------------------------------------
+
+export type HandoverStatus = "Draft" | "Completed";
+
+export interface HandoverRow {
+  id: string;
+  no: number;
+  tipe_movement: string;
+  outgoing: string;
+  incoming: string;
+  labor_type: string;
+  alasan: string;
+  tanggal: string;
+  demand_id?: string;
+}
+
+export interface HandoverForm {
+  id: string;
+  dept: string;
+  period: string; // YYYY-MM
+  status: HandoverStatus;
+  rows: HandoverRow[];
+  createdAt: string;
+}
