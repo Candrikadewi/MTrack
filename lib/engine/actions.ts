@@ -18,9 +18,11 @@ import type {
   DemandCategory,
   DemandOriginType,
   EmployeeRecord,
+  EmploymentStatus,
   MpStatusKategori,
   Project,
   ProjectMpNeedRow,
+  ReplacementStatus,
   ReviewResult,
   TaktCase,
   UtilPoolEntry,
@@ -42,6 +44,15 @@ export function getVokasiByNoreg(noreg: string): VokasiRecord | undefined {
   return matches.sort((a, b) => b.upload_date.localeCompare(a.upload_date))[0];
 }
 
+/** Employment status of a noreg — Vokasi db takes precedence, else derived from ZPAR contract status. */
+export function getEmploymentStatus(noreg: string): EmploymentStatus {
+  if (!noreg) return "";
+  if (getVokasiByNoreg(noreg)) return "Vokasi";
+  const emp = getActiveEmployeeByNoreg(noreg);
+  if (!emp) return "";
+  return emp.status_kontrak === "Permanen" ? "Permanen" : "Kontrak";
+}
+
 // ---------------------------------------------------------------------------
 // Demand creation
 // ---------------------------------------------------------------------------
@@ -60,11 +71,14 @@ function baseDemand(overrides: Partial<Demand>): Demand {
     tgl_masuk_outgoing: "",
     tgl_ended_outgoing: "",
     fulfill_date: "",
+    replacement_status: "",
+    no_replace_reason: "",
     replacement_noreg: "",
     replacement_nama: "",
     replacement_batch: "",
     replacement_tgl_masuk: "",
     replacement_dept: "",
+    replacement_employment_status: "",
     fs_status: "",
     status: "Open",
     created_at: new Date().toISOString(),
@@ -134,7 +148,8 @@ export function ensureVokasiEndedDemands(): void {
 
 export function createManualDemand(input: {
   category: DemandCategory;
-  origin_type: Extract<DemandOriginType, "Resign" | "Pension" | "GST" | "Unfit" | "Manual">;
+  origin_type: Extract<DemandOriginType, "Resign" | "Pension" | "GST" | "Unfit" | "Others" | "Manual">;
+  origin_label?: string; // free-text reason when origin_type = "Others"
   outgoing_noreg: string;
   outgoing_nama: string;
   div: string;
@@ -144,6 +159,7 @@ export function createManualDemand(input: {
   const d = baseDemand({
     category: input.category,
     origin_type: input.origin_type,
+    origin_label: input.origin_label,
     outgoing_noreg: input.outgoing_noreg,
     outgoing_nama: input.outgoing_nama,
     div: input.div,
@@ -213,8 +229,15 @@ export function setReviewResult(reviewId: string, result: ReviewResult): void {
  * supabase/schema.sql) — Admin may fill any category, Shop only PKWT — so
  * the rule holds even if the UI is bypassed. The local cache updates
  * shortly after via the realtime subscription.
+ *
+ * `replacementStatus` only applies to the Kontrak (PKWT) tab's "PKWT New
+ * Hire / MP Excess / MP Back Up" flow; the Vokasi tab leaves it "".
  */
-export function setDemandReplacementByNoreg(demandId: string, noreg: string): void {
+export function setDemandReplacementByNoreg(
+  demandId: string,
+  noreg: string,
+  replacementStatus: ReplacementStatus = ""
+): void {
   const demand = demandStore.get(demandId);
   if (!demand) return;
 
@@ -223,6 +246,7 @@ export function setDemandReplacementByNoreg(demandId: string, noreg: string): vo
   let batch = "";
   let tglMasuk: string | null = null;
   let fs_status = "";
+  let employmentStatus: EmploymentStatus = "";
 
   if (noreg) {
     const vokasi = getVokasiByNoreg(noreg);
@@ -232,21 +256,46 @@ export function setDemandReplacementByNoreg(demandId: string, noreg: string): vo
     batch = vokasi?.batch ?? "";
     tglMasuk = vokasi?.tgl_masuk ?? emp?.tgl_masuk ?? null;
     fs_status = demand.category === "PKWT" ? computeFsStatus(demand.dept, dept, vokasi?.tgl_ended) : "";
+    employmentStatus = getEmploymentStatus(noreg);
   }
 
   const supabase = createClient();
   supabase
     .rpc("set_demand_replacement", {
       p_demand_id: demandId,
+      p_replacement_status: replacementStatus,
       p_noreg: noreg,
       p_nama: nama,
       p_batch: batch,
       p_tgl_masuk: tglMasuk,
       p_dept: dept,
       p_fs_status: fs_status,
+      p_employment_status: employmentStatus,
+      p_no_replace_reason: "",
     })
     .then((res: { error: { message: string } | null }) => {
       if (res.error) console.error("set_demand_replacement failed:", res.error.message);
+    });
+}
+
+/** Kontrak tab "No Replace" path — clears any replacement info, records the reason. */
+export function setDemandNoReplace(demandId: string, reason: string): void {
+  const supabase = createClient();
+  supabase
+    .rpc("set_demand_replacement", {
+      p_demand_id: demandId,
+      p_replacement_status: "No Replace",
+      p_noreg: "",
+      p_nama: "",
+      p_batch: "",
+      p_tgl_masuk: null,
+      p_dept: "",
+      p_fs_status: "",
+      p_employment_status: "",
+      p_no_replace_reason: reason,
+    })
+    .then((res: { error: { message: string } | null }) => {
+      if (res.error) console.error("set_demand_replacement (no replace) failed:", res.error.message);
     });
 }
 

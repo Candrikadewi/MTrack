@@ -9,6 +9,7 @@ import { EmptyState, TableWrap, Td, Th } from "@/components/ui/Table";
 import { StatTile, ProgressBar } from "@/components/ui/StatTile";
 import { NoregInput, DateInput } from "@/components/enrollment/NoregInput";
 import { ManualDemandModal } from "@/components/enrollment/ManualDemandModal";
+import { MultiSelect } from "@/components/ui/MultiSelect";
 import { useStoreList } from "@/lib/useStore";
 import { demandStore, pkwtReviewStore } from "@/lib/repo";
 import { fmtDate, sisaHari } from "@/lib/engine/compute";
@@ -16,11 +17,21 @@ import {
   computeEnrollmentSummary,
   demandStatusLabel,
   demandsForTabAndMonth,
+  deptsOfRows,
+  divisionsOfRows,
+  filterByDivDept,
   monthLabel,
 } from "@/lib/engine/enrollment";
-import { setDemandFulfillDate, setDemandReplacementByNoreg, setReviewResult } from "@/lib/engine/actions";
+import {
+  setDemandFulfillDate,
+  setDemandNoReplace,
+  setDemandReplacementByNoreg,
+  setReviewResult,
+} from "@/lib/engine/actions";
 import { useRole } from "@/lib/RoleContext";
-import type { Demand, DemandCategory, PkwtReview, ReviewResult } from "@/lib/types";
+import type { Demand, DemandCategory, PkwtReview, ReplacementStatus, ReviewResult } from "@/lib/types";
+
+const REPLACEMENT_STATUS_OPTIONS: ReplacementStatus[] = ["PKWT New Hire", "MP Excess", "MP Back Up", "No Replace"];
 
 export default function EnrollmentPage() {
   const role = useRole();
@@ -217,11 +228,46 @@ function KontrakDetail({
 }) {
   const monthReviews = reviews.filter((r) => r.tgl_review.slice(0, 7) === period);
 
+  const [reviewDivs, setReviewDivs] = useState<string[]>([]);
+  const [reviewDepts, setReviewDepts] = useState<string[]>([]);
+  const reviewDivOptions = divisionsOfRows(monthReviews);
+  const reviewDeptOptions = deptsOfRows(monthReviews, reviewDivs);
+  const filteredReviews = filterByDivDept(monthReviews, reviewDivs, reviewDepts);
+
+  const [demandDivs, setDemandDivs] = useState<string[]>([]);
+  const [demandDepts, setDemandDepts] = useState<string[]>([]);
+  const demandDivOptions = divisionsOfRows(demands);
+  const demandDeptOptions = deptsOfRows(demands, demandDivs);
+  const filteredDemands = filterByDivDept(demands, demandDivs, demandDepts);
+
   return (
     <>
-      <Card title="Section 1 — Review">
-        {monthReviews.length === 0 ? (
-          <EmptyState text="Tidak ada PKWT jatuh tempo review pada periode ini." />
+      <Card
+        title="Section 1 — Review"
+        action={
+          <div className="flex gap-2">
+            <MultiSelect
+              options={reviewDivOptions}
+              selected={reviewDivs}
+              onChange={(v) => {
+                setReviewDivs(v);
+                setReviewDepts([]);
+              }}
+              placeholder="Semua Divisi"
+              className="w-44"
+            />
+            <MultiSelect
+              options={reviewDeptOptions}
+              selected={reviewDepts}
+              onChange={setReviewDepts}
+              placeholder="Semua Department"
+              className="w-44"
+            />
+          </div>
+        }
+      >
+        {filteredReviews.length === 0 ? (
+          <EmptyState text="Tidak ada PKWT jatuh tempo review pada periode/filter ini." />
         ) : (
           <TableWrap>
             <thead>
@@ -238,7 +284,7 @@ function KontrakDetail({
               </tr>
             </thead>
             <tbody>
-              {monthReviews.map((r) => {
+              {filteredReviews.map((r) => {
                 const days = sisaHari(r.tgl_review);
                 return (
                   <tr key={r.id}>
@@ -273,9 +319,32 @@ function KontrakDetail({
         )}
       </Card>
 
-      <Card title="Section 2 — PKWT Demand">
-        {demands.length === 0 ? (
-          <EmptyState text="Tidak ada PKWT demand pada periode ini." />
+      <Card
+        title="Section 2 — PKWT Demand"
+        action={
+          <div className="flex gap-2">
+            <MultiSelect
+              options={demandDivOptions}
+              selected={demandDivs}
+              onChange={(v) => {
+                setDemandDivs(v);
+                setDemandDepts([]);
+              }}
+              placeholder="Semua Divisi"
+              className="w-44"
+            />
+            <MultiSelect
+              options={demandDeptOptions}
+              selected={demandDepts}
+              onChange={setDemandDepts}
+              placeholder="Semua Department"
+              className="w-44"
+            />
+          </div>
+        }
+      >
+        {filteredDemands.length === 0 ? (
+          <EmptyState text="Tidak ada PKWT demand pada periode/filter ini." />
         ) : (
           <TableWrap>
             <thead>
@@ -285,17 +354,20 @@ function KontrakDetail({
                 <Th>Status</Th>
                 <Th>Divisi</Th>
                 <Th>Department</Th>
+                <Th>Status Replacement</Th>
                 <Th>Noreg Pengganti</Th>
                 <Th>Nama Pengganti</Th>
-                <Th>Batch Pengganti</Th>
+                <Th>Batch / Employment Status</Th>
                 <Th>Department Pengganti</Th>
                 <Th>Status FS</Th>
                 <Th>Tanggal Pemenuhan</Th>
+                <Th>Alasan (No Replace)</Th>
               </tr>
             </thead>
             <tbody>
-              {demands.map((d) => {
+              {filteredDemands.map((d) => {
                 const isLabelRow = d.origin_type === "Project" || d.origin_type === "TaktUp";
+                const isNoReplace = d.replacement_status === "No Replace";
                 return (
                   <tr key={d.id}>
                     {isLabelRow ? (
@@ -314,20 +386,81 @@ function KontrakDetail({
                     <Td>{d.dept}</Td>
                     <Td>
                       {canEditReplacement ? (
-                        <NoregInput value={d.replacement_noreg} onCommit={(v) => setDemandReplacementByNoreg(d.id, v)} />
+                        <Select
+                          value={d.replacement_status}
+                          onChange={(e) => {
+                            const status = e.target.value as ReplacementStatus;
+                            if (status === "No Replace") setDemandNoReplace(d.id, d.no_replace_reason);
+                            else setDemandReplacementByNoreg(d.id, d.replacement_noreg, status);
+                          }}
+                          className="min-w-[140px]"
+                        >
+                          <option value="">- pilih -</option>
+                          {REPLACEMENT_STATUS_OPTIONS.map((s) => (
+                            <option key={s} value={s}>
+                              {s}
+                            </option>
+                          ))}
+                        </Select>
                       ) : (
-                        d.replacement_noreg || "-"
+                        d.replacement_status || "-"
                       )}
                     </Td>
-                    <Td>{d.replacement_nama || "-"}</Td>
-                    <Td>{d.replacement_batch || "-"}</Td>
-                    <Td>{d.replacement_dept || "-"}</Td>
-                    <Td>{d.fs_status ? <Badge tone={statusTone(d.fs_status)}>{d.fs_status}</Badge> : "-"}</Td>
+                    {isNoReplace ? (
+                      <>
+                        <Td className="text-slate-400">-</Td>
+                        <Td className="text-slate-400">-</Td>
+                        <Td className="text-slate-400">-</Td>
+                        <Td className="text-slate-400">-</Td>
+                        <Td className="text-slate-400">-</Td>
+                        <Td className="text-slate-400">-</Td>
+                      </>
+                    ) : !d.replacement_status ? (
+                      <Td colSpan={6} className="text-slate-400">
+                        Pilih Status Replacement terlebih dahulu
+                      </Td>
+                    ) : (
+                      <>
+                        <Td>
+                          {canEditReplacement ? (
+                            <NoregInput
+                              value={d.replacement_noreg}
+                              onCommit={(v) => setDemandReplacementByNoreg(d.id, v, d.replacement_status)}
+                            />
+                          ) : (
+                            d.replacement_noreg || "-"
+                          )}
+                        </Td>
+                        <Td>{d.replacement_nama || "-"}</Td>
+                        <Td>
+                          {d.replacement_status === "PKWT New Hire"
+                            ? d.replacement_batch || "-"
+                            : d.replacement_employment_status || "-"}
+                        </Td>
+                        <Td>{d.replacement_dept || "-"}</Td>
+                        <Td>{d.fs_status ? <Badge tone={statusTone(d.fs_status)}>{d.fs_status}</Badge> : "-"}</Td>
+                        <Td>
+                          {canEditFulfillDate ? (
+                            <DateInput value={d.fulfill_date} onCommit={(v) => setDemandFulfillDate(d.id, v)} />
+                          ) : (
+                            fmtDate(d.fulfill_date)
+                          )}
+                        </Td>
+                      </>
+                    )}
                     <Td>
-                      {canEditFulfillDate ? (
-                        <DateInput value={d.fulfill_date} onCommit={(v) => setDemandFulfillDate(d.id, v)} />
+                      {isNoReplace ? (
+                        canEditReplacement ? (
+                          <NoregInput
+                            value={d.no_replace_reason}
+                            placeholder="Alasan tidak direplace..."
+                            onCommit={(v) => setDemandNoReplace(d.id, v)}
+                          />
+                        ) : (
+                          d.no_replace_reason || "-"
+                        )
                       ) : (
-                        fmtDate(d.fulfill_date)
+                        "-"
                       )}
                     </Td>
                   </tr>

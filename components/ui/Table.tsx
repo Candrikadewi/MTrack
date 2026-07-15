@@ -18,9 +18,18 @@ export function Th({ children, className = "" }: { children?: ReactNode; classNa
   );
 }
 
-export function Td({ children, className = "" }: { children?: ReactNode; className?: string }) {
+export function Td({
+  children,
+  className = "",
+  colSpan,
+}: {
+  children?: ReactNode;
+  className?: string;
+  colSpan?: number;
+}) {
   return (
     <td
+      colSpan={colSpan}
       className={`whitespace-nowrap border-b border-slate-100 px-3 py-2 text-slate-700 dark:border-slate-800 dark:text-slate-300 ${className}`}
     >
       {children}
