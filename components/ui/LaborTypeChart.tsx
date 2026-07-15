@@ -31,11 +31,13 @@ export function LaborTypeChart({ data }: { data: LaborTypeRow[] }) {
   // always-non-zero synthetic field on top and label that instead.
   const augmented = data.map((row) => ({ ...row, _labelAnchor: 0.0001 }));
 
-  function totalLabel(props: { x?: number | string; y?: number | string; width?: number | string; payload?: LaborTypeRow }) {
+  function totalLabel(props: { x?: number | string; y?: number | string; width?: number | string; index?: number }) {
+    // See CompositionChart's totalLabel for why `index` (not `payload`) is
+    // the reliable way to recover the full row here.
     const x = Number(props.x);
     const y = Number(props.y);
     const width = Number(props.width);
-    const row = props.payload;
+    const row = props.index !== undefined ? data[props.index] : undefined;
     if (Number.isNaN(x) || Number.isNaN(y) || Number.isNaN(width) || !row) return null;
     const total = Object.entries(row)
       .filter(([k]) => k !== "key" && k !== "_labelAnchor")
@@ -79,6 +81,7 @@ export function LaborTypeChart({ data }: { data: LaborTypeRow[] }) {
               fill={isDark ? s.dark : s.light}
               radius={i === arr.length - 1 ? [4, 4, 0, 0] : 0}
               maxBarSize={48}
+              isAnimationActive={false}
             />
           ))}
           <Bar

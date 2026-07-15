@@ -20,11 +20,16 @@ export function CompositionChart({ data, heightClass = "h-72" }: { data: Composi
   // label that; its height is negligible so it doesn't visibly affect the bar.
   const augmented = data.map((row) => ({ ...row, _labelAnchor: 0.0001 }));
 
-  function totalLabel(props: { x?: number | string; y?: number | string; width?: number | string; payload?: CompositionRow }) {
+  function totalLabel(props: { x?: number | string; y?: number | string; width?: number | string; index?: number }) {
+    // Recharts' `content` render prop filters entry props down to actual SVG
+    // attributes before forwarding them (see svgPropertiesAndEvents) — a
+    // `payload` prop is NOT one of those, so it never reaches here. `index`
+    // does survive, and since every row always has this anchor field (unlike
+    // sparse real series), index reliably maps back into our own `data`.
     const x = Number(props.x);
     const y = Number(props.y);
     const width = Number(props.width);
-    const row = props.payload;
+    const row = props.index !== undefined ? data[props.index] : undefined;
     if (Number.isNaN(x) || Number.isNaN(y) || Number.isNaN(width) || !row) return null;
     const total = row.permanen + row.kontrak + row.vokasi;
     return (
@@ -82,6 +87,7 @@ export function CompositionChart({ data, heightClass = "h-72" }: { data: Composi
               fill={isDark ? s.dark : s.light}
               radius={s.key === "vokasi" ? [4, 4, 0, 0] : 0}
               maxBarSize={40}
+              isAnimationActive={false}
             />
           ))}
           <Bar
