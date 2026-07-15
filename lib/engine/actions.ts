@@ -11,6 +11,7 @@ import {
   vokasiStore,
   getActiveSnapshot,
 } from "../repo";
+import { createClient } from "../supabase/client";
 import { computeFsStatus, computeReviewDate, sisaHari, today } from "./compute";
 import type {
   Demand,
@@ -38,7 +39,7 @@ export function getActiveEmployeeByNoreg(noreg: string): EmployeeRecord | undefi
 export function getVokasiByNoreg(noreg: string): VokasiRecord | undefined {
   const matches = vokasiStore.list().filter((v) => v.noreg === noreg);
   if (matches.length === 0) return undefined;
-  return matches.sort((a, b) => b.uploadDate.localeCompare(a.uploadDate))[0];
+  return matches.sort((a, b) => b.upload_date.localeCompare(a.upload_date))[0];
 }
 
 // ---------------------------------------------------------------------------
@@ -66,7 +67,7 @@ function baseDemand(overrides: Partial<Demand>): Demand {
     replacement_dept: "",
     fs_status: "",
     status: "Open",
-    createdAt: new Date().toISOString(),
+    created_at: new Date().toISOString(),
     ...overrides,
   };
 }
@@ -189,64 +190,64 @@ export function generatePkwtReviews(): void {
   }
 }
 
+/**
+ * Routed through the `set_review_result` Postgres RPC (see supabase/schema.sql)
+ * so the Admin/HR-only rule is enforced in the database, not just the UI.
+ * The local cache updates shortly after via the realtime subscription.
+ */
 export function setReviewResult(reviewId: string, result: ReviewResult): void {
-  const review = pkwtReviewStore.get(reviewId);
-  if (!review) return;
-  pkwtReviewStore.update(reviewId, { review_result: result });
-  if (result === "Terminate" && !review.demand_id) {
-    const d = baseDemand({
-      category: "PKWT",
-      origin_type: "PkwtTerminate",
-      origin_ref: review.id,
-      outgoing_noreg: review.noreg,
-      outgoing_nama: review.nama,
-      div: review.div,
-      dept: review.dept,
-      tgl_masuk_outgoing: review.tgl_masuk,
-      tgl_ended_outgoing: review.tgl_review,
+  const supabase = createClient();
+  supabase
+    .rpc("set_review_result", { p_review_id: reviewId, p_result: result })
+    .then((res: { error: { message: string } | null }) => {
+      if (res.error) console.error("set_review_result failed:", res.error.message);
     });
-    demandStore.insert(d);
-    pkwtReviewStore.update(reviewId, { demand_id: d.id });
-  }
 }
 
 // ---------------------------------------------------------------------------
 // Replacement linking (Enrollment)
 // ---------------------------------------------------------------------------
 
-export function setDemandReplacementByNoreg(demandId: string, noreg: string): Demand | undefined {
+/**
+ * Routed through the `set_demand_replacement` Postgres RPC (see
+ * supabase/schema.sql) — Admin may fill any category, Shop only PKWT — so
+ * the rule holds even if the UI is bypassed. The local cache updates
+ * shortly after via the realtime subscription.
+ */
+export function setDemandReplacementByNoreg(demandId: string, noreg: string): void {
   const demand = demandStore.get(demandId);
-  if (!demand) return undefined;
-  if (!noreg) {
-    return demandStore.update(demandId, {
-      replacement_noreg: "",
-      replacement_nama: "",
-      replacement_batch: "",
-      replacement_tgl_masuk: "",
-      replacement_dept: "",
-      fs_status: "",
-      status: "Open",
-    });
+  if (!demand) return;
+
+  let nama = "";
+  let dept = "";
+  let batch = "";
+  let tglMasuk: string | null = null;
+  let fs_status = "";
+
+  if (noreg) {
+    const vokasi = getVokasiByNoreg(noreg);
+    const emp = vokasi ? undefined : getActiveEmployeeByNoreg(noreg);
+    nama = vokasi?.nama ?? emp?.nama ?? "";
+    dept = vokasi?.dept ?? emp?.dept ?? "";
+    batch = vokasi?.batch ?? "";
+    tglMasuk = vokasi?.tgl_masuk ?? emp?.tgl_masuk ?? null;
+    fs_status = demand.category === "PKWT" ? computeFsStatus(demand.dept, dept, vokasi?.tgl_ended) : "";
   }
-  const vokasi = getVokasiByNoreg(noreg);
-  const emp = vokasi ? undefined : getActiveEmployeeByNoreg(noreg);
-  const nama = vokasi?.nama ?? emp?.nama ?? "";
-  const dept = vokasi?.dept ?? emp?.dept ?? "";
-  const batch = vokasi?.batch ?? "";
-  const tglMasuk = vokasi?.tgl_masuk ?? emp?.tgl_masuk ?? "";
 
-  const fs_status =
-    demand.category === "PKWT" ? computeFsStatus(demand.dept, dept, vokasi?.tgl_ended) : "";
-
-  return demandStore.update(demandId, {
-    replacement_noreg: noreg,
-    replacement_nama: nama,
-    replacement_batch: batch,
-    replacement_tgl_masuk: tglMasuk,
-    replacement_dept: dept,
-    fs_status,
-    status: nama ? "Fulfilled" : "Open",
-  });
+  const supabase = createClient();
+  supabase
+    .rpc("set_demand_replacement", {
+      p_demand_id: demandId,
+      p_noreg: noreg,
+      p_nama: nama,
+      p_batch: batch,
+      p_tgl_masuk: tglMasuk,
+      p_dept: dept,
+      p_fs_status: fs_status,
+    })
+    .then((res: { error: { message: string } | null }) => {
+      if (res.error) console.error("set_demand_replacement failed:", res.error.message);
+    });
 }
 
 export function setDemandFulfillDate(demandId: string, date: string): void {
@@ -360,7 +361,7 @@ export function createTaktUp(input: {
   date: string;
   takt_before: number;
   takt_after: number;
-  needRows: Omit<ProjectMpNeedRow, "id">[];
+  need_rows: Omit<ProjectMpNeedRow, "id">[];
 }): TaktCase {
   const takt: TaktCase = {
     id: genId("takt"),
@@ -369,13 +370,13 @@ export function createTaktUp(input: {
     category: "up",
     takt_before: input.takt_before,
     takt_after: input.takt_after,
-    needRows: input.needRows.map((r) => ({ ...r, id: genId("row") })),
+    need_rows: input.need_rows.map((r) => ({ ...r, id: genId("row") })),
     demand_ids: [],
     released_pool_ids: [],
   };
   taktStore.insert(takt);
   const demandIds: string[] = [];
-  for (const row of takt.needRows ?? []) {
+  for (const row of takt.need_rows ?? []) {
     const created = createDemandsFromTaktRow(takt, row);
     demandIds.push(...created.map((d) => d.id));
   }
@@ -387,7 +388,7 @@ export function createTaktDown(input: {
   date: string;
   takt_before: number;
   takt_after: number;
-  releasedPersons: { noreg: string; nama: string; type: MpStatusKategori; dept: string }[];
+  released_persons: { noreg: string; nama: string; type: MpStatusKategori; dept: string }[];
 }): TaktCase {
   const takt: TaktCase = {
     id: genId("takt"),
@@ -396,13 +397,13 @@ export function createTaktDown(input: {
     category: "down",
     takt_before: input.takt_before,
     takt_after: input.takt_after,
-    releasedPersons: input.releasedPersons,
+    released_persons: input.released_persons,
     demand_ids: [],
     released_pool_ids: [],
   };
   taktStore.insert(takt);
   const poolIds: string[] = [];
-  for (const p of input.releasedPersons) {
+  for (const p of input.released_persons) {
     const contractEnd = estimateContractEnd(p.noreg, p.type);
     const entry = pushToUtilPool({
       noreg: p.noreg,

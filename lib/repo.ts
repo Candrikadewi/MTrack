@@ -20,10 +20,27 @@ export const utilPoolStore = createStore<UtilPoolEntry>("util_pool");
 export const handoverStore = createStore<HandoverForm>("handover_forms");
 
 export function getActiveSnapshot(): ZparSnapshot | undefined {
-  return zparStore.list().find((s) => s.isActive);
+  return zparStore.list().find((s) => s.is_active);
 }
 
 export function activateSnapshot(id: string): void {
-  const all = zparStore.list();
-  zparStore.replaceAll(all.map((s) => ({ ...s, isActive: s.id === id })));
+  for (const s of zparStore.list()) {
+    const shouldBeActive = s.id === id;
+    if (s.is_active !== shouldBeActive) zparStore.update(s.id, { is_active: shouldBeActive });
+  }
+}
+
+export function clearAllData(): void {
+  for (const store of [
+    zparStore,
+    vokasiStore,
+    pkwtReviewStore,
+    demandStore,
+    projectStore,
+    taktStore,
+    utilPoolStore,
+    handoverStore,
+  ]) {
+    for (const item of store.list()) store.remove(item.id);
+  }
 }

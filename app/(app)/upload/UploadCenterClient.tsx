@@ -6,16 +6,16 @@ import { Field, Input } from "@/components/ui/Form";
 import { Badge } from "@/components/ui/Badge";
 import { EmptyState, TableWrap, Td, Th } from "@/components/ui/Table";
 import { useStoreList } from "@/lib/useStore";
-import { zparStore, vokasiStore, activateSnapshot } from "@/lib/repo";
-import { clearAllData, genId } from "@/lib/storage";
+import { zparStore, vokasiStore, activateSnapshot, clearAllData } from "@/lib/repo";
+import { genId } from "@/lib/storage";
 import { parseVokasiFile, parseZparFile } from "@/lib/parseFile";
 import { autoMatchVokasiBatch, ensureVokasiEndedDemands, generatePkwtReviews } from "@/lib/engine/actions";
 import { seedSampleData } from "@/lib/sampleData";
 import { fmtDate } from "@/lib/engine/compute";
 import type { VokasiRecord } from "@/lib/types";
 
-export default function UploadCenterPage() {
-  const snapshots = useStoreList(zparStore).sort((a, b) => b.uploadDate.localeCompare(a.uploadDate));
+export function UploadCenterClient() {
+  const snapshots = useStoreList(zparStore).sort((a, b) => b.upload_date.localeCompare(a.upload_date));
   const vokasiRecords = useStoreList(vokasiStore);
 
   const [zparPeriod, setZparPeriod] = useState(new Date().toISOString().slice(0, 7));
@@ -36,7 +36,7 @@ export default function UploadCenterPage() {
 
   const batches = Array.from(new Set(vokasiRecords.map((v) => v.batch))).map((batch) => {
     const rows = vokasiRecords.filter((v) => v.batch === batch);
-    return { batch, count: rows.length, uploadDate: rows[0]?.uploadDate ?? "" };
+    return { batch, count: rows.length, upload_date: rows[0]?.upload_date ?? "" };
   });
 
   async function handleZparUpload() {
@@ -49,12 +49,12 @@ export default function UploadCenterPage() {
         id: genId("zpar"),
         period: zparPeriod,
         filename: zparFile.name,
-        uploadDate: new Date().toISOString(),
-        isActive: false,
+        upload_date: new Date().toISOString(),
+        is_active: false,
         employees,
       };
       zparStore.insert(snapshot);
-      if (!snapshots.some((s) => s.isActive)) activateAndRefresh(snapshot.id);
+      if (!snapshots.some((s) => s.is_active)) activateAndRefresh(snapshot.id);
       setZparMsg(
         `Berhasil upload ${employees.length} employee aktif dari ${totalRows} baris (${skipped} baris dilewati / tidak match filter).`
       );
@@ -72,12 +72,12 @@ export default function UploadCenterPage() {
     setVokasiMsg("");
     try {
       const { records, totalRows } = await parseVokasiFile(vokasiFile, vokasiTglMasuk);
-      const uploadDate = new Date().toISOString();
+      const upload_date = new Date().toISOString();
       const full: VokasiRecord[] = records.map((r) => ({
         ...r,
         id: genId("vokasi"),
         batch: vokasiBatch,
-        uploadDate,
+        upload_date,
       }));
       vokasiStore.insertMany(full);
       ensureVokasiEndedDemands();
@@ -93,12 +93,12 @@ export default function UploadCenterPage() {
   }
 
   function loadSample() {
-    if (!confirm("Ini akan mengganti seluruh data saat ini dengan data contoh. Lanjutkan?")) return;
+    if (!confirm("Ini akan mengganti SELURUH data di database (untuk semua user) dengan data contoh. Lanjutkan?")) return;
     seedSampleData();
   }
 
   function resetAll() {
-    if (!confirm("Hapus SEMUA data M-TRACK dari browser ini? Tindakan ini tidak bisa dibatalkan.")) return;
+    if (!confirm("Hapus SEMUA data M-TRACK dari database (untuk semua user)? Tindakan ini tidak bisa dibatalkan.")) return;
     clearAllData();
   }
 
@@ -167,13 +167,13 @@ export default function UploadCenterPage() {
                     <tr key={s.id}>
                       <Td>{s.period}</Td>
                       <Td>{s.filename}</Td>
-                      <Td>{fmtDate(s.uploadDate.slice(0, 10))}</Td>
+                      <Td>{fmtDate(s.upload_date.slice(0, 10))}</Td>
                       <Td>{s.employees.length}</Td>
                       <Td>{perm}</Td>
                       <Td>{kontrak}</Td>
-                      <Td>{s.isActive ? <Badge tone="green">Active</Badge> : <Badge>Inactive</Badge>}</Td>
+                      <Td>{s.is_active ? <Badge tone="green">Active</Badge> : <Badge>Inactive</Badge>}</Td>
                       <Td>
-                        {!s.isActive && (
+                        {!s.is_active && (
                           <Button size="sm" onClick={() => activateAndRefresh(s.id)}>
                             Use This Data
                           </Button>
@@ -234,7 +234,7 @@ export default function UploadCenterPage() {
                   <tr key={b.batch}>
                     <Td>{b.batch}</Td>
                     <Td>{b.count}</Td>
-                    <Td>{fmtDate(b.uploadDate.slice(0, 10))}</Td>
+                    <Td>{fmtDate(b.upload_date.slice(0, 10))}</Td>
                   </tr>
                 ))}
               </tbody>

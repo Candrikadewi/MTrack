@@ -100,7 +100,7 @@ export async function parseZparFile(file: File): Promise<ZparParseResult> {
 }
 
 export interface VokasiParseResult {
-  records: Omit<VokasiRecord, "id" | "batch" | "uploadDate">[];
+  records: Omit<VokasiRecord, "id" | "batch" | "upload_date">[];
   totalRows: number;
 }
 

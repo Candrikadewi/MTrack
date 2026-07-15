@@ -19,9 +19,11 @@ import {
   monthLabel,
 } from "@/lib/engine/enrollment";
 import { setDemandFulfillDate, setDemandReplacementByNoreg, setReviewResult } from "@/lib/engine/actions";
+import { useRole } from "@/lib/RoleContext";
 import type { Demand, DemandCategory, PkwtReview, ReviewResult } from "@/lib/types";
 
 export default function EnrollmentPage() {
+  const role = useRole();
   const [tab, setTab] = useState<DemandCategory>("Vokasi");
   const [period, setPeriod] = useState(new Date().toISOString().slice(0, 7));
   const [modalOpen, setModalOpen] = useState(false);
@@ -43,9 +45,11 @@ export default function EnrollmentPage() {
         </div>
         <div className="flex items-center gap-2">
           <Input type="month" value={period} onChange={(e) => setPeriod(e.target.value)} className="w-40" />
-          <Button variant="primary" onClick={() => setModalOpen(true)}>
-            + Manual Demand
-          </Button>
+          {role === "admin" && (
+            <Button variant="primary" onClick={() => setModalOpen(true)}>
+              + Manual Demand
+            </Button>
+          )}
         </div>
       </div>
 
@@ -107,17 +111,26 @@ export default function EnrollmentPage() {
       </Card>
 
       {tab === "Vokasi" ? (
-        <VokasiDetail demands={monthDemands} />
+        <VokasiDetail demands={monthDemands} canEdit={role === "admin"} />
       ) : (
-        <KontrakDetail period={period} reviews={reviews} demands={monthDemands} />
+        <KontrakDetail
+          period={period}
+          reviews={reviews}
+          demands={monthDemands}
+          canEditReview={role === "admin" || role === "hr"}
+          canEditReplacement={role === "admin" || role === "shop"}
+          canEditFulfillDate={role === "admin"}
+        />
       )}
 
-      <ManualDemandModal open={modalOpen} onClose={() => setModalOpen(false)} defaultCategory={tab} />
+      {role === "admin" && (
+        <ManualDemandModal open={modalOpen} onClose={() => setModalOpen(false)} defaultCategory={tab} />
+      )}
     </div>
   );
 }
 
-function VokasiDetail({ demands }: { demands: Demand[] }) {
+function VokasiDetail({ demands, canEdit }: { demands: Demand[]; canEdit: boolean }) {
   return (
     <Card title="Detail — Vokasi">
       {demands.length === 0 ? (
@@ -165,7 +178,11 @@ function VokasiDetail({ demands }: { demands: Demand[] }) {
                     {isNaN(days) ? "-" : days}
                   </Td>
                   <Td>
-                    <NoregInput value={d.replacement_noreg} onCommit={(v) => setDemandReplacementByNoreg(d.id, v)} />
+                    {canEdit ? (
+                      <NoregInput value={d.replacement_noreg} onCommit={(v) => setDemandReplacementByNoreg(d.id, v)} />
+                    ) : (
+                      d.replacement_noreg || "-"
+                    )}
                   </Td>
                   <Td>{d.replacement_nama || "-"}</Td>
                   <Td>{d.replacement_tgl_masuk ? fmtDate(d.replacement_tgl_masuk) : "-"}</Td>
@@ -187,10 +204,16 @@ function KontrakDetail({
   period,
   reviews,
   demands,
+  canEditReview,
+  canEditReplacement,
+  canEditFulfillDate,
 }: {
   period: string;
   reviews: PkwtReview[];
   demands: Demand[];
+  canEditReview: boolean;
+  canEditReplacement: boolean;
+  canEditFulfillDate: boolean;
 }) {
   const monthReviews = reviews.filter((r) => r.tgl_review.slice(0, 7) === period);
 
@@ -228,15 +251,19 @@ function KontrakDetail({
                     <Td>{fmtDate(r.tgl_review)}</Td>
                     <Td className={days < 0 ? "text-red-600" : days <= 14 ? "text-amber-600" : ""}>{days}</Td>
                     <Td>
-                      <Select
-                        value={r.review_result}
-                        onChange={(e) => setReviewResult(r.id, e.target.value as ReviewResult)}
-                        className="min-w-[130px]"
-                      >
-                        <option value="">-</option>
-                        <option value="Continue">Continue</option>
-                        <option value="Terminate">Terminate</option>
-                      </Select>
+                      {canEditReview ? (
+                        <Select
+                          value={r.review_result}
+                          onChange={(e) => setReviewResult(r.id, e.target.value as ReviewResult)}
+                          className="min-w-[130px]"
+                        >
+                          <option value="">-</option>
+                          <option value="Continue">Continue</option>
+                          <option value="Terminate">Terminate</option>
+                        </Select>
+                      ) : (
+                        r.review_result || "-"
+                      )}
                     </Td>
                   </tr>
                 );
@@ -286,14 +313,22 @@ function KontrakDetail({
                     <Td>{d.div}</Td>
                     <Td>{d.dept}</Td>
                     <Td>
-                      <NoregInput value={d.replacement_noreg} onCommit={(v) => setDemandReplacementByNoreg(d.id, v)} />
+                      {canEditReplacement ? (
+                        <NoregInput value={d.replacement_noreg} onCommit={(v) => setDemandReplacementByNoreg(d.id, v)} />
+                      ) : (
+                        d.replacement_noreg || "-"
+                      )}
                     </Td>
                     <Td>{d.replacement_nama || "-"}</Td>
                     <Td>{d.replacement_batch || "-"}</Td>
                     <Td>{d.replacement_dept || "-"}</Td>
                     <Td>{d.fs_status ? <Badge tone={statusTone(d.fs_status)}>{d.fs_status}</Badge> : "-"}</Td>
                     <Td>
-                      <DateInput value={d.fulfill_date} onCommit={(v) => setDemandFulfillDate(d.id, v)} />
+                      {canEditFulfillDate ? (
+                        <DateInput value={d.fulfill_date} onCommit={(v) => setDemandFulfillDate(d.id, v)} />
+                      ) : (
+                        fmtDate(d.fulfill_date)
+                      )}
                     </Td>
                   </tr>
                 );

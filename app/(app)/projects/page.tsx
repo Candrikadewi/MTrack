@@ -9,13 +9,17 @@ import { useStoreList } from "@/lib/useStore";
 import { demandStore, projectStore } from "@/lib/repo";
 import { autoProjectFinishCheck, projectSuppliedCount } from "@/lib/engine/actions";
 import { fmtDate } from "@/lib/engine/compute";
+import { useRole } from "@/lib/RoleContext";
 
 export default function ProjectsPage() {
+  const role = useRole();
   const [modalOpen, setModalOpen] = useState(false);
 
   useEffect(() => {
-    autoProjectFinishCheck();
-  }, []);
+    // Only Admin can write (RLS); Shop/HR just view, so skip the auto-check
+    // to avoid optimistic local writes that the DB would reject.
+    if (role === "admin") autoProjectFinishCheck();
+  }, [role]);
 
   const projects = useStoreList(projectStore).sort((a, b) => b.start_date.localeCompare(a.start_date));
   const demands = useStoreList(demandStore);
@@ -29,9 +33,11 @@ export default function ProjectsPage() {
             Mendefinisikan kebutuhan MP — assignment kandidat dilakukan di Enrollment Monitoring.
           </p>
         </div>
-        <Button variant="primary" onClick={() => setModalOpen(true)}>
-          + New Project
-        </Button>
+        {role === "admin" && (
+          <Button variant="primary" onClick={() => setModalOpen(true)}>
+            + New Project
+          </Button>
+        )}
       </div>
 
       {projects.length === 0 ? (
@@ -106,7 +112,7 @@ export default function ProjectsPage() {
         </div>
       )}
 
-      <NewProjectModal open={modalOpen} onClose={() => setModalOpen(false)} />
+      {role === "admin" && <NewProjectModal open={modalOpen} onClose={() => setModalOpen(false)} />}
     </div>
   );
 }

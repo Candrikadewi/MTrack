@@ -2,8 +2,8 @@
 // requiring real ZPAR/Vokasi exports first. Purely additive helper, not part
 // of the core data model.
 import { addDays, addMonths, format, subMonths } from "date-fns";
-import { clearAllData, genId } from "./storage";
-import { zparStore, vokasiStore, activateSnapshot } from "./repo";
+import { genId } from "./storage";
+import { zparStore, vokasiStore, activateSnapshot, clearAllData } from "./repo";
 import {
   createProject,
   createTaktDown,
@@ -80,8 +80,8 @@ export function seedSampleData(): void {
     id: genId("zpar"),
     period: format(now(), "yyyy-MM"),
     filename: "sample-zpar.xlsx",
-    uploadDate: new Date().toISOString(),
-    isActive: false,
+    upload_date: new Date().toISOString(),
+    is_active: false,
     employees,
   };
   zparStore.insert(snapshot);
@@ -114,7 +114,7 @@ export function seedSampleData(): void {
             utilisasi: dept,
             status_saat_ini: "Active",
             gender: v % 2 === 0 ? "P" : "L",
-            uploadDate: iso(subMonths(now(), batch.monthsAgo)),
+            upload_date: iso(subMonths(now(), batch.monthsAgo)),
           });
         }
       }
@@ -175,7 +175,7 @@ export function seedSampleData(): void {
     date: iso(subMonths(now(), 1)),
     takt_before: 62,
     takt_after: 58,
-    needRows: [{ division: anyDivision.division, dept: anyDivision.depts[0], status_mp: "Vokasi", qty: 2, fulfill_date: iso(addDays(now(), 10)) }],
+    need_rows: [{ division: anyDivision.division, dept: anyDivision.depts[0], status_mp: "Vokasi", qty: 2, fulfill_date: iso(addDays(now(), 10)) }],
   });
 
   createTaktDown({
@@ -183,7 +183,7 @@ export function seedSampleData(): void {
     date: iso(subMonths(now(), 2)),
     takt_before: 70,
     takt_after: 75,
-    releasedPersons: [
+    released_persons: [
       { noreg: employees[10].noreg, nama: employees[10].nama, type: "PKWT", dept: employees[10].dept },
     ],
   });

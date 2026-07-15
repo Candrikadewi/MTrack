@@ -32,8 +32,8 @@ export interface ZparSnapshot {
   id: string;
   period: string; // YYYY-MM
   filename: string;
-  uploadDate: string; // ISO datetime
-  isActive: boolean;
+  upload_date: string; // ISO datetime
+  is_active: boolean;
   employees: EmployeeRecord[];
 }
 
@@ -56,7 +56,7 @@ export interface VokasiRecord {
   utilisasi: string;
   status_saat_ini: VokasiStatusSaatIni;
   gender: Gender;
-  uploadDate: string; // metadata: when this batch record was uploaded
+  upload_date: string; // metadata: when this batch record was uploaded
 }
 
 // ---------------------------------------------------------------------------
@@ -128,7 +128,7 @@ export interface Demand {
 
   status: DemandStatus;
 
-  createdAt: string;
+  created_at: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -178,10 +178,10 @@ export interface TaktCase {
   takt_before: number;
   takt_after: number;
   // "up" inputs
-  needRows?: ProjectMpNeedRow[];
+  need_rows?: ProjectMpNeedRow[];
   demand_ids: string[];
   // "down" inputs
-  releasedPersons?: TaktDownPerson[];
+  released_persons?: TaktDownPerson[];
   released_pool_ids: string[];
 }
 
@@ -230,5 +230,5 @@ export interface HandoverForm {
   period: string; // YYYY-MM
   status: HandoverStatus;
   rows: HandoverRow[];
-  createdAt: string;
+  created_at: string;
 }

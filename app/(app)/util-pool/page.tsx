@@ -9,6 +9,7 @@ import { useStoreList } from "@/lib/useStore";
 import { utilPoolStore } from "@/lib/repo";
 import { contractRemainingLabel, contractUrgency, fmtDate } from "@/lib/engine/compute";
 import { naturalRelease } from "@/lib/engine/actions";
+import { useRole } from "@/lib/RoleContext";
 import type { DemandCategory, UtilPoolEntry } from "@/lib/types";
 
 const urgencyClass: Record<string, string> = {
@@ -19,6 +20,7 @@ const urgencyClass: Record<string, string> = {
 };
 
 export default function UtilPoolPage() {
+  const role = useRole();
   const entries = useStoreList(utilPoolStore).sort((a, b) => b.entered_pool_date.localeCompare(a.entered_pool_date));
   const [assignTarget, setAssignTarget] = useState<{ entry: UtilPoolEntry; category: DemandCategory } | null>(null);
 
@@ -67,7 +69,7 @@ export default function UtilPoolPage() {
                       <Badge tone={statusTone(e.status)}>{e.status}</Badge>
                     </Td>
                     <Td>
-                      {e.status === "Open" && (
+                      {e.status === "Open" && role === "admin" && (
                         <div className="flex flex-wrap gap-1.5">
                           <Button size="sm" onClick={() => setAssignTarget({ entry: e, category: "PKWT" })}>
                             → PKWT

@@ -1,36 +1,28 @@
 "use client";
-import { useCallback, useSyncExternalStore } from "react";
-import { subscribeStorage } from "./storage";
+import { useCallback, useEffect, useSyncExternalStore } from "react";
+import { subscribeStorage, getChangeVersion } from "./storage";
 import type { Store } from "./storage";
 
-let globalVersion = 0;
-if (typeof window !== "undefined") {
-  window.addEventListener("mtrack:change", () => {
-    globalVersion++;
-  });
-  window.addEventListener("storage", () => {
-    globalVersion++;
-  });
-}
-
-const snapshotCache = new WeakMap<Store<{ id: string }>, { version: number; items: unknown[] }>();
 const EMPTY: unknown[] = [];
 
-/** Subscribes a component to a Store's contents, re-rendering on any mtrack data change. */
+/**
+ * Subscribes a component to a Store's contents, re-rendering on any change.
+ * store.list() returns a stable array reference until the next mutation, so
+ * no extra snapshot caching is needed here. Triggers the store's lazy
+ * (client-only) hydration + realtime subscription on mount.
+ */
 export function useStoreList<T extends { id: string }>(store: Store<T>): T[] {
-  const getSnapshot = useCallback(() => {
-    const cached = snapshotCache.get(store as Store<{ id: string }>);
-    if (cached && cached.version === globalVersion) return cached.items as T[];
-    const items = store.list();
-    snapshotCache.set(store as Store<{ id: string }>, { version: globalVersion, items });
-    return items;
+  useEffect(() => {
+    store.init();
   }, [store]);
+
+  const getSnapshot = useCallback(() => store.list(), [store]);
   const getServerSnapshot = useCallback(() => EMPTY as T[], []);
   return useSyncExternalStore(subscribeStorage, getSnapshot, getServerSnapshot);
 }
 
 /** Forces a re-render on any mtrack data change without materializing a snapshot value. */
 export function useDataVersion(): number {
-  const getSnapshot = useCallback(() => globalVersion, []);
+  const getSnapshot = useCallback(() => getChangeVersion(), []);
   return useSyncExternalStore(subscribeStorage, getSnapshot, () => 0);
 }

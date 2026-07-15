@@ -31,7 +31,7 @@ export default function DashboardPage() {
   const taktCases = useStoreList(taktStore);
   const utilPool = useStoreList(utilPoolStore);
 
-  const activeSnapshot = snapshots.find((s) => s.isActive);
+  const activeSnapshot = snapshots.find((s) => s.is_active);
   const employees = useMemo(() => activeSnapshot?.employees ?? [], [activeSnapshot]);
 
   const fulfilledVokasiIds = useMemo(

@@ -34,7 +34,7 @@ export function buildHandoverForm(dept: string, period: string): HandoverForm {
     period,
     status: "Draft",
     rows,
-    createdAt: new Date().toISOString(),
+    created_at: new Date().toISOString(),
   };
   handoverStore.insert(form);
   return form;

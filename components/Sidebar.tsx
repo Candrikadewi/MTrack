@@ -1,6 +1,8 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { logout } from "@/app/login/actions";
+import { canAccessModule, type Role } from "@/lib/roles";
 
 const NAV = [
   { href: "/upload", label: "Upload Center", icon: "⬆" },
@@ -12,8 +14,12 @@ const NAV = [
   { href: "/handover", label: "Handover Form", icon: "▤" },
 ];
 
-export function Sidebar() {
+const ROLE_LABEL: Record<Role, string> = { admin: "Admin", shop: "Shop", hr: "HR" };
+
+export function Sidebar({ role, email }: { role: Role; email: string }) {
   const pathname = usePathname();
+  const nav = NAV.filter((item) => canAccessModule(role, item.href));
+
   return (
     <aside className="fixed inset-y-0 left-0 z-40 hidden w-64 flex-col border-r border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950 md:flex">
       <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-5 dark:border-slate-800">
@@ -26,7 +32,7 @@ export function Sidebar() {
         </div>
       </div>
       <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
-        {NAV.map((item) => {
+        {nav.map((item) => {
           const isActive = pathname === item.href || pathname?.startsWith(item.href + "/");
           return (
             <Link
@@ -44,8 +50,15 @@ export function Sidebar() {
           );
         })}
       </nav>
-      <div className="border-t border-slate-100 px-5 py-4 text-[11px] text-slate-400 dark:border-slate-800">
-        Offline-first · data tersimpan di browser
+      <div className="border-t border-slate-100 px-5 py-4 dark:border-slate-800">
+        <div className="mb-2 truncate text-xs text-slate-500 dark:text-slate-400">
+          {email} · <span className="font-semibold">{ROLE_LABEL[role]}</span>
+        </div>
+        <form action={logout}>
+          <button type="submit" className="text-xs font-medium text-red-600 hover:underline">
+            Sign out
+          </button>
+        </form>
       </div>
     </aside>
   );
