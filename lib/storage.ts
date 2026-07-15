@@ -64,6 +64,10 @@ export interface Store<T extends { id: string }> {
   ready(): boolean;
   /** Client-only, idempotent: hydrates the cache and opens the realtime subscription. */
   init(): void;
+  /** Forces a fresh select("*") from Supabase into the cache — use after a
+   * server-side mutation (e.g. an RPC that inserts rows the client didn't
+   * create locally) so the UI doesn't have to wait on realtime to catch up. */
+  refetch(): void;
   key: string;
 }
 
@@ -108,9 +112,23 @@ export function createStore<T extends { id: string }>(table: string): Store<T> {
       .subscribe();
   }
 
+  function refetch() {
+    if (typeof window === "undefined") return;
+    client()
+      .from(table)
+      .select("*")
+      .then((res: ReadResult<T>) => {
+        if (!res.error && res.data) {
+          cache = res.data;
+          notify();
+        }
+      });
+  }
+
   return {
     key: table,
     init: start,
+    refetch,
     ready() {
       return initialized;
     },

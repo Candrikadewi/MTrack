@@ -229,7 +229,13 @@ export function setReviewResult(reviewId: string, result: ReviewResult): void {
         if (typeof window !== "undefined") {
           window.alert(`Gagal menyimpan review result: ${res.error.message}`);
         }
+        return;
       }
+      // On Terminate, the RPC creates a new Demand server-side — the client
+      // never inserted it locally, so without this the new "PKWT Demand" row
+      // only shows up once/if a realtime event arrives. Re-fetch instead of
+      // waiting on that.
+      if (result === "Terminate") demandStore.refetch();
     });
 }
 
@@ -290,7 +296,9 @@ export function setDemandReplacementByNoreg(
       if (res.error) {
         console.error("set_demand_replacement failed:", res.error.message);
         if (typeof window !== "undefined") window.alert(`Gagal menyimpan replacement: ${res.error.message}`);
+        return;
       }
+      demandStore.refetch();
     });
 }
 
@@ -314,7 +322,9 @@ export function setDemandNoReplace(demandId: string, reason: string): void {
       if (res.error) {
         console.error("set_demand_replacement (no replace) failed:", res.error.message);
         if (typeof window !== "undefined") window.alert(`Gagal menyimpan replacement: ${res.error.message}`);
+        return;
       }
+      demandStore.refetch();
     });
 }
 

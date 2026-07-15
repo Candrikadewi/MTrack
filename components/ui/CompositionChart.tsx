@@ -33,28 +33,16 @@ export function CompositionChart({ data, heightClass = "h-72" }: { data: Composi
     if (Number.isNaN(x) || Number.isNaN(y) || Number.isNaN(width) || !row) return null;
     const total = row.permanen + row.kontrak + row.vokasi;
     return (
-      <g>
-        <text
-          x={x + width / 2}
-          y={y - 18}
-          textAnchor="middle"
-          fontSize={12}
-          fontWeight={700}
-          fill={isDark ? "#f5f5f4" : "#1c1c1a"}
-        >
-          {total}
-        </text>
-        <text x={x + width / 2} y={y - 5} textAnchor="middle" fontSize={9.5} fill={isDark ? "#a3a29c" : "#6b6a63"}>
-          {`P:${row.permanen} C:${row.kontrak} V:${row.vokasi}`}
-        </text>
-      </g>
+      <text x={x + width / 2} y={y - 6} textAnchor="middle" fontSize={12} fontWeight={700} fill={isDark ? "#f5f5f4" : "#1c1c1a"}>
+        {total}
+      </text>
     );
   }
 
   return (
     <div className={`${heightClass} w-full`}>
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={augmented} margin={{ top: 30, right: 8, left: -20, bottom: 0 }} barCategoryGap="24%">
+        <BarChart data={augmented} margin={{ top: 24, right: 8, left: -20, bottom: 0 }} barCategoryGap="24%">
           <CartesianGrid strokeDasharray="0" vertical={false} stroke={isDark ? "#2c2c2a" : "#e1e0d9"} />
           <XAxis
             dataKey="key"
