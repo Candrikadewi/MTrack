@@ -22,25 +22,39 @@ export function LaborTypeChart({ data }: { data: LaborTypeRow[] }) {
   const isDark = typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: dark)").matches;
 
   if (data.length === 0) return null;
-  const presentKeys = new Set(SERIES.filter((s) => data.some((row) => row[s.key] !== undefined)).map((s) => s.key));
+  const presentSeries = SERIES.filter((s) => data.some((row) => row[s.key] !== undefined));
 
-  const totalLabel = (props: { x?: number | string; y?: number | string; width?: number | string; index?: number }) => {
-    const x = Number(props.x);
-    const y = Number(props.y);
-    const width = Number(props.width);
-    const { index } = props;
-    if (Number.isNaN(x) || Number.isNaN(y) || Number.isNaN(width) || index === undefined) return null;
-    const row = data[index];
-    if (!row) return null;
-    const total = Object.entries(row)
-      .filter(([k]) => k !== "key")
-      .reduce((sum, [, v]) => sum + (typeof v === "number" ? v : 0), 0);
-    return (
-      <text x={x + width / 2} y={y - 6} textAnchor="middle" fontSize={12} fontWeight={700} fill={isDark ? "#f5f5f4" : "#1c1c1a"}>
-        {total}
-      </text>
-    );
-  };
+  // Which sub-code is present *and last in declared order* for a given row —
+  // that Bar's segment sits at the top of that particular row's stack, since
+  // presence varies per base group (e.g. only B1-4 rows have those keys).
+  function isTopmostForRow(rowIndex: number, seriesKey: string): boolean {
+    const row = data[rowIndex];
+    if (!row) return false;
+    for (let i = presentSeries.length - 1; i >= 0; i--) {
+      if (row[presentSeries[i].key] !== undefined) return presentSeries[i].key === seriesKey;
+    }
+    return false;
+  }
+
+  function makeTotalLabel(seriesKey: string) {
+    return function TotalLabel(props: { x?: number | string; y?: number | string; width?: number | string; index?: number }) {
+      const { index } = props;
+      if (index === undefined || !isTopmostForRow(index, seriesKey)) return null;
+      const x = Number(props.x);
+      const y = Number(props.y);
+      const width = Number(props.width);
+      if (Number.isNaN(x) || Number.isNaN(y) || Number.isNaN(width)) return null;
+      const row = data[index];
+      const total = Object.entries(row)
+        .filter(([k]) => k !== "key")
+        .reduce((sum, [, v]) => sum + (typeof v === "number" ? v : 0), 0);
+      return (
+        <text x={x + width / 2} y={y - 6} textAnchor="middle" fontSize={12} fontWeight={700} fill={isDark ? "#f5f5f4" : "#1c1c1a"}>
+          {total}
+        </text>
+      );
+    };
+  }
 
   return (
     <div className="h-72 w-full">
@@ -65,7 +79,7 @@ export function LaborTypeChart({ data }: { data: LaborTypeRow[] }) {
             }}
           />
           <Legend wrapperStyle={{ fontSize: 11 }} iconType="circle" iconSize={8} />
-          {SERIES.filter((s) => presentKeys.has(s.key)).map((s, i, arr) => (
+          {presentSeries.map((s, i, arr) => (
             <Bar
               key={s.key}
               dataKey={s.key}
@@ -74,12 +88,10 @@ export function LaborTypeChart({ data }: { data: LaborTypeRow[] }) {
               fill={isDark ? s.dark : s.light}
               radius={i === arr.length - 1 ? [4, 4, 0, 0] : 0}
               maxBarSize={48}
-            />
+            >
+              <LabelList content={makeTotalLabel(s.key)} />
+            </Bar>
           ))}
-          {/* Zero-height anchor bar stacked on top, purely to place the total label above each bar */}
-          <Bar dataKey={() => 0} name="" stackId="labor" fill="transparent" isAnimationActive={false} legendType="none">
-            <LabelList content={totalLabel} />
-          </Bar>
         </BarChart>
       </ResponsiveContainer>
     </div>

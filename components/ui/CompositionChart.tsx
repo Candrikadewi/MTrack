@@ -13,6 +13,10 @@ export function CompositionChart({ data, heightClass = "h-72" }: { data: Composi
 
   if (data.length === 0) return null;
 
+  // permanen/kontrak/vokasi are always-present numeric fields (never
+  // undefined), so "vokasi" — declared last — is always the top segment of
+  // the stack; attaching the total label there directly (rather than via a
+  // synthetic zero-value bar) is what actually renders reliably in Recharts.
   const totalLabel = (props: { x?: number | string; y?: number | string; width?: number | string; index?: number }) => {
     const x = Number(props.x);
     const y = Number(props.y);
@@ -77,12 +81,10 @@ export function CompositionChart({ data, heightClass = "h-72" }: { data: Composi
               fill={isDark ? s.dark : s.light}
               radius={s.key === "vokasi" ? [4, 4, 0, 0] : 0}
               maxBarSize={40}
-            />
+            >
+              {s.key === "vokasi" && <LabelList content={totalLabel} />}
+            </Bar>
           ))}
-          {/* Zero-height anchor bar stacked on top, purely to place the total/breakdown label above each bar */}
-          <Bar dataKey={() => 0} name="" stackId="composition" fill="transparent" isAnimationActive={false} legendType="none">
-            <LabelList content={totalLabel} />
-          </Bar>
         </BarChart>
       </ResponsiveContainer>
     </div>

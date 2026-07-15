@@ -34,8 +34,23 @@ export function getChangeVersion(): number {
   return changeVersion;
 }
 
+/**
+ * Every table's `id` column is Postgres `uuid` (see supabase/schema.sql),
+ * and the RPCs (set_review_result, set_demand_replacement) type their id
+ * params as `uuid` too — so this MUST return an actual UUID, not just an
+ * opaque string, or every insert/RPC call is silently/loudly rejected by
+ * Postgres with "invalid input syntax for type uuid". The `prefix` param
+ * is accepted for call-site readability but no longer affects the output.
+ */
 export function genId(prefix = "id"): string {
-  return `${prefix}_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`;
+  void prefix;
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  // Fallback for environments without Web Crypto's randomUUID (shouldn't
+  // happen in any supported browser/Node runtime) — still not a real v4
+  // UUID, so writes would still fail; this only prevents a hard crash.
+  return `${Date.now().toString(16)}-0000-4000-8000-${Math.random().toString(16).slice(2, 14).padEnd(12, "0")}`;
 }
 
 export interface Store<T extends { id: string }> {

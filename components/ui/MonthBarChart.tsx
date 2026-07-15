@@ -12,6 +12,8 @@ const COLOR_MUTED_LIGHT = "#c3c2b7";
 const COLOR_MUTED_DARK = "#52514e";
 const COLOR_ACCENT_LIGHT = "#2a78d6";
 const COLOR_ACCENT_DARK = "#3987e5";
+const COLOR_CURRENT_LIGHT = "#f0a93b";
+const COLOR_CURRENT_DARK = "#d18a1f";
 
 export function MonthBarChart({
   data,
@@ -27,6 +29,7 @@ export function MonthBarChart({
   const isDark = typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: dark)").matches;
   const muted = isDark ? COLOR_MUTED_DARK : COLOR_MUTED_LIGHT;
   const accent = isDark ? COLOR_ACCENT_DARK : COLOR_ACCENT_LIGHT;
+  const current = isDark ? COLOR_CURRENT_DARK : COLOR_CURRENT_LIGHT;
 
   return (
     <div className="h-56 w-full">
@@ -61,7 +64,7 @@ export function MonthBarChart({
             {data.map((d) => (
               <Cell
                 key={d.month}
-                fill={d.month === selectedMonth ? accent : d.isCurrent ? accent : muted}
+                fill={d.isCurrent ? current : d.month === selectedMonth ? accent : muted}
                 fillOpacity={d.month === selectedMonth || d.isCurrent ? 1 : 0.75}
                 onClick={() => onSelect(d.month)}
               />
