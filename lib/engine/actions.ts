@@ -12,6 +12,7 @@ import {
   getActiveSnapshot,
 } from "../repo";
 import { createClient } from "../supabase/client";
+import { pushToast } from "../toast";
 import { computeFsStatus, computeReviewDate, sisaHari, today } from "./compute";
 import type {
   Demand,
@@ -226,9 +227,7 @@ export function setReviewResult(reviewId: string, result: ReviewResult): void {
       if (res.error) {
         console.error("set_review_result failed:", res.error.message);
         pkwtReviewStore.update(reviewId, { review_result: previous ?? "" });
-        if (typeof window !== "undefined") {
-          window.alert(`Gagal menyimpan review result: ${res.error.message}`);
-        }
+        pushToast(`Gagal menyimpan review result: ${res.error.message}`);
         return;
       }
       // On Terminate, the RPC creates a new Demand server-side — the client
@@ -295,7 +294,7 @@ export function setDemandReplacementByNoreg(
     .then((res: { error: { message: string } | null }) => {
       if (res.error) {
         console.error("set_demand_replacement failed:", res.error.message);
-        if (typeof window !== "undefined") window.alert(`Gagal menyimpan replacement: ${res.error.message}`);
+        pushToast(`Gagal menyimpan replacement: ${res.error.message}`);
         return;
       }
       demandStore.refetch();
@@ -321,7 +320,7 @@ export function setDemandNoReplace(demandId: string, reason: string): void {
     .then((res: { error: { message: string } | null }) => {
       if (res.error) {
         console.error("set_demand_replacement (no replace) failed:", res.error.message);
-        if (typeof window !== "undefined") window.alert(`Gagal menyimpan replacement: ${res.error.message}`);
+        pushToast(`Gagal menyimpan replacement: ${res.error.message}`);
         return;
       }
       demandStore.refetch();

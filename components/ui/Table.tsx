@@ -32,7 +32,7 @@ export function Td({
   return (
     <td
       colSpan={colSpan}
-      className={`whitespace-nowrap border-b border-slate-100 px-4 py-2.5 text-slate-700 transition-colors dark:border-slate-800 dark:text-slate-300 ${className}`}
+      className={`whitespace-nowrap border-b border-slate-100 px-4 py-2.5 text-slate-700 tabular-nums transition-colors dark:border-slate-800 dark:text-slate-300 ${className}`}
     >
       {children}
     </td>
