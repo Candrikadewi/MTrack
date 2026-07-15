@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { Pencil } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Badge, statusTone } from "@/components/ui/Badge";
@@ -10,10 +11,12 @@ import { demandStore, projectStore } from "@/lib/repo";
 import { autoProjectFinishCheck, projectSuppliedCount } from "@/lib/engine/actions";
 import { fmtDate } from "@/lib/engine/compute";
 import { useRole } from "@/lib/RoleContext";
+import type { Project } from "@/lib/types";
 
 export default function ProjectsPage() {
   const role = useRole();
   const [modalOpen, setModalOpen] = useState(false);
+  const [editingProject, setEditingProject] = useState<Project | null>(null);
 
   useEffect(() => {
     // Only Admin can write (RLS); Shop/HR just view, so skip the auto-check
@@ -69,6 +72,11 @@ export default function ProjectsPage() {
                     ) : (
                       <Badge tone="amber">⚠️ Perlu {gap} MP lagi</Badge>
                     )}
+                    {role === "admin" && (
+                      <Button variant="secondary" size="sm" onClick={() => setEditingProject(p)}>
+                        <Pencil size={13} /> Edit
+                      </Button>
+                    )}
                   </div>
                 </div>
 
@@ -112,7 +120,10 @@ export default function ProjectsPage() {
         </div>
       )}
 
-      {role === "admin" && <NewProjectModal open={modalOpen} onClose={() => setModalOpen(false)} />}
+      {role === "admin" && modalOpen && <NewProjectModal open onClose={() => setModalOpen(false)} />}
+      {role === "admin" && editingProject && (
+        <NewProjectModal open onClose={() => setEditingProject(null)} project={editingProject} />
+      )}
     </div>
   );
 }

@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { logout } from "@/app/login/actions";
 import { canAccessModule, type Role } from "@/lib/roles";
+import { clearSessionState } from "@/lib/useSessionState";
 
 const NAV = [
   { href: "/upload", label: "Upload Center", icon: Upload },
@@ -78,7 +79,7 @@ export function Sidebar({ role, email }: { role: Role; email: string }) {
           </span>
           <span className="truncate text-xs text-slate-500 dark:text-slate-400">{email}</span>
         </div>
-        <form action={logout}>
+        <form action={logout} onSubmit={clearSessionState}>
           <button
             type="submit"
             className="flex items-center gap-1.5 text-xs font-medium text-red-500 transition-colors hover:text-red-600"

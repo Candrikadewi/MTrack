@@ -31,7 +31,7 @@ export function MonthBarChart({
   return (
     <div className="h-56 w-full">
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={data} margin={{ top: 8, right: 8, left: -20, bottom: 0 }} barCategoryGap="30%">
+        <BarChart data={data} margin={{ top: 8, right: 8, left: -20, bottom: 0 }} barCategoryGap="15%">
           <XAxis
             dataKey="label"
             axisLine={{ stroke: "#e1e0d9" }}
@@ -50,7 +50,7 @@ export function MonthBarChart({
             }}
             formatter={(value) => [`${value} orang`, "Jumlah"]}
           />
-          <Bar dataKey="value" radius={[4, 4, 0, 0]} maxBarSize={24} cursor="pointer">
+          <Bar dataKey="value" radius={[4, 4, 0, 0]} maxBarSize={44} cursor="pointer">
             {showValueLabels && (
               <LabelList
                 dataKey="value"

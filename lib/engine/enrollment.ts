@@ -67,7 +67,7 @@ export function demandStatusLabel(d: Demand): string {
     Pension: "Pensiun",
     GST: "GST",
     Unfit: "Unfit",
-    Others: d.origin_label ? `Others: ${d.origin_label}` : "Others",
+    Others: d.origin_label || "Others",
     Manual: "Manual",
     VokasiEnded: "Vokasi Ended",
   };

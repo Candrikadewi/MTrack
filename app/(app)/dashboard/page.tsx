@@ -1,7 +1,8 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { format } from "date-fns";
-import { CalendarRange } from "lucide-react";
+import { useSessionState } from "@/lib/useSessionState";
+import { CalendarRange, Users2, UserCheck, FileText, GraduationCap, CalendarCheck2, UserMinus } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { StatTile, ProgressBar } from "@/components/ui/StatTile";
 import { Select } from "@/components/ui/Form";
@@ -55,7 +56,7 @@ export default function DashboardPage() {
     [snapshots]
   );
   const activeSnapshot = snapshots.find((s) => s.is_active);
-  const [period, setPeriod] = useState<string>("");
+  const [period, setPeriod] = useSessionState<string>("dash.period", "");
   const selectedSnapshot: ZparSnapshot | undefined =
     sortedSnapshots.find((s) => s.period === period) ?? activeSnapshot ?? sortedSnapshots[0];
 
@@ -81,9 +82,9 @@ export default function DashboardPage() {
     [snapshotsByPeriod, vokasi]
   );
 
-  const [selDirectorates, setSelDirectorates] = useState<string[]>([]);
-  const [selDivisions, setSelDivisions] = useState<string[]>([]);
-  const [selDepts, setSelDepts] = useState<string[]>([]);
+  const [selDirectorates, setSelDirectorates] = useSessionState<string[]>("dash.b1.directorates", []);
+  const [selDivisions, setSelDivisions] = useSessionState<string[]>("dash.b1.divisions", []);
+  const [selDepts, setSelDepts] = useSessionState<string[]>("dash.b1.depts", []);
 
   if (sortedSnapshots.length === 0) {
     return (
@@ -170,21 +171,32 @@ export default function DashboardPage() {
           <MultiSelect label="Department" options={deptOptions} selected={selDepts} onChange={setSelDepts} />
         </div>
         <div className="grid gap-3 sm:grid-cols-4">
-          <StatTile label="Total Manpower" value={filteredEmployees.length + vokasiActive.length} emphasize />
+          <StatTile
+            label="Total Manpower"
+            value={filteredEmployees.length + vokasiActive.length}
+            tone="blue"
+            icon={Users2}
+          />
           <StatTile
             label="Permanen"
             value={permanenCount.length}
             sub={`L: ${genderCount(permanenCount).L} · P: ${genderCount(permanenCount).P}`}
+            tone="emerald"
+            icon={UserCheck}
           />
           <StatTile
             label="Kontrak (PKWT+AKTI)"
             value={kontrakCount.length}
             sub={`L: ${genderCount(kontrakCount).L} · P: ${genderCount(kontrakCount).P}`}
+            tone="amber"
+            icon={FileText}
           />
           <StatTile
             label="Vokasi Aktif"
             value={vokasiActive.length}
             sub={`L: ${genderCount(vokasiActive).L} · P: ${genderCount(vokasiActive).P}`}
+            tone="violet"
+            icon={GraduationCap}
           />
         </div>
       </Card>
@@ -265,9 +277,9 @@ function OrgCascadeFilter({
 }
 
 function LaborTypeBlock({ employees }: { employees: EmployeeRecord[] }) {
-  const [selDirectorates, setSelDirectorates] = useState<string[]>([]);
-  const [selDivisions, setSelDivisions] = useState<string[]>([]);
-  const [selDepts, setSelDepts] = useState<string[]>([]);
+  const [selDirectorates, setSelDirectorates] = useSessionState<string[]>("dash.laborType.directorates", []);
+  const [selDivisions, setSelDivisions] = useSessionState<string[]>("dash.laborType.divisions", []);
+  const [selDepts, setSelDepts] = useSessionState<string[]>("dash.laborType.depts", []);
   const filtered = filterEmployees(employees, {
     directorates: selDirectorates,
     divisions: selDivisions,
@@ -300,9 +312,12 @@ function CompactDetailList({ items, unit }: { items: { key: string; count: numbe
       {top.map((d) => (
         <span
           key={d.key}
-          className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+          className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 py-1 pl-2.5 pr-1 text-xs font-medium text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300"
         >
-          {d.key} <span className="font-semibold text-slate-800 dark:text-slate-100">{d.count}</span>
+          {d.key}
+          <span className="inline-flex min-w-[1.4rem] items-center justify-center rounded-full bg-blue-600 px-1.5 py-0.5 text-[11px] font-bold text-white dark:bg-blue-500">
+            {d.count}
+          </span>
         </span>
       ))}
       {restCount > 0 && (
@@ -315,12 +330,12 @@ function CompactDetailList({ items, unit }: { items: { key: string; count: numbe
 }
 
 function PkwtReviewChartBlock({ employees, reviews }: { employees: EmployeeRecord[]; reviews: PkwtReview[] }) {
-  const [selDirectorates, setSelDirectorates] = useState<string[]>([]);
-  const [selDivisions, setSelDivisions] = useState<string[]>([]);
-  const [selDepts, setSelDepts] = useState<string[]>([]);
+  const [selDirectorates, setSelDirectorates] = useSessionState<string[]>("dash.pkwtReview.directorates", []);
+  const [selDivisions, setSelDivisions] = useSessionState<string[]>("dash.pkwtReview.divisions", []);
+  const [selDepts, setSelDepts] = useSessionState<string[]>("dash.pkwtReview.depts", []);
   const filteredReviews = filterByDivDept(reviews, selDivisions, selDepts);
   const { buckets, byMonth } = monthBuckets(filteredReviews, (r) => r.tgl_review?.slice(0, 7));
-  const [selected, setSelected] = useState(currentMonthKey());
+  const [selected, setSelected] = useSessionState("dash.pkwtReview.month", currentMonthKey());
   const detailItems = byMonth.get(selected) ?? [];
   const byStatusKontrak = groupCountBy(detailItems, (r) => r.status_kontrak);
   const byLaborType = groupCountBy(detailItems, (r) => r.labor_type || "Other");
@@ -358,12 +373,12 @@ function PkwtReviewChartBlock({ employees, reviews }: { employees: EmployeeRecor
 }
 
 function VokasiEndedChartBlock({ employees, vokasi }: { employees: EmployeeRecord[]; vokasi: VokasiRecord[] }) {
-  const [selDirectorates, setSelDirectorates] = useState<string[]>([]);
-  const [selDivisions, setSelDivisions] = useState<string[]>([]);
-  const [selDepts, setSelDepts] = useState<string[]>([]);
+  const [selDirectorates, setSelDirectorates] = useSessionState<string[]>("dash.vokasiEnded.directorates", []);
+  const [selDivisions, setSelDivisions] = useSessionState<string[]>("dash.vokasiEnded.divisions", []);
+  const [selDepts, setSelDepts] = useSessionState<string[]>("dash.vokasiEnded.depts", []);
   const filteredVokasi = filterByDivDept(vokasi, selDivisions, selDepts);
   const { buckets, byMonth } = monthBuckets(filteredVokasi, (v) => v.tgl_ended?.slice(0, 7));
-  const [selected, setSelected] = useState(currentMonthKey());
+  const [selected, setSelected] = useSessionState("dash.vokasiEnded.month", currentMonthKey());
   const detailItems = byMonth.get(selected) ?? [];
   const byLaborType = groupCountBy(detailItems, (v) => v.labor_type || "Other");
 
@@ -408,8 +423,8 @@ function EnrollmentColumn({
     <div>
       <h4 className="mb-2 text-xs font-semibold text-slate-500">{label}</h4>
       <div className="grid grid-cols-2 gap-3">
-        <StatTile label={monthLabel} value={stats.currentMonthCount} emphasize />
-        <StatTile label="Need Replace" value={stats.needReplace} emphasize />
+        <StatTile label={monthLabel} value={stats.currentMonthCount} tone="blue" icon={CalendarCheck2} />
+        <StatTile label="Need Replace" value={stats.needReplace} tone="rose" icon={UserMinus} />
       </div>
       <div className="mt-3">
         <div className="mb-1 flex items-center justify-between text-xs text-slate-500">

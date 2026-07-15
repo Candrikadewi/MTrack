@@ -110,7 +110,7 @@ export function expandRowToDemands(
 }
 
 export function createDemandsFromProjectRow(project: Project, row: ProjectMpNeedRow): Demand[] {
-  return expandRowToDemands(row, "Project", project.id, `${project.name} — ${row.division} — ${row.dept}`);
+  return expandRowToDemands(row, "Project", project.id, project.name);
 }
 
 export function createDemandsFromTaktRow(takt: TaktCase, row: ProjectMpNeedRow): Demand[] {
@@ -210,14 +210,25 @@ export function generatePkwtReviews(): void {
 /**
  * Routed through the `set_review_result` Postgres RPC (see supabase/schema.sql)
  * so the Admin/HR-only rule is enforced in the database, not just the UI.
- * The local cache updates shortly after via the realtime subscription.
+ * Applies an optimistic local update immediately (the RPC bypasses the
+ * generic Store.update() write path, so without this the UI only reflects
+ * the change once a realtime event arrives) and reverts + surfaces the
+ * error if the RPC itself is rejected (e.g. a role/permission mismatch).
  */
 export function setReviewResult(reviewId: string, result: ReviewResult): void {
+  const previous = pkwtReviewStore.get(reviewId)?.review_result;
+  pkwtReviewStore.update(reviewId, { review_result: result });
   const supabase = createClient();
   supabase
     .rpc("set_review_result", { p_review_id: reviewId, p_result: result })
     .then((res: { error: { message: string } | null }) => {
-      if (res.error) console.error("set_review_result failed:", res.error.message);
+      if (res.error) {
+        console.error("set_review_result failed:", res.error.message);
+        pkwtReviewStore.update(reviewId, { review_result: previous ?? "" });
+        if (typeof window !== "undefined") {
+          window.alert(`Gagal menyimpan review result: ${res.error.message}`);
+        }
+      }
     });
 }
 
@@ -275,7 +286,10 @@ export function setDemandReplacementByNoreg(
       p_no_replace_reason: "",
     })
     .then((res: { error: { message: string } | null }) => {
-      if (res.error) console.error("set_demand_replacement failed:", res.error.message);
+      if (res.error) {
+        console.error("set_demand_replacement failed:", res.error.message);
+        if (typeof window !== "undefined") window.alert(`Gagal menyimpan replacement: ${res.error.message}`);
+      }
     });
 }
 
@@ -296,7 +310,10 @@ export function setDemandNoReplace(demandId: string, reason: string): void {
       p_no_replace_reason: reason,
     })
     .then((res: { error: { message: string } | null }) => {
-      if (res.error) console.error("set_demand_replacement (no replace) failed:", res.error.message);
+      if (res.error) {
+        console.error("set_demand_replacement (no replace) failed:", res.error.message);
+        if (typeof window !== "undefined") window.alert(`Gagal menyimpan replacement: ${res.error.message}`);
+      }
     });
 }
 
@@ -369,6 +386,43 @@ export function createProject(input: {
 
 export function projectSuppliedCount(project: Project): number {
   return demandStore.list().filter((d) => project.demand_ids.includes(d.id) && d.status === "Fulfilled").length;
+}
+
+/** Edit-after-registration: name/dates only — rows/demands are handled by
+ * addProjectRow / increaseProjectRowQty below, which never delete or shrink
+ * existing demand records (only additive changes are safe post-registration). */
+export function updateProjectDetails(
+  projectId: string,
+  input: { name?: string; start_date?: string; end_date?: string }
+): void {
+  projectStore.update(projectId, input);
+}
+
+/** Adds a brand-new MP need row to an already-registered project, expanding
+ * it into demand records immediately (same as at creation time). Always
+ * re-reads the project from the store so sequential calls in a loop don't
+ * clobber each other's row/demand_ids updates. */
+export function addProjectRow(projectId: string, row: Omit<ProjectMpNeedRow, "id">): void {
+  const project = projectStore.get(projectId);
+  if (!project) return;
+  const newRow: ProjectMpNeedRow = { ...row, id: genId("row") };
+  const updatedRows = [...project.rows, newRow];
+  const created = createDemandsFromProjectRow({ ...project, rows: updatedRows }, newRow);
+  projectStore.update(projectId, { rows: updatedRows, demand_ids: [...project.demand_ids, ...created.map((d) => d.id)] });
+}
+
+/** Increases an existing row's qty, creating demand records only for the
+ * delta. Decreasing qty is intentionally not supported here — it would mean
+ * silently deleting demand records that may already be Fulfilled. */
+export function increaseProjectRowQty(projectId: string, rowId: string, newQty: number): void {
+  const project = projectStore.get(projectId);
+  if (!project) return;
+  const row = project.rows.find((r) => r.id === rowId);
+  if (!row || newQty <= row.qty) return;
+  const delta = newQty - row.qty;
+  const updatedRows = project.rows.map((r) => (r.id === rowId ? { ...r, qty: newQty } : r));
+  const created = expandRowToDemands({ ...row, qty: delta }, "Project", project.id, project.name);
+  projectStore.update(projectId, { rows: updatedRows, demand_ids: [...project.demand_ids, ...created.map((d) => d.id)] });
 }
 
 /** §7 / §12 Auto Project Finish: run when Project Monitoring module is opened. */
