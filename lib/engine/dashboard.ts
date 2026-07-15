@@ -18,6 +18,33 @@ export function deptsOf(employees: EmployeeRecord[], division?: string): string[
   return Array.from(new Set(scoped.map((e) => e.dept))).sort();
 }
 
+/** Multi-select variant: divisions under any of the given directorates (all divisions if empty). */
+export function divisionsOfAny(employees: EmployeeRecord[], directorats: string[]): string[] {
+  const scoped = directorats.length ? employees.filter((e) => directorats.includes(e.directorat)) : employees;
+  return Array.from(new Set(scoped.map((e) => e.division))).sort();
+}
+
+/** Multi-select variant: depts under any of the given divisions (all depts if empty). */
+export function deptsOfAny(employees: EmployeeRecord[], divisions: string[]): string[] {
+  const scoped = divisions.length ? employees.filter((e) => divisions.includes(e.division)) : employees;
+  return Array.from(new Set(scoped.map((e) => e.dept))).sort();
+}
+
+export interface OrgFilter {
+  directorates: string[];
+  divisions: string[];
+  depts: string[];
+}
+
+export function filterEmployees(employees: EmployeeRecord[], filter: OrgFilter): EmployeeRecord[] {
+  return employees.filter(
+    (e) =>
+      (filter.directorates.length === 0 || filter.directorates.includes(e.directorat)) &&
+      (filter.divisions.length === 0 || filter.divisions.includes(e.division)) &&
+      (filter.depts.length === 0 || filter.depts.includes(e.dept))
+  );
+}
+
 export interface CompositionRow {
   key: string;
   permanen: number;
@@ -36,9 +63,9 @@ export function compositionByDivision(
   employees: EmployeeRecord[],
   vokasi: VokasiRecord[],
   fulfilledVokasiIds: Set<string>,
-  directorat: string
+  selectedDirectorates: string[]
 ): CompositionRow[] {
-  const divisions = divisionsOf(employees, directorat);
+  const divisions = divisionsOfAny(employees, selectedDirectorates);
   return divisions.map((division) => {
     const empRows = employees.filter((e) => e.division === division);
     const vokasiRows = vokasi.filter((v) => v.div === division && isVokasiActive(v, fulfilledVokasiIds));
@@ -59,9 +86,9 @@ export function compositionByDept(
   employees: EmployeeRecord[],
   vokasi: VokasiRecord[],
   fulfilledVokasiIds: Set<string>,
-  division: string
+  selectedDivisions: string[]
 ): CompositionRow[] {
-  const depts = deptsOf(employees, division);
+  const depts = deptsOfAny(employees, selectedDivisions);
   return depts.map((dept) => {
     const empRows = employees.filter((e) => e.dept === dept);
     const vokasiRows = vokasi.filter((v) => v.dept === dept && isVokasiActive(v, fulfilledVokasiIds));

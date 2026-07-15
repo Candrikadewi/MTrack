@@ -67,10 +67,31 @@ export function demandStatusLabel(d: Demand): string {
     Pension: "Pensiun",
     GST: "GST",
     Unfit: "Unfit",
+    Others: d.origin_label ? `Others: ${d.origin_label}` : "Others",
     Manual: "Manual",
     VokasiEnded: "Vokasi Ended",
   };
   return labels[d.origin_type] ?? d.origin_type;
+}
+
+/** Generic cascading div/dept filter for any {div,dept}-shaped array (reviews use div/dept, demands use div/dept too). */
+export function divisionsOfRows(rows: { div: string }[]): string[] {
+  return Array.from(new Set(rows.map((r) => r.div).filter(Boolean))).sort();
+}
+
+export function deptsOfRows(rows: { div: string; dept: string }[], selectedDivisions: string[]): string[] {
+  const scoped = selectedDivisions.length ? rows.filter((r) => selectedDivisions.includes(r.div)) : rows;
+  return Array.from(new Set(scoped.map((r) => r.dept).filter(Boolean))).sort();
+}
+
+export function filterByDivDept<T extends { div: string; dept: string }>(
+  rows: T[],
+  divisions: string[],
+  depts: string[]
+): T[] {
+  return rows.filter(
+    (r) => (divisions.length === 0 || divisions.includes(r.div)) && (depts.length === 0 || depts.includes(r.dept))
+  );
 }
 
 export function monthLabel(month: string): string {

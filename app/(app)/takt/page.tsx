@@ -9,8 +9,10 @@ import { TaktDownModal } from "@/components/takt/TaktDownModal";
 import { useStoreList } from "@/lib/useStore";
 import { demandStore, taktStore, utilPoolStore } from "@/lib/repo";
 import { fmtDate } from "@/lib/engine/compute";
+import { useRole } from "@/lib/RoleContext";
 
 export default function TaktPage() {
+  const role = useRole();
   const [upOpen, setUpOpen] = useState(false);
   const [downOpen, setDownOpen] = useState(false);
 
@@ -27,14 +29,16 @@ export default function TaktPage() {
             Takt Up membuat Demand di Enrollment. Takt Down langsung ke Utilization Pool.
           </p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="secondary" onClick={() => setDownOpen(true)}>
-            + Takt Down
-          </Button>
-          <Button variant="primary" onClick={() => setUpOpen(true)}>
-            + Takt Up
-          </Button>
-        </div>
+        {role === "admin" && (
+          <div className="flex gap-2">
+            <Button variant="secondary" onClick={() => setDownOpen(true)}>
+              + Takt Down
+            </Button>
+            <Button variant="primary" onClick={() => setUpOpen(true)}>
+              + Takt Up
+            </Button>
+          </div>
+        )}
       </div>
 
       {cases.length === 0 ? (
@@ -88,8 +92,12 @@ export default function TaktPage() {
         </Card>
       )}
 
-      <TaktUpModal open={upOpen} onClose={() => setUpOpen(false)} />
-      <TaktDownModal open={downOpen} onClose={() => setDownOpen(false)} />
+      {role === "admin" && (
+        <>
+          <TaktUpModal open={upOpen} onClose={() => setUpOpen(false)} />
+          <TaktDownModal open={downOpen} onClose={() => setDownOpen(false)} />
+        </>
+      )}
     </div>
   );
 }

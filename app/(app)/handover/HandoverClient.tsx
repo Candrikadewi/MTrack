@@ -11,10 +11,10 @@ import { deptsOf } from "@/lib/engine/dashboard";
 import { buildHandoverForm, finalizeHandoverForm } from "@/lib/engine/handover";
 import { fmtDate } from "@/lib/engine/compute";
 
-export default function HandoverPage() {
+export function HandoverClient() {
   const snapshots = useStoreList(zparStore);
-  const forms = useStoreList(handoverStore).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  const activeSnapshot = snapshots.find((s) => s.isActive);
+  const forms = useStoreList(handoverStore).sort((a, b) => b.created_at.localeCompare(a.created_at));
+  const activeSnapshot = snapshots.find((s) => s.is_active);
   const depts = deptsOf(activeSnapshot?.employees ?? []);
 
   const [dept, setDept] = useState("");

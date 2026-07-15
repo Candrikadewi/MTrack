@@ -29,7 +29,7 @@ export function TaktUpModal({ open, onClose }: { open: boolean; onClose: () => v
   function submit() {
     const validRows = rows.filter((r) => r.division && r.dept && r.qty > 0);
     if (validRows.length === 0) return;
-    createTaktUp({ plant, date, takt_before: taktBefore, takt_after: taktAfter, needRows: validRows });
+    createTaktUp({ plant, date, takt_before: taktBefore, takt_after: taktAfter, need_rows: validRows });
     reset();
     onClose();
   }

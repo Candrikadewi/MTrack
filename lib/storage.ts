@@ -1,29 +1,41 @@
-// Generic localStorage-backed data access layer.
+// Supabase-backed data access layer with an in-memory cache, so every store
+// still reads synchronously (list/get) the way the rest of the app expects —
+// see MTRACK_SPEC.md §13, which calls for exactly this: a generic data layer
+// that can move to Supabase "tanpa mengubah logic UI". Writes update the
+// cache immediately (optimistic) and persist to Supabase in the background;
+// a realtime subscription keeps every open tab/user in sync.
 //
-// Every entity is stored under its own top-level key as a JSON array.
-// The API surface (list/get/set/insert/update/remove) is intentionally
-// generic and synchronous-feeling so that swapping the implementation for
-// Supabase later only requires changing this file, not any UI code — see
-// MTRACK_SPEC.md §13.
+// Network/realtime setup is deliberately lazy (triggered by Store.init(),
+// called from useStoreList's effect) rather than at module load — this file
+// is imported by "use client" components, whose module code also executes
+// once during Next.js's server render pass, where hydrate()/channel() must
+// not run.
+import type { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
+import { createClient } from "./supabase/client";
 
-const PREFIX = "mtrack:";
+type PgError = { message: string } | null;
+type WriteResult = { error: PgError };
+type ReadResult<T> = { data: T[] | null; error: PgError };
 
-function readAll<T>(key: string): T[] {
-  if (typeof window === "undefined") return [];
-  const raw = window.localStorage.getItem(PREFIX + key);
-  if (!raw) return [];
-  try {
-    return JSON.parse(raw) as T[];
-  } catch {
-    return [];
-  }
+let changeVersion = 0;
+const listeners = new Set<() => void>();
+
+function notify(): void {
+  changeVersion++;
+  listeners.forEach((cb) => cb());
 }
 
-function writeAll<T>(key: string, items: T[]): void {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(PREFIX + key, JSON.stringify(items));
-  // Notify same-tab listeners (storage event only fires cross-tab natively).
-  window.dispatchEvent(new CustomEvent("mtrack:change", { detail: { key } }));
+export function subscribeStorage(cb: () => void): () => void {
+  listeners.add(cb);
+  return () => listeners.delete(cb);
+}
+
+export function getChangeVersion(): number {
+  return changeVersion;
+}
+
+export function genId(prefix = "id"): string {
+  return `${prefix}_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`;
 }
 
 export interface Store<T extends { id: string }> {
@@ -34,76 +46,124 @@ export interface Store<T extends { id: string }> {
   update(id: string, patch: Partial<T>): T | undefined;
   upsert(item: T): T;
   remove(id: string): void;
-  replaceAll(items: T[]): void;
+  ready(): boolean;
+  /** Client-only, idempotent: hydrates the cache and opens the realtime subscription. */
+  init(): void;
   key: string;
 }
 
-export function createStore<T extends { id: string }>(key: string): Store<T> {
+export function createStore<T extends { id: string }>(table: string): Store<T> {
+  let cache: T[] = [];
+  let initialized = false;
+  let started = false;
+
+  function client() {
+    return createClient();
+  }
+
+  function start() {
+    if (started || typeof window === "undefined") return;
+    started = true;
+    const supabase = client();
+
+    supabase
+      .from(table)
+      .select("*")
+      .then((res: ReadResult<T>) => {
+        if (!res.error && res.data) cache = res.data;
+        initialized = true;
+        notify();
+      });
+
+    supabase
+      .channel(`public:${table}`)
+      .on("postgres_changes", { event: "*", schema: "public", table }, (payload: RealtimePostgresChangesPayload<T>) => {
+        if (payload.eventType === "INSERT") {
+          const row = payload.new as T;
+          if (!cache.some((r) => r.id === row.id)) cache = [...cache, row];
+        } else if (payload.eventType === "UPDATE") {
+          const row = payload.new as T;
+          cache = cache.map((r) => (r.id === row.id ? row : r));
+        } else if (payload.eventType === "DELETE") {
+          const oldRow = payload.old as T;
+          cache = cache.filter((r) => r.id !== oldRow.id);
+        }
+        notify();
+      })
+      .subscribe();
+  }
+
   return {
-    key,
+    key: table,
+    init: start,
+    ready() {
+      return initialized;
+    },
     list() {
-      return readAll<T>(key);
+      return cache;
     },
     get(id) {
-      return readAll<T>(key).find((i) => i.id === id);
+      return cache.find((i) => i.id === id);
     },
     insert(item) {
-      const all = readAll<T>(key);
-      all.push(item);
-      writeAll(key, all);
+      cache = [...cache, item];
+      notify();
+      client()
+        .from(table)
+        .insert(item)
+        .then((res: WriteResult) => {
+          if (res.error) console.error(`insert into ${table} failed:`, res.error.message);
+        });
       return item;
     },
     insertMany(items) {
-      const all = readAll<T>(key);
-      all.push(...items);
-      writeAll(key, all);
+      cache = [...cache, ...items];
+      notify();
+      client()
+        .from(table)
+        .insert(items)
+        .then((res: WriteResult) => {
+          if (res.error) console.error(`insertMany into ${table} failed:`, res.error.message);
+        });
       return items;
     },
     update(id, patch) {
-      const all = readAll<T>(key);
-      const idx = all.findIndex((i) => i.id === id);
+      const idx = cache.findIndex((i) => i.id === id);
       if (idx === -1) return undefined;
-      all[idx] = { ...all[idx], ...patch };
-      writeAll(key, all);
-      return all[idx];
+      const updated = { ...cache[idx], ...patch };
+      cache = cache.map((r, i) => (i === idx ? updated : r));
+      notify();
+      client()
+        .from(table)
+        .update(patch)
+        .eq("id", id)
+        .then((res: WriteResult) => {
+          if (res.error) console.error(`update ${table} failed:`, res.error.message);
+        });
+      return updated;
     },
     upsert(item) {
-      const all = readAll<T>(key);
-      const idx = all.findIndex((i) => i.id === item.id);
-      if (idx === -1) all.push(item);
-      else all[idx] = item;
-      writeAll(key, all);
+      const idx = cache.findIndex((i) => i.id === item.id);
+      cache = idx === -1 ? [...cache, item] : cache.map((r, i) => (i === idx ? item : r));
+      notify();
+      client()
+        .from(table)
+        .upsert(item)
+        .then((res: WriteResult) => {
+          if (res.error) console.error(`upsert into ${table} failed:`, res.error.message);
+        });
       return item;
     },
     remove(id) {
-      const all = readAll<T>(key).filter((i) => i.id !== id);
-      writeAll(key, all);
-    },
-    replaceAll(items) {
-      writeAll(key, items);
+      cache = cache.filter((i) => i.id !== id);
+      notify();
+      client()
+        .from(table)
+        .delete()
+        .eq("id", id)
+        .then((res: WriteResult) => {
+          if (res.error) console.error(`delete from ${table} failed:`, res.error.message);
+        });
     },
   };
-}
-
-export function genId(prefix = "id"): string {
-  return `${prefix}_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`;
-}
-
-export function subscribeStorage(cb: () => void): () => void {
-  if (typeof window === "undefined") return () => {};
-  const handler = () => cb();
-  window.addEventListener("mtrack:change", handler);
-  window.addEventListener("storage", handler);
-  return () => {
-    window.removeEventListener("mtrack:change", handler);
-    window.removeEventListener("storage", handler);
-  };
-}
-
-export function clearAllData(): void {
-  if (typeof window === "undefined") return;
-  Object.keys(window.localStorage)
-    .filter((k) => k.startsWith(PREFIX))
-    .forEach((k) => window.localStorage.removeItem(k));
-  window.dispatchEvent(new CustomEvent("mtrack:change", { detail: { key: "*" } }));
 }

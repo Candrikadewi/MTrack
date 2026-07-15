@@ -11,15 +11,18 @@ import {
   vokasiStore,
   getActiveSnapshot,
 } from "../repo";
+import { createClient } from "../supabase/client";
 import { computeFsStatus, computeReviewDate, sisaHari, today } from "./compute";
 import type {
   Demand,
   DemandCategory,
   DemandOriginType,
   EmployeeRecord,
+  EmploymentStatus,
   MpStatusKategori,
   Project,
   ProjectMpNeedRow,
+  ReplacementStatus,
   ReviewResult,
   TaktCase,
   UtilPoolEntry,
@@ -38,7 +41,16 @@ export function getActiveEmployeeByNoreg(noreg: string): EmployeeRecord | undefi
 export function getVokasiByNoreg(noreg: string): VokasiRecord | undefined {
   const matches = vokasiStore.list().filter((v) => v.noreg === noreg);
   if (matches.length === 0) return undefined;
-  return matches.sort((a, b) => b.uploadDate.localeCompare(a.uploadDate))[0];
+  return matches.sort((a, b) => b.upload_date.localeCompare(a.upload_date))[0];
+}
+
+/** Employment status of a noreg — Vokasi db takes precedence, else derived from ZPAR contract status. */
+export function getEmploymentStatus(noreg: string): EmploymentStatus {
+  if (!noreg) return "";
+  if (getVokasiByNoreg(noreg)) return "Vokasi";
+  const emp = getActiveEmployeeByNoreg(noreg);
+  if (!emp) return "";
+  return emp.status_kontrak === "Permanen" ? "Permanen" : "Kontrak";
 }
 
 // ---------------------------------------------------------------------------
@@ -59,14 +71,17 @@ function baseDemand(overrides: Partial<Demand>): Demand {
     tgl_masuk_outgoing: "",
     tgl_ended_outgoing: "",
     fulfill_date: "",
+    replacement_status: "",
+    no_replace_reason: "",
     replacement_noreg: "",
     replacement_nama: "",
     replacement_batch: "",
     replacement_tgl_masuk: "",
     replacement_dept: "",
+    replacement_employment_status: "",
     fs_status: "",
     status: "Open",
-    createdAt: new Date().toISOString(),
+    created_at: new Date().toISOString(),
     ...overrides,
   };
 }
@@ -133,7 +148,8 @@ export function ensureVokasiEndedDemands(): void {
 
 export function createManualDemand(input: {
   category: DemandCategory;
-  origin_type: Extract<DemandOriginType, "Resign" | "Pension" | "GST" | "Unfit" | "Manual">;
+  origin_type: Extract<DemandOriginType, "Resign" | "Pension" | "GST" | "Unfit" | "Others" | "Manual">;
+  origin_label?: string; // free-text reason when origin_type = "Others"
   outgoing_noreg: string;
   outgoing_nama: string;
   div: string;
@@ -143,6 +159,7 @@ export function createManualDemand(input: {
   const d = baseDemand({
     category: input.category,
     origin_type: input.origin_type,
+    origin_label: input.origin_label,
     outgoing_noreg: input.outgoing_noreg,
     outgoing_nama: input.outgoing_nama,
     div: input.div,
@@ -189,64 +206,97 @@ export function generatePkwtReviews(): void {
   }
 }
 
+/**
+ * Routed through the `set_review_result` Postgres RPC (see supabase/schema.sql)
+ * so the Admin/HR-only rule is enforced in the database, not just the UI.
+ * The local cache updates shortly after via the realtime subscription.
+ */
 export function setReviewResult(reviewId: string, result: ReviewResult): void {
-  const review = pkwtReviewStore.get(reviewId);
-  if (!review) return;
-  pkwtReviewStore.update(reviewId, { review_result: result });
-  if (result === "Terminate" && !review.demand_id) {
-    const d = baseDemand({
-      category: "PKWT",
-      origin_type: "PkwtTerminate",
-      origin_ref: review.id,
-      outgoing_noreg: review.noreg,
-      outgoing_nama: review.nama,
-      div: review.div,
-      dept: review.dept,
-      tgl_masuk_outgoing: review.tgl_masuk,
-      tgl_ended_outgoing: review.tgl_review,
+  const supabase = createClient();
+  supabase
+    .rpc("set_review_result", { p_review_id: reviewId, p_result: result })
+    .then((res: { error: { message: string } | null }) => {
+      if (res.error) console.error("set_review_result failed:", res.error.message);
     });
-    demandStore.insert(d);
-    pkwtReviewStore.update(reviewId, { demand_id: d.id });
-  }
 }
 
 // ---------------------------------------------------------------------------
 // Replacement linking (Enrollment)
 // ---------------------------------------------------------------------------
 
-export function setDemandReplacementByNoreg(demandId: string, noreg: string): Demand | undefined {
+/**
+ * Routed through the `set_demand_replacement` Postgres RPC (see
+ * supabase/schema.sql) — Admin may fill any category, Shop only PKWT — so
+ * the rule holds even if the UI is bypassed. The local cache updates
+ * shortly after via the realtime subscription.
+ *
+ * `replacementStatus` only applies to the Kontrak (PKWT) tab's "PKWT New
+ * Hire / MP Excess / MP Back Up" flow; the Vokasi tab leaves it "".
+ */
+export function setDemandReplacementByNoreg(
+  demandId: string,
+  noreg: string,
+  replacementStatus: ReplacementStatus = ""
+): void {
   const demand = demandStore.get(demandId);
-  if (!demand) return undefined;
-  if (!noreg) {
-    return demandStore.update(demandId, {
-      replacement_noreg: "",
-      replacement_nama: "",
-      replacement_batch: "",
-      replacement_tgl_masuk: "",
-      replacement_dept: "",
-      fs_status: "",
-      status: "Open",
-    });
+  if (!demand) return;
+
+  let nama = "";
+  let dept = "";
+  let batch = "";
+  let tglMasuk: string | null = null;
+  let fs_status = "";
+  let employmentStatus: EmploymentStatus = "";
+
+  if (noreg) {
+    const vokasi = getVokasiByNoreg(noreg);
+    const emp = vokasi ? undefined : getActiveEmployeeByNoreg(noreg);
+    nama = vokasi?.nama ?? emp?.nama ?? "";
+    dept = vokasi?.dept ?? emp?.dept ?? "";
+    batch = vokasi?.batch ?? "";
+    tglMasuk = vokasi?.tgl_masuk ?? emp?.tgl_masuk ?? null;
+    fs_status = demand.category === "PKWT" ? computeFsStatus(demand.dept, dept, vokasi?.tgl_ended) : "";
+    employmentStatus = getEmploymentStatus(noreg);
   }
-  const vokasi = getVokasiByNoreg(noreg);
-  const emp = vokasi ? undefined : getActiveEmployeeByNoreg(noreg);
-  const nama = vokasi?.nama ?? emp?.nama ?? "";
-  const dept = vokasi?.dept ?? emp?.dept ?? "";
-  const batch = vokasi?.batch ?? "";
-  const tglMasuk = vokasi?.tgl_masuk ?? emp?.tgl_masuk ?? "";
 
-  const fs_status =
-    demand.category === "PKWT" ? computeFsStatus(demand.dept, dept, vokasi?.tgl_ended) : "";
+  const supabase = createClient();
+  supabase
+    .rpc("set_demand_replacement", {
+      p_demand_id: demandId,
+      p_replacement_status: replacementStatus,
+      p_noreg: noreg,
+      p_nama: nama,
+      p_batch: batch,
+      p_tgl_masuk: tglMasuk,
+      p_dept: dept,
+      p_fs_status: fs_status,
+      p_employment_status: employmentStatus,
+      p_no_replace_reason: "",
+    })
+    .then((res: { error: { message: string } | null }) => {
+      if (res.error) console.error("set_demand_replacement failed:", res.error.message);
+    });
+}
 
-  return demandStore.update(demandId, {
-    replacement_noreg: noreg,
-    replacement_nama: nama,
-    replacement_batch: batch,
-    replacement_tgl_masuk: tglMasuk,
-    replacement_dept: dept,
-    fs_status,
-    status: nama ? "Fulfilled" : "Open",
-  });
+/** Kontrak tab "No Replace" path — clears any replacement info, records the reason. */
+export function setDemandNoReplace(demandId: string, reason: string): void {
+  const supabase = createClient();
+  supabase
+    .rpc("set_demand_replacement", {
+      p_demand_id: demandId,
+      p_replacement_status: "No Replace",
+      p_noreg: "",
+      p_nama: "",
+      p_batch: "",
+      p_tgl_masuk: null,
+      p_dept: "",
+      p_fs_status: "",
+      p_employment_status: "",
+      p_no_replace_reason: reason,
+    })
+    .then((res: { error: { message: string } | null }) => {
+      if (res.error) console.error("set_demand_replacement (no replace) failed:", res.error.message);
+    });
 }
 
 export function setDemandFulfillDate(demandId: string, date: string): void {
@@ -360,7 +410,7 @@ export function createTaktUp(input: {
   date: string;
   takt_before: number;
   takt_after: number;
-  needRows: Omit<ProjectMpNeedRow, "id">[];
+  need_rows: Omit<ProjectMpNeedRow, "id">[];
 }): TaktCase {
   const takt: TaktCase = {
     id: genId("takt"),
@@ -369,13 +419,13 @@ export function createTaktUp(input: {
     category: "up",
     takt_before: input.takt_before,
     takt_after: input.takt_after,
-    needRows: input.needRows.map((r) => ({ ...r, id: genId("row") })),
+    need_rows: input.need_rows.map((r) => ({ ...r, id: genId("row") })),
     demand_ids: [],
     released_pool_ids: [],
   };
   taktStore.insert(takt);
   const demandIds: string[] = [];
-  for (const row of takt.needRows ?? []) {
+  for (const row of takt.need_rows ?? []) {
     const created = createDemandsFromTaktRow(takt, row);
     demandIds.push(...created.map((d) => d.id));
   }
@@ -387,7 +437,7 @@ export function createTaktDown(input: {
   date: string;
   takt_before: number;
   takt_after: number;
-  releasedPersons: { noreg: string; nama: string; type: MpStatusKategori; dept: string }[];
+  released_persons: { noreg: string; nama: string; type: MpStatusKategori; dept: string }[];
 }): TaktCase {
   const takt: TaktCase = {
     id: genId("takt"),
@@ -396,13 +446,13 @@ export function createTaktDown(input: {
     category: "down",
     takt_before: input.takt_before,
     takt_after: input.takt_after,
-    releasedPersons: input.releasedPersons,
+    released_persons: input.released_persons,
     demand_ids: [],
     released_pool_ids: [],
   };
   taktStore.insert(takt);
   const poolIds: string[] = [];
-  for (const p of input.releasedPersons) {
+  for (const p of input.released_persons) {
     const contractEnd = estimateContractEnd(p.noreg, p.type);
     const entry = pushToUtilPool({
       noreg: p.noreg,

@@ -32,8 +32,8 @@ export interface ZparSnapshot {
   id: string;
   period: string; // YYYY-MM
   filename: string;
-  uploadDate: string; // ISO datetime
-  isActive: boolean;
+  upload_date: string; // ISO datetime
+  is_active: boolean;
   employees: EmployeeRecord[];
 }
 
@@ -56,7 +56,7 @@ export interface VokasiRecord {
   utilisasi: string;
   status_saat_ini: VokasiStatusSaatIni;
   gender: Gender;
-  uploadDate: string; // metadata: when this batch record was uploaded
+  upload_date: string; // metadata: when this batch record was uploaded
 }
 
 // ---------------------------------------------------------------------------
@@ -93,18 +93,25 @@ export type DemandOriginType =
   | "Pension"
   | "GST"
   | "Unfit"
+  | "Others"
   | "Manual";
 
 export type DemandStatus = "Open" | "Fulfilled";
 
 export type FsStatus = "Need FS" | "No Need FS" | "";
 
+/** PKWT Demand replacement path — see MTRACK_SPEC.md revision (Enrollment Kontrak). */
+export type ReplacementStatus = "" | "PKWT New Hire" | "MP Excess" | "MP Back Up" | "No Replace";
+
+/** Employment status of the replacement candidate — auto-derived from where the noreg was found. */
+export type EmploymentStatus = "" | "Kontrak" | "Permanen" | "Vokasi";
+
 export interface Demand {
   id: string;
   category: DemandCategory;
   origin_type: DemandOriginType;
   origin_ref: string; // id of source record (project/takt/pkwt review/vokasi record)
-  origin_label?: string; // human readable label for the origin (project name etc.)
+  origin_label?: string; // human readable label for the origin (project name, or "Others" custom reason)
 
   outgoing_noreg: string;
   outgoing_nama: string;
@@ -118,17 +125,21 @@ export interface Demand {
 
   fulfill_date: string; // target date replacement should start
 
+  replacement_status: ReplacementStatus; // PKWT only
+  no_replace_reason: string; // set when replacement_status = "No Replace"
+
   replacement_noreg: string;
   replacement_nama: string;
   replacement_batch: string;
   replacement_tgl_masuk: string;
-  replacement_dept: string; // department of the vokasi replacement (for fs_status)
+  replacement_dept: string; // department of the replacement (for fs_status)
+  replacement_employment_status: EmploymentStatus;
 
   fs_status: FsStatus; // PKWT only, computed
 
   status: DemandStatus;
 
-  createdAt: string;
+  created_at: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -178,10 +189,10 @@ export interface TaktCase {
   takt_before: number;
   takt_after: number;
   // "up" inputs
-  needRows?: ProjectMpNeedRow[];
+  need_rows?: ProjectMpNeedRow[];
   demand_ids: string[];
   // "down" inputs
-  releasedPersons?: TaktDownPerson[];
+  released_persons?: TaktDownPerson[];
   released_pool_ids: string[];
 }
 
@@ -230,5 +241,5 @@ export interface HandoverForm {
   period: string; // YYYY-MM
   status: HandoverStatus;
   rows: HandoverRow[];
-  createdAt: string;
+  created_at: string;
 }
