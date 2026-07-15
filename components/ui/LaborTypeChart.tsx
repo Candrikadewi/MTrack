@@ -24,44 +24,33 @@ export function LaborTypeChart({ data }: { data: LaborTypeRow[] }) {
   if (data.length === 0) return null;
   const presentSeries = SERIES.filter((s) => data.some((row) => row[s.key] !== undefined));
 
-  // Which sub-code is present *and last in declared order* within a given
-  // row — that's the segment sitting at the top of that row's stack, since
-  // presence varies per base group (only B1-4 rows carry those keys, etc).
-  function isTopmostInRow(row: LaborTypeRow, seriesKey: string): boolean {
-    for (let i = presentSeries.length - 1; i >= 0; i--) {
-      if (row[presentSeries[i].key] !== undefined) return presentSeries[i].key === seriesKey;
-    }
-    return false;
-  }
+  // A category's sub-codes vary in which ones are present (only B rows carry
+  // B1-4, etc.), so there's no single real series to reliably pin a label
+  // to — and any series can be legitimately 0/absent for a given bar, which
+  // Recharts skips rendering (and labelling) entirely. Stack one extra,
+  // always-non-zero synthetic field on top and label that instead.
+  const augmented = data.map((row) => ({ ...row, _labelAnchor: 0.0001 }));
 
-  function makeTotalLabel(seriesKey: string) {
-    return function TotalLabel(props: {
-      x?: number | string;
-      y?: number | string;
-      width?: number | string;
-      payload?: LaborTypeRow;
-    }) {
-      const row = props.payload;
-      if (!row || !isTopmostInRow(row, seriesKey)) return null;
-      const x = Number(props.x);
-      const y = Number(props.y);
-      const width = Number(props.width);
-      if (Number.isNaN(x) || Number.isNaN(y) || Number.isNaN(width)) return null;
-      const total = Object.entries(row)
-        .filter(([k]) => k !== "key")
-        .reduce((sum, [, v]) => sum + (typeof v === "number" ? v : 0), 0);
-      return (
-        <text x={x + width / 2} y={y - 6} textAnchor="middle" fontSize={12} fontWeight={700} fill={isDark ? "#f5f5f4" : "#1c1c1a"}>
-          {total}
-        </text>
-      );
-    };
+  function totalLabel(props: { x?: number | string; y?: number | string; width?: number | string; payload?: LaborTypeRow }) {
+    const x = Number(props.x);
+    const y = Number(props.y);
+    const width = Number(props.width);
+    const row = props.payload;
+    if (Number.isNaN(x) || Number.isNaN(y) || Number.isNaN(width) || !row) return null;
+    const total = Object.entries(row)
+      .filter(([k]) => k !== "key" && k !== "_labelAnchor")
+      .reduce((sum, [, v]) => sum + (typeof v === "number" ? v : 0), 0);
+    return (
+      <text x={x + width / 2} y={y - 6} textAnchor="middle" fontSize={12} fontWeight={700} fill={isDark ? "#f5f5f4" : "#1c1c1a"}>
+        {total}
+      </text>
+    );
   }
 
   return (
     <div className="h-72 w-full">
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={data} margin={{ top: 24, right: 8, left: -20, bottom: 0 }} barCategoryGap="24%">
+        <BarChart data={augmented} margin={{ top: 24, right: 8, left: -20, bottom: 0 }} barCategoryGap="24%">
           <CartesianGrid strokeDasharray="0" vertical={false} stroke={isDark ? "#2c2c2a" : "#e1e0d9"} />
           <XAxis
             dataKey="key"
@@ -90,10 +79,19 @@ export function LaborTypeChart({ data }: { data: LaborTypeRow[] }) {
               fill={isDark ? s.dark : s.light}
               radius={i === arr.length - 1 ? [4, 4, 0, 0] : 0}
               maxBarSize={48}
-            >
-              <LabelList content={makeTotalLabel(s.key)} />
-            </Bar>
+            />
           ))}
+          <Bar
+            dataKey="_labelAnchor"
+            name=""
+            stackId="labor"
+            fill="transparent"
+            isAnimationActive={false}
+            legendType="none"
+            minPointSize={2}
+          >
+            <LabelList content={totalLabel} />
+          </Bar>
         </BarChart>
       </ResponsiveContainer>
     </div>

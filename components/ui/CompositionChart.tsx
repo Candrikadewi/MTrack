@@ -13,12 +13,13 @@ export function CompositionChart({ data, heightClass = "h-72" }: { data: Composi
 
   if (data.length === 0) return null;
 
-  // permanen/kontrak/vokasi are always-present numeric fields (never
-  // undefined), so "vokasi" — declared last — is always the top segment of
-  // the stack. Read the row straight off `payload` (the actual data point
-  // Recharts is rendering this segment for) rather than indexing back into
-  // `data`, since Recharts does not guarantee `index` maps 1:1 to `data`'s
-  // array position once any series has sparse/undefined values.
+  // Any of permanen/kontrak/vokasi can legitimately be 0 for a given month,
+  // and Recharts skips rendering (and labelling) a stacked segment whose
+  // value is 0 — so the total label can't be pinned to any one real series.
+  // Instead stack one extra, always-non-zero synthetic field on top and
+  // label that; its height is negligible so it doesn't visibly affect the bar.
+  const augmented = data.map((row) => ({ ...row, _labelAnchor: 0.0001 }));
+
   function totalLabel(props: { x?: number | string; y?: number | string; width?: number | string; payload?: CompositionRow }) {
     const x = Number(props.x);
     const y = Number(props.y);
@@ -48,7 +49,7 @@ export function CompositionChart({ data, heightClass = "h-72" }: { data: Composi
   return (
     <div className={`${heightClass} w-full`}>
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={data} margin={{ top: 30, right: 8, left: -20, bottom: 0 }} barCategoryGap="24%">
+        <BarChart data={augmented} margin={{ top: 30, right: 8, left: -20, bottom: 0 }} barCategoryGap="24%">
           <CartesianGrid strokeDasharray="0" vertical={false} stroke={isDark ? "#2c2c2a" : "#e1e0d9"} />
           <XAxis
             dataKey="key"
@@ -81,10 +82,19 @@ export function CompositionChart({ data, heightClass = "h-72" }: { data: Composi
               fill={isDark ? s.dark : s.light}
               radius={s.key === "vokasi" ? [4, 4, 0, 0] : 0}
               maxBarSize={40}
-            >
-              {s.key === "vokasi" && <LabelList content={totalLabel} />}
-            </Bar>
+            />
           ))}
+          <Bar
+            dataKey="_labelAnchor"
+            name=""
+            stackId="composition"
+            fill="transparent"
+            isAnimationActive={false}
+            legendType="none"
+            minPointSize={2}
+          >
+            <LabelList content={totalLabel} />
+          </Bar>
         </BarChart>
       </ResponsiveContainer>
     </div>
