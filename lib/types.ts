@@ -7,6 +7,12 @@ export type Gender = "L" | "P";
 
 export type MpStatusKategori = "Vokasi" | "PKWT" | "Permanen" | "AKTI";
 
+/** Known Labor Type codes (Dashboard §Komposisi by Labor Type). Employee/Vokasi
+ * records store labor_type as free text — this is the recognized set used for
+ * chart grouping; anything else is bucketed as "Other". */
+export const LABOR_TYPES = ["A", "B1", "B2", "B3", "B4", "C1", "C2", "D", "E1", "E2", "F", "T"] as const;
+export type LaborType = (typeof LABOR_TYPES)[number];
+
 // ---------------------------------------------------------------------------
 // 3.1 / 3.2 — ZPAR Snapshot & Employee Record
 // ---------------------------------------------------------------------------
@@ -56,6 +62,7 @@ export interface VokasiRecord {
   utilisasi: string;
   status_saat_ini: VokasiStatusSaatIni;
   gender: Gender;
+  labor_type: string;
   upload_date: string; // metadata: when this batch record was uploaded
 }
 
@@ -76,6 +83,7 @@ export interface PkwtReview {
   tgl_review: string; // computed
   review_result: ReviewResult;
   demand_id?: string; // set once Terminate creates a Demand
+  labor_type: string;
 }
 
 // ---------------------------------------------------------------------------

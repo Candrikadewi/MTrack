@@ -1,5 +1,5 @@
 "use client";
-import { Bar, BarChart, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, Cell, LabelList, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 export interface MonthBarDatum {
   month: string; // YYYY-MM
@@ -17,10 +17,12 @@ export function MonthBarChart({
   data,
   onSelect,
   selectedMonth,
+  showValueLabels = false,
 }: {
   data: MonthBarDatum[];
   onSelect: (month: string) => void;
   selectedMonth: string;
+  showValueLabels?: boolean;
 }) {
   const isDark = typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: dark)").matches;
   const muted = isDark ? COLOR_MUTED_DARK : COLOR_MUTED_LIGHT;
@@ -49,6 +51,13 @@ export function MonthBarChart({
             formatter={(value) => [`${value} orang`, "Jumlah"]}
           />
           <Bar dataKey="value" radius={[4, 4, 0, 0]} maxBarSize={24} cursor="pointer">
+            {showValueLabels && (
+              <LabelList
+                dataKey="value"
+                position="top"
+                style={{ fontSize: 11, fill: isDark ? "#c3c2b7" : "#57564f" }}
+              />
+            )}
             {data.map((d) => (
               <Cell
                 key={d.month}

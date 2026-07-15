@@ -200,6 +200,7 @@ export function generatePkwtReviews(): void {
       tgl_masuk: emp.tgl_masuk,
       tgl_review,
       review_result: "" as ReviewResult,
+      labor_type: emp.labor_type,
     };
     pkwtReviewStore.insert(rec);
     seenIds.add(rec.id);

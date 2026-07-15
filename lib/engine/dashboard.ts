@@ -1,8 +1,7 @@
 // Aggregation helpers for the Dashboard — pure functions over the raw
 // stores, read-only per MTRACK_SPEC.md §5 / §11.
-import { addMonths, format, subMonths } from "date-fns";
-import { computeVokasiStatus } from "./compute";
-import type { Demand, EmployeeRecord, PkwtReview, VokasiRecord } from "../types";
+import { addMonths, endOfMonth, format, subMonths } from "date-fns";
+import type { Demand, DemandOriginType, EmployeeRecord, PkwtReview, VokasiRecord } from "../types";
 
 export function directorates(employees: EmployeeRecord[]): string[] {
   return Array.from(new Set(employees.map((e) => e.directorat))).sort();
@@ -54,56 +53,95 @@ export interface CompositionRow {
   perempuan: number;
 }
 
-function isVokasiActive(v: VokasiRecord, fulfilledIds: Set<string>): boolean {
-  const status = computeVokasiStatus(v.tgl_ended, fulfilledIds.has(v.id));
-  return status !== "Ended";
+// ---------------------------------------------------------------------------
+// Manpower Movement — one bar per month of the Fiscal Year (April → March)
+// ---------------------------------------------------------------------------
+
+/** 12 "yyyy-MM" month keys for the fiscal year (Apr–Mar) containing refDate. */
+export function fiscalYearMonths(refDate: Date = new Date()): string[] {
+  const startYear = refDate.getMonth() >= 3 ? refDate.getFullYear() : refDate.getFullYear() - 1;
+  return Array.from({ length: 12 }, (_, i) => format(new Date(startYear, 3 + i, 1), "yyyy-MM"));
 }
 
-export function compositionByDivision(
-  employees: EmployeeRecord[],
+function isVokasiActiveAsOf(v: VokasiRecord, asOfIsoDate: string): boolean {
+  if (!v.tgl_masuk || v.tgl_masuk > asOfIsoDate) return false;
+  return !v.tgl_ended || v.tgl_ended > asOfIsoDate;
+}
+
+/** Movement per FY month, sourced from the ZPAR snapshot whose `period` matches
+ * that month (0 if no snapshot uploaded for it) + Vokasi active as of month-end. */
+export function manpowerMovementByFiscalYear(
+  snapshotsByPeriod: Map<string, EmployeeRecord[]>,
   vokasi: VokasiRecord[],
-  fulfilledVokasiIds: Set<string>,
-  selectedDirectorates: string[]
+  refDate: Date = new Date()
 ): CompositionRow[] {
-  const divisions = divisionsOfAny(employees, selectedDirectorates);
-  return divisions.map((division) => {
-    const empRows = employees.filter((e) => e.division === division);
-    const vokasiRows = vokasi.filter((v) => v.div === division && isVokasiActive(v, fulfilledVokasiIds));
-    const permanen = empRows.filter((e) => e.status_kontrak === "Permanen").length;
-    const kontrak = empRows.length - permanen;
+  return fiscalYearMonths(refDate).map((month) => {
+    const employees = snapshotsByPeriod.get(month) ?? [];
+    const permanenRows = employees.filter((e) => e.status_kontrak === "Permanen");
+    const kontrakRows = employees.filter((e) => e.status_kontrak !== "Permanen");
+    const monthEnd = format(endOfMonth(new Date(`${month}-01T00:00:00`)), "yyyy-MM-dd");
+    const vokasiRows = vokasi.filter((v) => isVokasiActiveAsOf(v, monthEnd));
     return {
-      key: division,
-      permanen,
-      kontrak,
+      key: format(new Date(`${month}-01T00:00:00`), "MMM yy"),
+      permanen: permanenRows.length,
+      kontrak: kontrakRows.length,
       vokasi: vokasiRows.length,
-      laki: empRows.filter((e) => e.gender === "L").length + vokasiRows.filter((v) => v.gender === "L").length,
-      perempuan: empRows.filter((e) => e.gender === "P").length + vokasiRows.filter((v) => v.gender === "P").length,
+      laki:
+        permanenRows.filter((e) => e.gender === "L").length +
+        kontrakRows.filter((e) => e.gender === "L").length +
+        vokasiRows.filter((v) => v.gender === "L").length,
+      perempuan:
+        permanenRows.filter((e) => e.gender === "P").length +
+        kontrakRows.filter((e) => e.gender === "P").length +
+        vokasiRows.filter((v) => v.gender === "P").length,
     };
   });
 }
 
-export function compositionByDept(
-  employees: EmployeeRecord[],
-  vokasi: VokasiRecord[],
-  fulfilledVokasiIds: Set<string>,
-  selectedDivisions: string[]
-): CompositionRow[] {
-  const depts = deptsOfAny(employees, selectedDivisions);
-  return depts.map((dept) => {
-    const empRows = employees.filter((e) => e.dept === dept);
-    const vokasiRows = vokasi.filter((v) => v.dept === dept && isVokasiActive(v, fulfilledVokasiIds));
-    const permanen = empRows.filter((e) => e.status_kontrak === "Permanen").length;
-    const kontrak = empRows.length - permanen;
-    return {
-      key: dept,
-      permanen,
-      kontrak,
-      vokasi: vokasiRows.length,
-      laki: empRows.filter((e) => e.gender === "L").length + vokasiRows.filter((v) => v.gender === "L").length,
-      perempuan: empRows.filter((e) => e.gender === "P").length + vokasiRows.filter((v) => v.gender === "P").length,
-    };
+// ---------------------------------------------------------------------------
+// Komposisi by Labor Type
+// ---------------------------------------------------------------------------
+
+export const LABOR_TYPE_GROUPS: { base: string; codes: string[] }[] = [
+  { base: "A", codes: ["A"] },
+  { base: "B", codes: ["B1", "B2", "B3", "B4"] },
+  { base: "C", codes: ["C1", "C2"] },
+  { base: "D", codes: ["D"] },
+  { base: "E", codes: ["E1", "E2"] },
+  { base: "T", codes: ["T"] },
+  { base: "F", codes: ["F"] },
+];
+
+export type LaborTypeRow = { key: string } & Record<string, number | string>;
+
+/** One row per base group (A,B,C,D,E,T,F); sub-codes (B1-4/C1-2/E1-2) become
+ * separate stacked keys within the same bar. Unrecognized codes bucket as "Other". */
+export function laborTypeComposition(employees: EmployeeRecord[]): LaborTypeRow[] {
+  const counts = new Map<string, number>();
+  for (const e of employees) {
+    const code = e.labor_type.trim();
+    if (!code) continue;
+    counts.set(code, (counts.get(code) ?? 0) + 1);
+  }
+  const known = new Set(LABOR_TYPE_GROUPS.flatMap((g) => g.codes));
+  const rows: LaborTypeRow[] = LABOR_TYPE_GROUPS.map((g) => {
+    const row: LaborTypeRow = { key: g.base };
+    for (const code of g.codes) {
+      const c = counts.get(code) ?? 0;
+      if (c > 0) row[code] = c;
+    }
+    return row;
   });
+  const otherCount = Array.from(counts.entries())
+    .filter(([code]) => !known.has(code))
+    .reduce((sum, [, c]) => sum + c, 0);
+  if (otherCount > 0) rows.push({ key: "Other", Other: otherCount });
+  return rows;
 }
+
+// ---------------------------------------------------------------------------
+// Month bucketing (PKWT Review / Vokasi Ended charts)
+// ---------------------------------------------------------------------------
 
 export interface MonthBucket {
   month: string;
@@ -155,32 +193,65 @@ export function groupCountBy<T>(items: T[], keyOf: (item: T) => string): { key: 
     .sort((a, b) => b.count - a.count);
 }
 
-export function pkwtEnrollmentStats(reviews: PkwtReview[], demands: Demand[]) {
+// ---------------------------------------------------------------------------
+// Enrollment Overview — need-replace + composition breakdown
+// ---------------------------------------------------------------------------
+
+const ORIGIN_LABELS: Record<DemandOriginType, string> = {
+  PkwtTerminate: "PKWT Terminate",
+  VokasiEnded: "Vokasi Ended",
+  Project: "Project",
+  TaktUp: "Takt Time",
+  Resign: "Resign",
+  Pension: "Pension",
+  GST: "GST",
+  Unfit: "Unfit",
+  Others: "Others",
+  Manual: "Manual",
+};
+
+export function demandOriginLabel(d: Demand): string {
+  return ORIGIN_LABELS[d.origin_type] ?? d.origin_type;
+}
+
+export interface ReplacementStats {
+  currentMonthCount: number;
+  needReplace: number;
+  fulfilled: number;
+  total: number;
+  percent: number;
+  composition: { key: string; count: number }[];
+}
+
+export function pkwtEnrollmentStats(reviews: PkwtReview[], demands: Demand[]): ReplacementStats {
   const cm = currentMonthKey();
-  const reviewsThisMonth = reviews.filter((r) => r.tgl_review.slice(0, 7) === cm);
-  const terminated = reviews.filter((r) => r.review_result === "Terminate");
-  const terminatedDemandIds = new Set(terminated.map((r) => r.demand_id).filter(Boolean));
-  const terminatedDemands = demands.filter((d) => terminatedDemandIds.has(d.id));
-  const fulfilled = terminatedDemands.filter((d) => d.status === "Fulfilled").length;
+  const reviewsThisMonth = reviews.filter((r) => r.tgl_review.slice(0, 7) === cm).length;
+  const pkwtDemands = demands.filter((d) => d.category === "PKWT");
+  const open = pkwtDemands.filter((d) => d.status === "Open");
+  const fulfilled = pkwtDemands.length - open.length;
   return {
-    reviewsThisMonth: reviewsThisMonth.length,
-    terminatedCount: terminated.length,
+    currentMonthCount: reviewsThisMonth,
+    needReplace: open.length,
     fulfilled,
-    percent: terminatedDemands.length ? (fulfilled / terminatedDemands.length) * 100 : 0,
+    total: pkwtDemands.length,
+    percent: pkwtDemands.length ? (fulfilled / pkwtDemands.length) * 100 : 0,
+    composition: groupCountBy(open, demandOriginLabel),
   };
 }
 
-export function vokasiEnrollmentStats(vokasi: VokasiRecord[], demands: Demand[]) {
+export function vokasiEnrollmentStats(vokasi: VokasiRecord[], demands: Demand[]): ReplacementStats {
   const cm = currentMonthKey();
-  const endedThisMonth = vokasi.filter((v) => v.tgl_ended?.slice(0, 7) === cm);
-  const endedDemands = demands.filter(
-    (d) => d.category === "Vokasi" && d.origin_type === "VokasiEnded" && d.tgl_ended_outgoing.slice(0, 7) === cm
-  );
-  const fulfilled = endedDemands.filter((d) => d.status === "Fulfilled").length;
+  const endedThisMonth = vokasi.filter((v) => v.tgl_ended?.slice(0, 7) === cm).length;
+  const vokasiDemands = demands.filter((d) => d.category === "Vokasi");
+  const open = vokasiDemands.filter((d) => d.status === "Open");
+  const fulfilled = vokasiDemands.length - open.length;
   return {
-    endedThisMonth: endedThisMonth.length,
+    currentMonthCount: endedThisMonth,
+    needReplace: open.length,
     fulfilled,
-    percent: endedDemands.length ? (fulfilled / endedDemands.length) * 100 : 0,
+    total: vokasiDemands.length,
+    percent: vokasiDemands.length ? (fulfilled / vokasiDemands.length) * 100 : 0,
+    composition: groupCountBy(open, demandOriginLabel),
   };
 }
 

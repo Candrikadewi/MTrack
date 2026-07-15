@@ -31,6 +31,8 @@ function pick<T>(arr: T[], i: number): T {
   return arr[i % arr.length];
 }
 
+const LABOR_TYPE_CYCLE = ["A", "B1", "B2", "B3", "B4", "C1", "C2", "D", "E1", "E2", "F", "T"];
+
 export function seedSampleData(): void {
   clearAllData();
 
@@ -58,7 +60,7 @@ export function seedSampleData(): void {
           employees.push({
             noreg: `EMP${String(n).padStart(4, "0")}`,
             nama: `Karyawan ${n}`,
-            labor_type: "Direct",
+            labor_type: pick(LABOR_TYPE_CYCLE, n),
             tgl_masuk: iso(subMonths(now(), spread.monthsAgoAtMasuk)),
             status_kontrak: spread.status,
             eg: "Active",
@@ -87,6 +89,20 @@ export function seedSampleData(): void {
   zparStore.insert(snapshot);
   activateSnapshot(snapshot.id);
 
+  // A few extra historical snapshots (same roster) so the Manpower Movement
+  // chart on the Dashboard has more than one populated bar out of the box.
+  for (let back = 1; back <= 3; back++) {
+    const pastPeriod = format(subMonths(now(), back), "yyyy-MM");
+    zparStore.insert({
+      id: genId("zpar"),
+      period: pastPeriod,
+      filename: `sample-zpar-${pastPeriod}.xlsx`,
+      upload_date: iso(subMonths(now(), back)),
+      is_active: false,
+      employees,
+    });
+  }
+
   // --- Vokasi cumulative database -----------------------------------------
   const vokasiBatches: { batch: string; monthsAgo: number; endedInMonths: number[] }[] = [
     { batch: "Batch 2024-A", monthsAgo: 10, endedInMonths: [-1, 0, 1] },
@@ -114,6 +130,7 @@ export function seedSampleData(): void {
             utilisasi: dept,
             status_saat_ini: "Active",
             gender: v % 2 === 0 ? "P" : "L",
+            labor_type: pick(LABOR_TYPE_CYCLE, v),
             upload_date: iso(subMonths(now(), batch.monthsAgo)),
           });
         }

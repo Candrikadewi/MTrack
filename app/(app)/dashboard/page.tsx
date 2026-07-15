@@ -1,5 +1,6 @@
 "use client";
 import { useMemo, useState } from "react";
+import { format } from "date-fns";
 import { CalendarRange } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { StatTile, ProgressBar } from "@/components/ui/StatTile";
@@ -7,27 +8,31 @@ import { Select } from "@/components/ui/Form";
 import { MultiSelect } from "@/components/ui/MultiSelect";
 import { MonthBarChart } from "@/components/ui/MonthBarChart";
 import { CompositionChart } from "@/components/ui/CompositionChart";
+import { LaborTypeChart } from "@/components/ui/LaborTypeChart";
 import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/Table";
 import { useStoreList } from "@/lib/useStore";
 import { demandStore, pkwtReviewStore, projectStore, taktStore, utilPoolStore, vokasiStore, zparStore } from "@/lib/repo";
 import {
-  compositionByDept,
-  compositionByDivision,
   currentMonthKey,
   deptsOfAny,
   directorates,
   divisionsOfAny,
   filterEmployees,
   groupCountBy,
+  laborTypeComposition,
+  manpowerMovementByFiscalYear,
   monthBuckets,
   pkwtEnrollmentStats,
   vokasiEnrollmentStats,
+  type ReplacementStats,
 } from "@/lib/engine/dashboard";
+import { filterByDivDept } from "@/lib/engine/enrollment";
 import { computeVokasiStatus } from "@/lib/engine/compute";
 import type {
   Demand,
   EmployeeRecord,
+  Plant,
   PkwtReview,
   Project,
   TaktCase,
@@ -59,6 +64,21 @@ export default function DashboardPage() {
   const fulfilledVokasiIds = useMemo(
     () => new Set(demands.filter((d) => d.category === "Vokasi" && d.status === "Fulfilled").map((d) => d.origin_ref)),
     [demands]
+  );
+
+  const snapshotsByPeriod = useMemo(() => {
+    const latestByPeriod = new Map<string, ZparSnapshot>();
+    for (const s of snapshots) {
+      const existing = latestByPeriod.get(s.period);
+      if (!existing || s.upload_date > existing.upload_date) latestByPeriod.set(s.period, s);
+    }
+    const map = new Map<string, EmployeeRecord[]>();
+    for (const [p, s] of latestByPeriod) map.set(p, s.employees);
+    return map;
+  }, [snapshots]);
+  const movementRows = useMemo(
+    () => manpowerMovementByFiscalYear(snapshotsByPeriod, vokasi),
+    [snapshotsByPeriod, vokasi]
   );
 
   const [selDirectorates, setSelDirectorates] = useState<string[]>([]);
@@ -125,7 +145,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Block 1 */}
+      {/* 1. Total Manpower & Status */}
       <Card title="Total Manpower & Status">
         <div className="mb-4 grid gap-3 sm:grid-cols-3">
           <MultiSelect
@@ -169,18 +189,24 @@ export default function DashboardPage() {
         </div>
       </Card>
 
+      {/* 2. Manpower Movement */}
+      <Card title="Manpower Movement" subtitle="Komposisi Permanen / Kontrak / Vokasi per bulan, Fiscal Year (Apr–Mar)">
+        <CompositionChart data={movementRows} heightClass="h-56" />
+      </Card>
+
+      {/* 3. Komposisi by Labor Type */}
+      <LaborTypeBlock employees={employees} />
+
+      {/* 4 & 5. PKWT Review / Vokasi Ended per bulan */}
       <div className="grid gap-6 lg:grid-cols-2">
-        <CompositionByDivisionBlock employees={employees} vokasi={vokasi} fulfilledVokasiIds={fulfilledVokasiIds} />
-        <CompositionByDeptBlock employees={employees} vokasi={vokasi} fulfilledVokasiIds={fulfilledVokasiIds} />
+        <PkwtReviewChartBlock employees={employees} reviews={reviews} />
+        <VokasiEndedChartBlock employees={employees} vokasi={vokasi} />
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <PkwtReviewChartBlock reviews={reviews} />
-        <VokasiEndedChartBlock vokasi={vokasi} />
-      </div>
-
+      {/* 6. Enrollment Overview */}
       <EnrollmentOverviewBlock reviews={reviews} vokasi={vokasi} demands={demands} />
 
+      {/* 7 & 8. Project / Takt Time Summary */}
       <div className="grid gap-6 lg:grid-cols-2">
         <ProjectSummaryBlock projects={projects} demands={demands} />
         <TaktSummaryBlock taktCases={taktCases} demands={demands} utilPool={utilPool} />
@@ -189,48 +215,78 @@ export default function DashboardPage() {
   );
 }
 
-function CompositionByDivisionBlock({
+// ---------------------------------------------------------------------------
+// Shared cascading Directorate → Division → Department filter
+// ---------------------------------------------------------------------------
+
+function OrgCascadeFilter({
   employees,
-  vokasi,
-  fulfilledVokasiIds,
+  selDirectorates,
+  setSelDirectorates,
+  selDivisions,
+  setSelDivisions,
+  selDepts,
+  setSelDepts,
 }: {
   employees: EmployeeRecord[];
-  vokasi: VokasiRecord[];
-  fulfilledVokasiIds: Set<string>;
+  selDirectorates: string[];
+  setSelDirectorates: (v: string[]) => void;
+  selDivisions: string[];
+  setSelDivisions: (v: string[]) => void;
+  selDepts: string[];
+  setSelDepts: (v: string[]) => void;
 }) {
-  const dirs = directorates(employees);
-  const [selected, setSelected] = useState<string[]>([]);
-  const rows = compositionByDivision(employees, vokasi, fulfilledVokasiIds, selected);
-
+  const divisionOptions = divisionsOfAny(employees, selDirectorates);
+  const deptOptions = deptsOfAny(employees, selDivisions);
   return (
-    <Card
-      title="Komposisi per Divisi"
-      action={<MultiSelect options={dirs} selected={selected} onChange={setSelected} placeholder="Semua Directorate" className="w-56" />}
-    >
-      {rows.length === 0 ? <EmptyState text="Tidak ada data." /> : <CompositionChart data={rows} />}
-    </Card>
+    <div className="mb-4 grid gap-3 sm:grid-cols-3">
+      <MultiSelect
+        label="Directorate"
+        options={directorates(employees)}
+        selected={selDirectorates}
+        onChange={(v) => {
+          setSelDirectorates(v);
+          setSelDivisions([]);
+          setSelDepts([]);
+        }}
+      />
+      <MultiSelect
+        label="Division"
+        options={divisionOptions}
+        selected={selDivisions}
+        onChange={(v) => {
+          setSelDivisions(v);
+          setSelDepts([]);
+        }}
+      />
+      <MultiSelect label="Department" options={deptOptions} selected={selDepts} onChange={setSelDepts} />
+    </div>
   );
 }
 
-function CompositionByDeptBlock({
-  employees,
-  vokasi,
-  fulfilledVokasiIds,
-}: {
-  employees: EmployeeRecord[];
-  vokasi: VokasiRecord[];
-  fulfilledVokasiIds: Set<string>;
-}) {
-  const divs = useMemo(() => Array.from(new Set(employees.map((e) => e.division))).sort(), [employees]);
-  const [selected, setSelected] = useState<string[]>([]);
-  const rows = compositionByDept(employees, vokasi, fulfilledVokasiIds, selected);
+function LaborTypeBlock({ employees }: { employees: EmployeeRecord[] }) {
+  const [selDirectorates, setSelDirectorates] = useState<string[]>([]);
+  const [selDivisions, setSelDivisions] = useState<string[]>([]);
+  const [selDepts, setSelDepts] = useState<string[]>([]);
+  const filtered = filterEmployees(employees, {
+    directorates: selDirectorates,
+    divisions: selDivisions,
+    depts: selDepts,
+  });
+  const rows = laborTypeComposition(filtered);
 
   return (
-    <Card
-      title="Komposisi per Department"
-      action={<MultiSelect options={divs} selected={selected} onChange={setSelected} placeholder="Semua Divisi" className="w-56" />}
-    >
-      {rows.length === 0 ? <EmptyState text="Tidak ada data." /> : <CompositionChart data={rows} />}
+    <Card title="Komposisi by Labor Type">
+      <OrgCascadeFilter
+        employees={employees}
+        selDirectorates={selDirectorates}
+        setSelDirectorates={setSelDirectorates}
+        selDivisions={selDivisions}
+        setSelDivisions={setSelDivisions}
+        selDepts={selDepts}
+        setSelDepts={setSelDepts}
+      />
+      {rows.length === 0 ? <EmptyState text="Tidak ada data." /> : <LaborTypeChart data={rows} />}
     </Card>
   );
 }
@@ -240,7 +296,7 @@ function CompactDetailList({ items, unit }: { items: { key: string; count: numbe
   const restCount = items.slice(5).reduce((sum, i) => sum + i.count, 0);
   if (items.length === 0) return <p className="text-sm text-slate-400">Tidak ada {unit} bulan ini.</p>;
   return (
-    <div className="mt-3 flex flex-wrap gap-1.5">
+    <div className="mt-1 flex flex-wrap gap-1.5">
       {top.map((d) => (
         <span
           key={d.key}
@@ -258,47 +314,117 @@ function CompactDetailList({ items, unit }: { items: { key: string; count: numbe
   );
 }
 
-function PkwtReviewChartBlock({ reviews }: { reviews: PkwtReview[] }) {
-  const { buckets, byMonth } = monthBuckets(reviews, (r) => r.tgl_review?.slice(0, 7));
+function PkwtReviewChartBlock({ employees, reviews }: { employees: EmployeeRecord[]; reviews: PkwtReview[] }) {
+  const [selDirectorates, setSelDirectorates] = useState<string[]>([]);
+  const [selDivisions, setSelDivisions] = useState<string[]>([]);
+  const [selDepts, setSelDepts] = useState<string[]>([]);
+  const filteredReviews = filterByDivDept(reviews, selDivisions, selDepts);
+  const { buckets, byMonth } = monthBuckets(filteredReviews, (r) => r.tgl_review?.slice(0, 7));
   const [selected, setSelected] = useState(currentMonthKey());
   const detailItems = byMonth.get(selected) ?? [];
-  const byDept = groupCountBy(detailItems, (r) => r.dept);
+  const byStatusKontrak = groupCountBy(detailItems, (r) => r.status_kontrak);
+  const byLaborType = groupCountBy(detailItems, (r) => r.labor_type || "Other");
 
   return (
     <Card title="PKWT Review per Bulan">
+      <OrgCascadeFilter
+        employees={employees}
+        selDirectorates={selDirectorates}
+        setSelDirectorates={setSelDirectorates}
+        selDivisions={selDivisions}
+        setSelDivisions={setSelDivisions}
+        selDepts={selDepts}
+        setSelDepts={setSelDepts}
+      />
       <div className="grid gap-4 md:grid-cols-2">
-        <MonthBarChart data={buckets} selectedMonth={selected} onSelect={setSelected} />
+        <MonthBarChart data={buckets} selectedMonth={selected} onSelect={setSelected} showValueLabels />
         <div>
           <div className="text-xs font-semibold text-slate-500">Detail — {selected}</div>
           <div className="mt-1 text-2xl font-bold text-slate-800 dark:text-slate-100">
             {detailItems.length} <span className="text-sm font-normal text-slate-500">orang review</span>
           </div>
-          <CompactDetailList items={byDept} unit="review" />
+          <div className="mt-3">
+            <div className="text-xs font-medium text-slate-500">By Status Kontrak</div>
+            <CompactDetailList items={byStatusKontrak} unit="review" />
+          </div>
+          <div className="mt-3">
+            <div className="text-xs font-medium text-slate-500">By Labor Type</div>
+            <CompactDetailList items={byLaborType} unit="review" />
+          </div>
         </div>
       </div>
     </Card>
   );
 }
 
-function VokasiEndedChartBlock({ vokasi }: { vokasi: VokasiRecord[] }) {
-  const { buckets, byMonth } = monthBuckets(vokasi, (v) => v.tgl_ended?.slice(0, 7));
+function VokasiEndedChartBlock({ employees, vokasi }: { employees: EmployeeRecord[]; vokasi: VokasiRecord[] }) {
+  const [selDirectorates, setSelDirectorates] = useState<string[]>([]);
+  const [selDivisions, setSelDivisions] = useState<string[]>([]);
+  const [selDepts, setSelDepts] = useState<string[]>([]);
+  const filteredVokasi = filterByDivDept(vokasi, selDivisions, selDepts);
+  const { buckets, byMonth } = monthBuckets(filteredVokasi, (v) => v.tgl_ended?.slice(0, 7));
   const [selected, setSelected] = useState(currentMonthKey());
   const detailItems = byMonth.get(selected) ?? [];
-  const byDept = groupCountBy(detailItems, (v) => v.dept);
+  const byLaborType = groupCountBy(detailItems, (v) => v.labor_type || "Other");
 
   return (
     <Card title="Vokasi Ended per Bulan">
+      <OrgCascadeFilter
+        employees={employees}
+        selDirectorates={selDirectorates}
+        setSelDirectorates={setSelDirectorates}
+        selDivisions={selDivisions}
+        setSelDivisions={setSelDivisions}
+        selDepts={selDepts}
+        setSelDepts={setSelDepts}
+      />
       <div className="grid gap-4 md:grid-cols-2">
-        <MonthBarChart data={buckets} selectedMonth={selected} onSelect={setSelected} />
+        <MonthBarChart data={buckets} selectedMonth={selected} onSelect={setSelected} showValueLabels />
         <div>
           <div className="text-xs font-semibold text-slate-500">Detail — {selected}</div>
           <div className="mt-1 text-2xl font-bold text-slate-800 dark:text-slate-100">
             {detailItems.length} <span className="text-sm font-normal text-slate-500">ended</span>
           </div>
-          <CompactDetailList items={byDept} unit="vokasi ended" />
+          <div className="mt-3">
+            <div className="text-xs font-medium text-slate-500">By Labor Type</div>
+            <CompactDetailList items={byLaborType} unit="vokasi ended" />
+          </div>
         </div>
       </div>
     </Card>
+  );
+}
+
+function EnrollmentColumn({
+  label,
+  monthLabel,
+  stats,
+}: {
+  label: string;
+  monthLabel: string;
+  stats: ReplacementStats;
+}) {
+  return (
+    <div>
+      <h4 className="mb-2 text-xs font-semibold text-slate-500">{label}</h4>
+      <div className="grid grid-cols-2 gap-3">
+        <StatTile label={monthLabel} value={stats.currentMonthCount} emphasize />
+        <StatTile label="Need Replace" value={stats.needReplace} emphasize />
+      </div>
+      <div className="mt-3">
+        <div className="mb-1 flex items-center justify-between text-xs text-slate-500">
+          <span>Progress Replacement</span>
+          <span className="font-medium text-slate-700 dark:text-slate-300">
+            {stats.fulfilled}/{stats.total} MP replaced ({stats.percent.toFixed(0)}%)
+          </span>
+        </div>
+        <ProgressBar percent={stats.percent} />
+      </div>
+      <div className="mt-3">
+        <div className="text-xs font-medium text-slate-500">Komposisi Need Replace</div>
+        <CompactDetailList items={stats.composition} unit="need replace" />
+      </div>
+    </div>
   );
 }
 
@@ -316,28 +442,8 @@ function EnrollmentOverviewBlock({
   return (
     <Card title="Enrollment Overview">
       <div className="grid gap-6 sm:grid-cols-2">
-        <div>
-          <h4 className="mb-2 text-xs font-semibold text-slate-500">PKWT</h4>
-          <div className="grid grid-cols-2 gap-3">
-            <StatTile label="Review Bulan Ini" value={pkwt.reviewsThisMonth} emphasize />
-            <StatTile label="Terminate / Ended" value={pkwt.terminatedCount} emphasize />
-          </div>
-          <div className="mt-3">
-            <div className="mb-1 text-xs text-slate-500">Progress Replacement</div>
-            <ProgressBar percent={pkwt.percent} />
-          </div>
-        </div>
-        <div>
-          <h4 className="mb-2 text-xs font-semibold text-slate-500">Vokasi</h4>
-          <div className="grid grid-cols-2 gap-3">
-            <StatTile label="Ended Bulan Ini" value={vok.endedThisMonth} emphasize />
-            <StatTile label="Sudah Fulfilled" value={vok.fulfilled} />
-          </div>
-          <div className="mt-3">
-            <div className="mb-1 text-xs text-slate-500">Progress Replacement</div>
-            <ProgressBar percent={vok.percent} />
-          </div>
-        </div>
+        <EnrollmentColumn label="PKWT" monthLabel="Review Bulan Ini" stats={pkwt} />
+        <EnrollmentColumn label="Vokasi" monthLabel="Ended Bulan Ini" stats={vok} />
       </div>
     </Card>
   );
@@ -352,12 +458,15 @@ function ProjectSummaryBlock({ projects, demands }: { projects: Project[]; deman
       ) : (
         <ul className="divide-y divide-slate-100 dark:divide-slate-800">
           {ongoing.map((p) => {
+            const needed = p.rows.reduce((sum, r) => sum + r.qty, 0);
             const gap = demands.filter((d) => p.demand_ids.includes(d.id) && d.status === "Open").length;
             return (
               <li key={p.id} className="flex items-center justify-between py-2 text-sm">
                 <div>
                   <div className="font-medium text-slate-800 dark:text-slate-100">{p.name}</div>
-                  <div className="text-xs text-slate-500">selesai {p.end_date}</div>
+                  <div className="text-xs text-slate-500">
+                    Kebutuhan: {needed} orang · selesai {p.end_date}
+                  </div>
                 </div>
                 {gap === 0 ? (
                   <Badge tone="green">✅ MP Terpenuhi</Badge>
@@ -373,6 +482,11 @@ function ProjectSummaryBlock({ projects, demands }: { projects: Project[]; deman
   );
 }
 
+function taktMpDelta(t: TaktCase): number {
+  if (t.category === "up") return (t.need_rows ?? []).reduce((sum, r) => sum + r.qty, 0);
+  return -(t.released_persons?.length ?? t.released_pool_ids.length);
+}
+
 function TaktSummaryBlock({
   taktCases,
   demands,
@@ -382,46 +496,69 @@ function TaktSummaryBlock({
   demands: Demand[];
   utilPool: UtilPoolEntry[];
 }) {
-  const plants: ("Plant 1" | "Plant 2")[] = ["Plant 1", "Plant 2"];
+  const plants: Plant[] = ["Plant 1", "Plant 2"];
+  const todayStr = format(new Date(), "yyyy-MM-dd");
   return (
     <Card title="Takt Time Monitoring Summary">
-      <div className="space-y-3">
+      <div className="space-y-4">
         {plants.map((plant) => {
-          const cases = taktCases.filter((t) => t.plant === plant).sort((a, b) => b.date.localeCompare(a.date));
-          const last = cases[0];
-          if (!last) {
-            return (
-              <div key={plant} className="flex items-center justify-between rounded-lg border border-slate-100 px-3 py-2 text-sm dark:border-slate-800">
-                <span className="font-medium text-slate-700 dark:text-slate-200">{plant}</span>
-                <span className="text-slate-400">Belum ada data</span>
-              </div>
-            );
+          const cases = taktCases.filter((t) => t.plant === plant);
+          const current = cases.filter((t) => t.date <= todayStr).sort((a, b) => b.date.localeCompare(a.date))[0];
+          const next = cases.filter((t) => t.date > todayStr).sort((a, b) => a.date.localeCompare(b.date))[0];
+
+          let needed = 0;
+          let fulfilledCount = 0;
+          if (next) {
+            if (next.category === "up") {
+              needed = (next.need_rows ?? []).reduce((sum, r) => sum + r.qty, 0);
+              fulfilledCount = demands.filter((d) => next.demand_ids.includes(d.id) && d.status === "Fulfilled").length;
+            } else {
+              needed = next.released_persons?.length ?? 0;
+              fulfilledCount = utilPool.filter((u) => next.released_pool_ids.includes(u.id) && u.status !== "Open").length;
+            }
           }
-          let ok: boolean;
-          if (last.category === "up") {
-            ok = demands.filter((d) => last.demand_ids.includes(d.id)).every((d) => d.status === "Fulfilled");
-          } else {
-            ok = utilPool.filter((u) => last.released_pool_ids.includes(u.id)).every((u) => u.status !== "Open");
-          }
-          const label =
-            last.category === "up"
-              ? ok
-                ? "✅ MP Terpenuhi"
-                : "⚠️ Masih Perlu Supply"
-              : ok
-                ? "✅ Semua MP Sudah Diutilisasi"
-                : "⚠️ Masih Ada MP Belum Diutilisasi";
+          const kurang = needed - fulfilledCount;
+
           return (
-            <div key={plant} className="rounded-lg border border-slate-100 px-3 py-2 dark:border-slate-800">
-              <div className="flex items-center justify-between">
-                <span className="font-medium text-slate-700 dark:text-slate-200">{plant}</span>
-                <span className="text-sm font-semibold text-slate-800 dark:text-slate-100">{last.takt_after}s</span>
-              </div>
-              <div className="mt-1 flex items-center justify-between text-xs text-slate-500">
-                <span>
-                  Kasus terakhir: {last.category === "up" ? "Takt Up" : "Takt Down"} ({last.date})
-                </span>
-                <Badge tone={ok ? "green" : "amber"}>{label}</Badge>
+            <div key={plant} className="rounded-lg border border-slate-100 p-3 dark:border-slate-800">
+              <div className="mb-2 text-sm font-semibold text-slate-700 dark:text-slate-200">{plant}</div>
+
+              {!current ? (
+                <div className="text-xs text-slate-400">Belum ada Takt Time berjalan.</div>
+              ) : (
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-slate-500">Takt Saat Ini ({current.date})</span>
+                  <span className="font-semibold text-slate-800 dark:text-slate-100">
+                    {current.takt_after}s{" "}
+                    <span className={taktMpDelta(current) >= 0 ? "text-emerald-600" : "text-rose-600"}>
+                      ({taktMpDelta(current) >= 0 ? "+" : ""}
+                      {taktMpDelta(current)} MP)
+                    </span>
+                  </span>
+                </div>
+              )}
+
+              <div className="mt-2 border-t border-dashed border-slate-100 pt-2 dark:border-slate-800">
+                {!next ? (
+                  <div className="text-xs text-slate-400">Belum ada rencana Next Takt Time Prep.</div>
+                ) : (
+                  <div className="text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500">Next Takt Time Prep</span>
+                      <span className="font-semibold text-slate-800 dark:text-slate-100">
+                        {next.takt_after}s · mulai {next.date}
+                      </span>
+                    </div>
+                    <div className="mt-1 flex items-center justify-between">
+                      <span className="text-slate-500">Kebutuhan {needed} orang</span>
+                      {kurang <= 0 ? (
+                        <Badge tone="green">✅ MP Terpenuhi</Badge>
+                      ) : (
+                        <Badge tone="amber">⚠️ Kurang {kurang} MP</Badge>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           );

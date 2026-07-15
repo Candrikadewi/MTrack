@@ -48,6 +48,10 @@ function normalizeGender(raw: string): Gender {
   return "L";
 }
 
+function normalizeLaborType(raw: string): string {
+  return raw.trim().toUpperCase();
+}
+
 export function derivePlant(division: string): string {
   const d = division.toLowerCase();
   if (d.includes("2")) return "Plant 2";
@@ -82,7 +86,7 @@ export async function parseZparFile(file: File): Promise<ZparParseResult> {
     employees.push({
       noreg: findValue(row, ["noreg", "no reg", "nik", "employee id", "emp id", "id"]),
       nama: findValue(row, ["nama", "name", "nama lengkap", "employee name"]),
-      labor_type: findValue(row, ["labor type", "labor_type", "tipe tenaga kerja"]),
+      labor_type: normalizeLaborType(findValue(row, ["labor type", "labor_type", "tipe tenaga kerja"])),
       tgl_masuk: toIsoDate(findValue(row, ["tgl masuk", "tanggal masuk", "hire date", "joining date", "tmt"])),
       status_kontrak,
       eg: "Active",
@@ -119,6 +123,7 @@ export async function parseVokasiFile(file: File, defaultTglMasuk: string): Prom
       utilisasi: findValue(row, ["utilisasi", "utilization"]),
       status_saat_ini: "Active" as const,
       gender: normalizeGender(findValue(row, ["gender", "jk", "jenis kelamin", "sex"])),
+      labor_type: normalizeLaborType(findValue(row, ["labor type", "labor_type", "tipe tenaga kerja"])),
     };
   });
   return { records, totalRows: rows.length };

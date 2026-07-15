@@ -1,20 +1,31 @@
 "use client";
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import type { CompositionRow } from "@/lib/engine/dashboard";
+import type { LaborTypeRow } from "@/lib/engine/dashboard";
 
 const SERIES = [
-  { key: "permanen", label: "Permanen", light: "#2a78d6", dark: "#3987e5" },
-  { key: "kontrak", label: "Kontrak", light: "#1baf7a", dark: "#199e70" },
-  { key: "vokasi", label: "Vokasi", light: "#eda100", dark: "#c98500" },
+  { key: "A", label: "A", light: "#2a78d6", dark: "#3987e5" },
+  { key: "B1", label: "B1", light: "#0f8a5f", dark: "#16a06e" },
+  { key: "B2", label: "B2", light: "#1baf7a", dark: "#199e70" },
+  { key: "B3", label: "B3", light: "#4fc99a", dark: "#2fbd85" },
+  { key: "B4", label: "B4", light: "#8adfc0", dark: "#59d1a8" },
+  { key: "C1", label: "C1", light: "#7c5cd6", dark: "#8f74e0" },
+  { key: "C2", label: "C2", light: "#a996ea", dark: "#b6a5ee" },
+  { key: "D", label: "D", light: "#f0a93b", dark: "#d18a1f" },
+  { key: "E1", label: "E1", light: "#0891b2", dark: "#0ea5c4" },
+  { key: "E2", label: "E2", light: "#5fc9dd", dark: "#38b6cf" },
+  { key: "T", label: "T", light: "#6b7280", dark: "#8a93a3" },
+  { key: "F", label: "F", light: "#d6537c", dark: "#c23f68" },
+  { key: "Other", label: "Other", light: "#c3c2b7", dark: "#52514e" },
 ] as const;
 
-export function CompositionChart({ data, heightClass = "h-72" }: { data: CompositionRow[]; heightClass?: string }) {
+export function LaborTypeChart({ data }: { data: LaborTypeRow[] }) {
   const isDark = typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: dark)").matches;
 
   if (data.length === 0) return null;
+  const presentKeys = new Set(SERIES.filter((s) => data.some((row) => row[s.key] !== undefined)).map((s) => s.key));
 
   return (
-    <div className={`${heightClass} w-full`}>
+    <div className="h-72 w-full">
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={data} margin={{ top: 8, right: 8, left: -20, bottom: 0 }} barCategoryGap="24%">
           <CartesianGrid strokeDasharray="0" vertical={false} stroke={isDark ? "#2c2c2a" : "#e1e0d9"} />
@@ -22,11 +33,7 @@ export function CompositionChart({ data, heightClass = "h-72" }: { data: Composi
             dataKey="key"
             axisLine={{ stroke: isDark ? "#383835" : "#c3c2b7" }}
             tickLine={false}
-            tick={{ fontSize: 11, fill: "#898781" }}
-            interval={0}
-            angle={data.length > 5 ? -20 : 0}
-            textAnchor={data.length > 5 ? "end" : "middle"}
-            height={data.length > 5 ? 50 : 30}
+            tick={{ fontSize: 12, fill: "#898781" }}
           />
           <YAxis allowDecimals={false} axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: "#898781" }} />
           <Tooltip
@@ -39,16 +46,16 @@ export function CompositionChart({ data, heightClass = "h-72" }: { data: Composi
               color: isDark ? "#ffffff" : "#0b0b0b",
             }}
           />
-          <Legend wrapperStyle={{ fontSize: 12 }} iconType="circle" iconSize={8} />
-          {SERIES.map((s, i) => (
+          <Legend wrapperStyle={{ fontSize: 11 }} iconType="circle" iconSize={8} />
+          {SERIES.filter((s) => presentKeys.has(s.key)).map((s, i, arr) => (
             <Bar
               key={s.key}
               dataKey={s.key}
               name={s.label}
-              stackId="composition"
+              stackId="labor"
               fill={isDark ? s.dark : s.light}
-              radius={i === SERIES.length - 1 ? [4, 4, 0, 0] : 0}
-              maxBarSize={40}
+              radius={i === arr.length - 1 ? [4, 4, 0, 0] : 0}
+              maxBarSize={48}
             />
           ))}
         </BarChart>
