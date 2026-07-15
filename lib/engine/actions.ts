@@ -20,6 +20,7 @@ import type {
   EmployeeRecord,
   EmploymentStatus,
   MpStatusKategori,
+  PkwtReview,
   Project,
   ProjectMpNeedRow,
   ReplacementStatus,
@@ -180,17 +181,18 @@ export function generatePkwtReviews(): void {
   if (!snap) return;
   const existing = pkwtReviewStore.list();
   const kontrakTypes = new Set(["Kontrak 1.1", "Kontrak 1.2", "Kontrak 2"]);
-  const seenIds = new Set<string>();
+  // Collected into one insertMany() call — firing one insert() per employee
+  // (previously up to hundreds of concurrent requests) risked silent partial
+  // failures where a review would show up locally (optimistic cache) but
+  // never actually land in Supabase, later failing set_review_result with
+  // "Review not found".
+  const toCreate: PkwtReview[] = [];
   for (const emp of snap.employees) {
     if (!kontrakTypes.has(emp.status_kontrak)) continue;
     const tgl_review = computeReviewDate(emp.tgl_masuk, emp.status_kontrak);
     const prior = existing.find((r) => r.noreg === emp.noreg && r.tgl_review === tgl_review);
-    if (prior) {
-      seenIds.add(prior.id);
-      // keep as-is (preserves review_result / demand_id)
-      continue;
-    }
-    const rec = {
+    if (prior) continue; // keep as-is (preserves review_result / demand_id)
+    toCreate.push({
       id: genId("pkwtrev"),
       noreg: emp.noreg,
       nama: emp.nama,
@@ -201,10 +203,9 @@ export function generatePkwtReviews(): void {
       tgl_review,
       review_result: "" as ReviewResult,
       labor_type: emp.labor_type,
-    };
-    pkwtReviewStore.insert(rec);
-    seenIds.add(rec.id);
+    });
   }
+  if (toCreate.length) pkwtReviewStore.insertMany(toCreate);
 }
 
 /**

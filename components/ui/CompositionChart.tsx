@@ -15,16 +15,16 @@ export function CompositionChart({ data, heightClass = "h-72" }: { data: Composi
 
   // permanen/kontrak/vokasi are always-present numeric fields (never
   // undefined), so "vokasi" — declared last — is always the top segment of
-  // the stack; attaching the total label there directly (rather than via a
-  // synthetic zero-value bar) is what actually renders reliably in Recharts.
-  const totalLabel = (props: { x?: number | string; y?: number | string; width?: number | string; index?: number }) => {
+  // the stack. Read the row straight off `payload` (the actual data point
+  // Recharts is rendering this segment for) rather than indexing back into
+  // `data`, since Recharts does not guarantee `index` maps 1:1 to `data`'s
+  // array position once any series has sparse/undefined values.
+  function totalLabel(props: { x?: number | string; y?: number | string; width?: number | string; payload?: CompositionRow }) {
     const x = Number(props.x);
     const y = Number(props.y);
     const width = Number(props.width);
-    const { index } = props;
-    if (Number.isNaN(x) || Number.isNaN(y) || Number.isNaN(width) || index === undefined) return null;
-    const row = data[index];
-    if (!row) return null;
+    const row = props.payload;
+    if (Number.isNaN(x) || Number.isNaN(y) || Number.isNaN(width) || !row) return null;
     const total = row.permanen + row.kontrak + row.vokasi;
     return (
       <g>
@@ -43,7 +43,7 @@ export function CompositionChart({ data, heightClass = "h-72" }: { data: Composi
         </text>
       </g>
     );
-  };
+  }
 
   return (
     <div className={`${heightClass} w-full`}>

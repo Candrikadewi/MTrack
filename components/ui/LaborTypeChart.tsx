@@ -24,12 +24,10 @@ export function LaborTypeChart({ data }: { data: LaborTypeRow[] }) {
   if (data.length === 0) return null;
   const presentSeries = SERIES.filter((s) => data.some((row) => row[s.key] !== undefined));
 
-  // Which sub-code is present *and last in declared order* for a given row —
-  // that Bar's segment sits at the top of that particular row's stack, since
-  // presence varies per base group (e.g. only B1-4 rows have those keys).
-  function isTopmostForRow(rowIndex: number, seriesKey: string): boolean {
-    const row = data[rowIndex];
-    if (!row) return false;
+  // Which sub-code is present *and last in declared order* within a given
+  // row — that's the segment sitting at the top of that row's stack, since
+  // presence varies per base group (only B1-4 rows carry those keys, etc).
+  function isTopmostInRow(row: LaborTypeRow, seriesKey: string): boolean {
     for (let i = presentSeries.length - 1; i >= 0; i--) {
       if (row[presentSeries[i].key] !== undefined) return presentSeries[i].key === seriesKey;
     }
@@ -37,14 +35,18 @@ export function LaborTypeChart({ data }: { data: LaborTypeRow[] }) {
   }
 
   function makeTotalLabel(seriesKey: string) {
-    return function TotalLabel(props: { x?: number | string; y?: number | string; width?: number | string; index?: number }) {
-      const { index } = props;
-      if (index === undefined || !isTopmostForRow(index, seriesKey)) return null;
+    return function TotalLabel(props: {
+      x?: number | string;
+      y?: number | string;
+      width?: number | string;
+      payload?: LaborTypeRow;
+    }) {
+      const row = props.payload;
+      if (!row || !isTopmostInRow(row, seriesKey)) return null;
       const x = Number(props.x);
       const y = Number(props.y);
       const width = Number(props.width);
       if (Number.isNaN(x) || Number.isNaN(y) || Number.isNaN(width)) return null;
-      const row = data[index];
       const total = Object.entries(row)
         .filter(([k]) => k !== "key")
         .reduce((sum, [, v]) => sum + (typeof v === "number" ? v : 0), 0);
