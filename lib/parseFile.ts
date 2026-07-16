@@ -13,10 +13,18 @@ async function sheetToRows(file: File): Promise<Record<string, unknown>[]> {
   return XLSX.utils.sheet_to_json(sheet, { defval: "" }) as Record<string, unknown>[];
 }
 
+/** Collapses whitespace/parens differences ("Posisi (Struktural)" vs "posisi
+ * struktural" vs "Posisi(Struktural) ") so real-world header formatting
+ * quirks don't break column matching. */
+function normalizeHeader(s: string): string {
+  return s.trim().toLowerCase().replace(/[\s()]+/g, "");
+}
+
 function findValue(row: Record<string, unknown>, aliases: string[]): string {
   const keys = Object.keys(row);
-  for (const alias of aliases) {
-    const key = keys.find((k) => k.trim().toLowerCase() === alias);
+  const normalizedAliases = aliases.map(normalizeHeader);
+  for (const alias of normalizedAliases) {
+    const key = keys.find((k) => normalizeHeader(k) === alias);
     if (key !== undefined && row[key] !== "") return String(row[key]);
   }
   return "";

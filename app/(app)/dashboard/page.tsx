@@ -58,9 +58,20 @@ export default function DashboardPage() {
     [snapshots]
   );
   const activeSnapshot = snapshots.find((s) => s.is_active);
-  const [period, setPeriod] = useSessionState<string>("dash.period", "");
+
+  // "Bulan berjalan" — the dashboard's single top-level viewing-month filter.
+  // Drives which ZPAR snapshot backs the headcount sections (matched by period,
+  // falling back to whichever snapshot is active) AND the month-bucket
+  // highlighting/windowing used across every section below. Selecting the
+  // *active* ZPAR snapshot itself is an Upload Center concern, not this filter.
+  const [refMonth, setRefMonth] = useSessionState<string>("dash.refMonth", currentMonthKey());
+  const refMonthOptions = useMemo(() => {
+    const base = new Date(`${currentMonthKey()}-01T00:00:00`);
+    return Array.from({ length: 13 }, (_, i) => format(addMonths(base, 6 - i), "yyyy-MM"));
+  }, []);
+
   const selectedSnapshot: ZparSnapshot | undefined =
-    sortedSnapshots.find((s) => s.period === period) ?? activeSnapshot ?? sortedSnapshots[0];
+    sortedSnapshots.find((s) => s.period === refMonth) ?? activeSnapshot ?? sortedSnapshots[0];
 
   const employees = useMemo(() => selectedSnapshot?.employees ?? [], [selectedSnapshot]);
 
@@ -83,15 +94,6 @@ export default function DashboardPage() {
   const [selDirectorates, setSelDirectorates] = useSessionState<string[]>("dash.b1.directorates", []);
   const [selDivisions, setSelDivisions] = useSessionState<string[]>("dash.b1.divisions", []);
   const [selDepts, setSelDepts] = useSessionState<string[]>("dash.b1.depts", []);
-
-  // "Bulan berjalan" — the dashboard's own viewing-month reference, independent
-  // of which ZPAR snapshot is selected/active (that's an Upload Center concern).
-  // Drives month-bucket highlighting/windowing across every section below.
-  const [refMonth, setRefMonth] = useSessionState<string>("dash.refMonth", currentMonthKey());
-  const refMonthOptions = useMemo(() => {
-    const base = new Date(`${currentMonthKey()}-01T00:00:00`);
-    return Array.from({ length: 13 }, (_, i) => format(addMonths(base, 6 - i), "yyyy-MM"));
-  }, []);
 
   if (sortedSnapshots.length === 0) {
     return (
@@ -136,42 +138,28 @@ export default function DashboardPage() {
             Ringkasan kondisi manpower — read-only, mengagregasi semua modul.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 dark:border-slate-800 dark:bg-slate-900">
-            <CalendarRange size={16} className="text-slate-400" />
-            <span className="text-xs font-medium text-slate-500">Bulan</span>
-            <Select
-              value={refMonth}
-              onChange={(e) => setRefMonth(e.target.value)}
-              className="!w-auto border-none !p-0 !py-0 text-sm font-semibold shadow-none focus:ring-0"
-            >
-              {refMonthOptions.map((m) => (
-                <option key={m} value={m}>
-                  {format(new Date(`${m}-01T00:00:00`), "MMM yyyy")}
-                </option>
-              ))}
-            </Select>
-          </div>
-          <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 dark:border-slate-800 dark:bg-slate-900">
-            <CalendarRange size={16} className="text-slate-400" />
-            <span className="text-xs font-medium text-slate-500">Periode ZPAR</span>
-            <Select
-              value={selectedSnapshot?.period ?? ""}
-              onChange={(e) => setPeriod(e.target.value)}
-              className="!w-auto border-none !p-0 !py-0 text-sm font-semibold shadow-none focus:ring-0"
-            >
-              {sortedSnapshots.map((s) => (
-                <option key={s.id} value={s.period}>
-                  {s.period} {s.is_active ? "(aktif)" : ""}
-                </option>
-              ))}
-            </Select>
-          </div>
+        <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 dark:border-slate-800 dark:bg-slate-900">
+          <CalendarRange size={16} className="text-slate-400" />
+          <span className="text-xs font-medium text-slate-500">Bulan</span>
+          <Select
+            value={refMonth}
+            onChange={(e) => setRefMonth(e.target.value)}
+            className="!w-auto border-none !p-0 !py-0 text-sm font-semibold shadow-none focus:ring-0"
+          >
+            {refMonthOptions.map((m) => (
+              <option key={m} value={m}>
+                {format(new Date(`${m}-01T00:00:00`), "MMM yyyy")}
+              </option>
+            ))}
+          </Select>
         </div>
       </div>
 
       {/* 1. Total Manpower & Status */}
-      <Card title="Total Manpower & Status">
+      <Card
+        title="Total Manpower & Status"
+        subtitle={selectedSnapshot ? `Data ZPAR periode ${selectedSnapshot.period}` : undefined}
+      >
         <div className="mb-4 grid gap-3 sm:grid-cols-3">
           <MultiSelect
             label="Directorate"
@@ -194,15 +182,7 @@ export default function DashboardPage() {
           />
           <MultiSelect label="Department" options={deptOptions} selected={selDepts} onChange={setSelDepts} />
         </div>
-        <div className="grid gap-3 lg:grid-cols-3">
-          <StatTile
-            label="Total Manpower"
-            value={filteredEmployees.length + vokasiActive.length}
-            tone="blue"
-            icon={Users2}
-          />
-          <PositionBreakdownPanel employees={filteredEmployees} />
-        </div>
+        <TotalManpowerCard total={filteredEmployees.length + vokasiActive.length} employees={filteredEmployees} />
         <div className="mt-3 grid gap-3 sm:grid-cols-3">
           <StatTile
             label="Permanen"
@@ -306,26 +286,41 @@ function OrgCascadeFilter({
   );
 }
 
-function PositionBreakdownPanel({ employees }: { employees: EmployeeRecord[] }) {
+function TotalManpowerCard({ total, employees }: { total: number; employees: EmployeeRecord[] }) {
   const rows = positionBreakdown(employees);
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900 lg:col-span-2">
-      <div className="mb-2 text-xs font-semibold text-slate-500">Breakdown Posisi (Struktural)</div>
-      {rows.length === 0 ? (
-        <p className="text-sm text-slate-400">Tidak ada data posisi struktural.</p>
-      ) : (
-        <div className="grid grid-cols-2 gap-x-6 gap-y-1.5">
-          {rows.map((r) => (
-            <div key={r.label} className="flex items-center justify-between gap-2 text-sm">
-              <span className="flex items-center gap-1.5 text-slate-600 dark:text-slate-300">
-                <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500" />
-                {r.label}
-              </span>
-              <span className="font-semibold tabular-nums text-slate-800 dark:text-slate-100">{r.count}</span>
+    <div className="rounded-2xl border border-blue-100 bg-gradient-to-br from-blue-50 to-indigo-50 p-4 dark:border-blue-500/20 dark:from-blue-500/10 dark:to-indigo-500/10">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+        <div className="flex shrink-0 items-center gap-3 sm:border-r sm:border-blue-200/60 sm:pr-5 dark:sm:border-blue-500/20">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-500/15 text-blue-600 dark:text-blue-300">
+            <Users2 size={18} strokeWidth={2.25} />
+          </span>
+          <div>
+            <div className="text-xs font-medium text-slate-500 dark:text-slate-400">Total Manpower</div>
+            <div className="mt-0.5 bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-3xl font-bold tabular-nums text-transparent">
+              {total}
             </div>
-          ))}
+          </div>
         </div>
-      )}
+        <div className="flex-1 sm:pl-1">
+          <div className="mb-1.5 text-xs font-semibold text-slate-500">Breakdown Posisi (Struktural)</div>
+          {rows.length === 0 ? (
+            <p className="text-sm text-slate-400">Tidak ada data posisi struktural.</p>
+          ) : (
+            <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 sm:grid-cols-3 lg:grid-cols-5">
+              {rows.map((r) => (
+                <div key={r.label} className="flex items-center justify-between gap-2 text-sm">
+                  <span className="flex items-center gap-1.5 text-slate-600 dark:text-slate-300">
+                    <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500" />
+                    {r.label}
+                  </span>
+                  <span className="font-semibold tabular-nums text-slate-800 dark:text-slate-100">{r.count}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -513,13 +508,15 @@ function PkwtReviewChartBlock({
           <div className="mt-1 text-2xl font-bold text-slate-800 dark:text-slate-100">
             {detailItems.length} <span className="text-sm font-normal text-slate-500">orang review</span>
           </div>
-          <div className="mt-3">
-            <div className="text-xs font-medium text-slate-500">By Status Kontrak</div>
-            <CompactDetailList items={byStatusKontrak} unit="review" />
-          </div>
-          <div className="mt-3">
-            <div className="text-xs font-medium text-slate-500">By Labor Type</div>
-            <CompactDetailList items={byLaborType} unit="review" />
+          <div className="mt-3 grid gap-4 sm:grid-cols-2 sm:divide-x sm:divide-slate-200 dark:sm:divide-slate-800">
+            <div>
+              <div className="text-xs font-medium text-slate-500">By Status Kontrak</div>
+              <CompactDetailList items={byStatusKontrak} unit="review" />
+            </div>
+            <div className="sm:pl-4">
+              <div className="text-xs font-medium text-slate-500">By Labor Type</div>
+              <CompactDetailList items={byLaborType} unit="review" />
+            </div>
           </div>
         </div>
       </div>
