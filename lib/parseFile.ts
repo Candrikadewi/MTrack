@@ -3,6 +3,7 @@
 // so real-world exports with slightly different column names still parse.
 import * as XLSX from "xlsx";
 import { format } from "date-fns";
+import { computeVokasiEndedDate } from "./engine/compute";
 import type { EmployeeRecord, Gender, StatusKontrak, VokasiRecord } from "./types";
 
 async function sheetToRows(file: File): Promise<Record<string, unknown>[]> {
@@ -98,6 +99,15 @@ export async function parseZparFile(file: File): Promise<ZparParseResult> {
       tgl_lahir: toIsoDate(findValue(row, ["tgl lahir", "tanggal lahir", "birth date", "dob"])),
       gender: normalizeGender(findValue(row, ["gender", "jk", "jenis kelamin", "sex"])),
       plant: derivePlant(division),
+      posisi_struktural: findValue(row, [
+        "posisi (struktural)",
+        "posisi struktural",
+        "posisi",
+        "jabatan struktural",
+        "jabatan",
+        "structural position",
+        "position",
+      ]),
     });
   }
   return { employees, totalRows: rows.length, skipped };
@@ -119,7 +129,8 @@ export async function parseVokasiFile(file: File, defaultTglMasuk: string): Prom
       dept: findValue(row, ["dept", "shop", "department", "departemen"]),
       lokasi: findValue(row, ["lokasi", "location"]),
       tgl_masuk: tglMasuk,
-      tgl_ended: toIsoDate(findValue(row, ["tgl ended", "tanggal ended", "end date", "ended"])),
+      // Business rule: Vokasi selalu 6 bulan − 1 hari dari tgl_masuk, bukan dari file upload.
+      tgl_ended: computeVokasiEndedDate(tglMasuk),
       utilisasi: findValue(row, ["utilisasi", "utilization"]),
       status_saat_ini: "Active" as const,
       gender: normalizeGender(findValue(row, ["gender", "jk", "jenis kelamin", "sex"])),

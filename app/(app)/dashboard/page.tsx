@@ -2,7 +2,7 @@
 import { useMemo } from "react";
 import { format } from "date-fns";
 import { useSessionState } from "@/lib/useSessionState";
-import { CalendarRange, Users2, UserCheck, FileText, GraduationCap, CalendarCheck2, UserMinus } from "lucide-react";
+import { CalendarRange, Users2, UserCheck, FileText, GraduationCap } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { StatTile, ProgressBar } from "@/components/ui/StatTile";
 import { Select } from "@/components/ui/Form";
@@ -11,11 +11,12 @@ import { MonthBarChart } from "@/components/ui/MonthBarChart";
 import { CompositionChart } from "@/components/ui/CompositionChart";
 import { LaborTypeChart } from "@/components/ui/LaborTypeChart";
 import { Badge } from "@/components/ui/Badge";
-import { EmptyState } from "@/components/ui/Table";
+import { EmptyState, TableWrap, Td, Th } from "@/components/ui/Table";
 import { useStoreList } from "@/lib/useStore";
 import { demandStore, pkwtReviewStore, projectStore, taktStore, utilPoolStore, vokasiStore, zparStore } from "@/lib/repo";
 import {
   currentMonthKey,
+  demandSupplyRows,
   deptsOfAny,
   directorates,
   divisionsOfAny,
@@ -24,12 +25,13 @@ import {
   laborTypeComposition,
   manpowerMovementByFiscalYear,
   monthBuckets,
-  pkwtEnrollmentStats,
-  vokasiEnrollmentStats,
-  type ReplacementStats,
+  positionBreakdown,
+  type DemandSupplyRow,
+  type MovementStatus,
 } from "@/lib/engine/dashboard";
 import { filterByDivDept } from "@/lib/engine/enrollment";
 import { computeVokasiStatus } from "@/lib/engine/compute";
+import { LABOR_TYPES } from "@/lib/types";
 import type {
   Demand,
   EmployeeRecord,
@@ -77,10 +79,6 @@ export default function DashboardPage() {
     for (const [p, s] of latestByPeriod) map.set(p, s.employees);
     return map;
   }, [snapshots]);
-  const movementRows = useMemo(
-    () => manpowerMovementByFiscalYear(snapshotsByPeriod, vokasi),
-    [snapshotsByPeriod, vokasi]
-  );
 
   const [selDirectorates, setSelDirectorates] = useSessionState<string[]>("dash.b1.directorates", []);
   const [selDivisions, setSelDivisions] = useSessionState<string[]>("dash.b1.divisions", []);
@@ -170,13 +168,16 @@ export default function DashboardPage() {
           />
           <MultiSelect label="Department" options={deptOptions} selected={selDepts} onChange={setSelDepts} />
         </div>
-        <div className="grid gap-3 sm:grid-cols-4">
+        <div className="grid gap-3 lg:grid-cols-3">
           <StatTile
             label="Total Manpower"
             value={filteredEmployees.length + vokasiActive.length}
             tone="blue"
             icon={Users2}
           />
+          <PositionBreakdownPanel employees={filteredEmployees} />
+        </div>
+        <div className="mt-3 grid gap-3 sm:grid-cols-3">
           <StatTile
             label="Permanen"
             value={permanenCount.length}
@@ -185,7 +186,7 @@ export default function DashboardPage() {
             icon={UserCheck}
           />
           <StatTile
-            label="Kontrak (PKWT+AKTI)"
+            label="Kontrak"
             value={kontrakCount.length}
             sub={`L: ${genderCount(kontrakCount).L} · P: ${genderCount(kontrakCount).P}`}
             tone="amber"
@@ -202,12 +203,10 @@ export default function DashboardPage() {
       </Card>
 
       {/* 2. Manpower Movement */}
-      <Card title="Manpower Movement" subtitle="Komposisi Permanen / Kontrak / Vokasi per bulan, Fiscal Year (Apr–Mar)">
-        <CompositionChart data={movementRows} heightClass="h-56" />
-      </Card>
+      <ManpowerMovementBlock employees={employees} snapshotsByPeriod={snapshotsByPeriod} vokasi={vokasi} />
 
       {/* 3. Komposisi by Labor Type */}
-      <LaborTypeBlock employees={employees} />
+      <LaborTypeBlock employees={employees} vokasi={vokasi} demands={demands} />
 
       {/* 4 & 5. PKWT Review / Vokasi Ended per bulan */}
       <div className="grid gap-6 lg:grid-cols-2">
@@ -215,8 +214,8 @@ export default function DashboardPage() {
         <VokasiEndedChartBlock employees={employees} vokasi={vokasi} />
       </div>
 
-      {/* 6. Enrollment Overview */}
-      <EnrollmentOverviewBlock reviews={reviews} vokasi={vokasi} demands={demands} />
+      {/* 6. Demand-Supply Overview */}
+      <DemandSupplyBlock demands={demands} />
 
       {/* 7 & 8. Project / Takt Time Summary */}
       <div className="grid gap-6 lg:grid-cols-2">
@@ -276,7 +275,112 @@ function OrgCascadeFilter({
   );
 }
 
-function LaborTypeBlock({ employees }: { employees: EmployeeRecord[] }) {
+function PositionBreakdownPanel({ employees }: { employees: EmployeeRecord[] }) {
+  const rows = positionBreakdown(employees);
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900 lg:col-span-2">
+      <div className="mb-2 text-xs font-semibold text-slate-500">Breakdown Posisi (Struktural)</div>
+      {rows.length === 0 ? (
+        <p className="text-sm text-slate-400">Tidak ada data posisi struktural.</p>
+      ) : (
+        <div className="grid grid-cols-2 gap-x-6 gap-y-1.5">
+          {rows.map((r) => (
+            <div key={r.label} className="flex items-center justify-between gap-2 text-sm">
+              <span className="flex items-center gap-1.5 text-slate-600 dark:text-slate-300">
+                <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500" />
+                {r.label}
+              </span>
+              <span className="font-semibold tabular-nums text-slate-800 dark:text-slate-100">{r.count}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const MOVEMENT_STATUSES: MovementStatus[] = ["Permanen", "Kontrak", "Vokasi"];
+
+function ManpowerMovementBlock({
+  employees,
+  snapshotsByPeriod,
+  vokasi,
+}: {
+  employees: EmployeeRecord[];
+  snapshotsByPeriod: Map<string, EmployeeRecord[]>;
+  vokasi: VokasiRecord[];
+}) {
+  const [selDirectorates, setSelDirectorates] = useSessionState<string[]>("dash.movement.directorates", []);
+  const [selDivisions, setSelDivisions] = useSessionState<string[]>("dash.movement.divisions", []);
+  const [selDepts, setSelDepts] = useSessionState<string[]>("dash.movement.depts", []);
+  const [selLaborTypes, setSelLaborTypes] = useSessionState<string[]>("dash.movement.laborTypes", []);
+  const [selStatuses, setSelStatuses] = useSessionState<MovementStatus[]>("dash.movement.statuses", []);
+
+  const movementRows = useMemo(
+    () =>
+      manpowerMovementByFiscalYear(snapshotsByPeriod, vokasi, {
+        org: { directorates: selDirectorates, divisions: selDivisions, depts: selDepts },
+        laborTypes: selLaborTypes,
+        statuses: selStatuses,
+      }),
+    [snapshotsByPeriod, vokasi, selDirectorates, selDivisions, selDepts, selLaborTypes, selStatuses]
+  );
+
+  return (
+    <Card title="Manpower Movement">
+      <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        <MultiSelect
+          label="Directorate"
+          options={directorates(employees)}
+          selected={selDirectorates}
+          onChange={(v) => {
+            setSelDirectorates(v);
+            setSelDivisions([]);
+            setSelDepts([]);
+          }}
+        />
+        <MultiSelect
+          label="Division"
+          options={divisionsOfAny(employees, selDirectorates)}
+          selected={selDivisions}
+          onChange={(v) => {
+            setSelDivisions(v);
+            setSelDepts([]);
+          }}
+        />
+        <MultiSelect
+          label="Department"
+          options={deptsOfAny(employees, selDivisions)}
+          selected={selDepts}
+          onChange={setSelDepts}
+        />
+        <MultiSelect
+          label="Labor Type"
+          options={[...LABOR_TYPES]}
+          selected={selLaborTypes}
+          onChange={setSelLaborTypes}
+        />
+        <MultiSelect
+          label="Status"
+          options={MOVEMENT_STATUSES}
+          selected={selStatuses}
+          onChange={(v) => setSelStatuses(v as MovementStatus[])}
+        />
+      </div>
+      <CompositionChart data={movementRows} heightClass="h-56" />
+    </Card>
+  );
+}
+
+function LaborTypeBlock({
+  employees,
+  vokasi,
+  demands,
+}: {
+  employees: EmployeeRecord[];
+  vokasi: VokasiRecord[];
+  demands: Demand[];
+}) {
   const [selDirectorates, setSelDirectorates] = useSessionState<string[]>("dash.laborType.directorates", []);
   const [selDivisions, setSelDivisions] = useSessionState<string[]>("dash.laborType.divisions", []);
   const [selDepts, setSelDepts] = useSessionState<string[]>("dash.laborType.depts", []);
@@ -285,7 +389,18 @@ function LaborTypeBlock({ employees }: { employees: EmployeeRecord[] }) {
     divisions: selDivisions,
     depts: selDepts,
   });
-  const rows = laborTypeComposition(filtered);
+  const fulfilledVokasiIds = new Set(
+    demands.filter((d) => d.category === "Vokasi" && d.status === "Fulfilled").map((d) => d.origin_ref)
+  );
+  const filteredVokasi = vokasi.filter(
+    (v) =>
+      (selDivisions.length === 0 || selDivisions.includes(v.div)) &&
+      (selDepts.length === 0 || selDepts.includes(v.dept))
+  );
+  const vokasiActive = filteredVokasi.filter(
+    (v) => computeVokasiStatus(v.tgl_ended, fulfilledVokasiIds.has(v.id)) !== "Ended"
+  );
+  const rows = laborTypeComposition(filtered, vokasiActive.length);
 
   return (
     <Card title="Komposisi by Labor Type">
@@ -373,7 +488,6 @@ function VokasiEndedChartBlock({ employees, vokasi }: { employees: EmployeeRecor
   const { buckets, byMonth } = monthBuckets(filteredVokasi, (v) => v.tgl_ended?.slice(0, 7));
   const [selected, setSelected] = useSessionState("dash.vokasiEnded.month", currentMonthKey());
   const detailItems = byMonth.get(selected) ?? [];
-  const byLaborType = groupCountBy(detailItems, (v) => v.labor_type || "Other");
 
   return (
     <Card title="Vokasi Ended per Bulan">
@@ -393,65 +507,70 @@ function VokasiEndedChartBlock({ employees, vokasi }: { employees: EmployeeRecor
           <div className="mt-1 text-2xl font-bold text-slate-800 dark:text-slate-100">
             {detailItems.length} <span className="text-sm font-normal text-slate-500">ended</span>
           </div>
-          <div className="mt-3">
-            <div className="text-xs font-medium text-slate-500">By Labor Type</div>
-            <CompactDetailList items={byLaborType} unit="vokasi ended" />
-          </div>
         </div>
       </div>
     </Card>
   );
 }
 
-function EnrollmentColumn({
-  label,
-  monthLabel,
-  stats,
-}: {
-  label: string;
-  monthLabel: string;
-  stats: ReplacementStats;
-}) {
+function DemandSupplyTable({ label, rows }: { label: string; rows: DemandSupplyRow[] }) {
+  const totalDemand = rows.reduce((sum, r) => sum + r.demand, 0);
+  const totalSupply = rows.reduce((sum, r) => sum + r.supply, 0);
+  const totalPercent = totalDemand ? (totalSupply / totalDemand) * 100 : 0;
+
   return (
     <div>
       <h4 className="mb-2 text-xs font-semibold text-slate-500">{label}</h4>
-      <div className="grid grid-cols-2 gap-3">
-        <StatTile label={monthLabel} value={stats.currentMonthCount} tone="blue" icon={CalendarCheck2} />
-        <StatTile label="Need Replace" value={stats.needReplace} tone="rose" icon={UserMinus} />
-      </div>
-      <div className="mt-3">
-        <div className="mb-1 flex items-center justify-between text-xs text-slate-500">
-          <span>Progress Replacement</span>
-          <span className="font-medium text-slate-700 dark:text-slate-300">
-            {stats.fulfilled}/{stats.total} MP replaced ({stats.percent.toFixed(0)}%)
-          </span>
-        </div>
-        <ProgressBar percent={stats.percent} />
-      </div>
-      <div className="mt-3">
-        <div className="text-xs font-medium text-slate-500">Komposisi Need Replace</div>
-        <CompactDetailList items={stats.composition} unit="need replace" />
-      </div>
+      {rows.length === 0 ? (
+        <EmptyState text="Belum ada demand." />
+      ) : (
+        <TableWrap>
+          <thead>
+            <tr>
+              <Th>Replacement Need</Th>
+              <Th>Demand</Th>
+              <Th>Supply</Th>
+              <Th>Progress</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.reason}>
+                <Td>{r.reason}</Td>
+                <Td>{r.demand}</Td>
+                <Td>{r.supply}</Td>
+                <Td>
+                  <div className="w-28">
+                    <ProgressBar percent={r.percent} />
+                  </div>
+                </Td>
+              </tr>
+            ))}
+            <tr className="border-t-2 border-slate-200 font-semibold dark:border-slate-700">
+              <Td>Total</Td>
+              <Td>{totalDemand}</Td>
+              <Td>{totalSupply}</Td>
+              <Td>
+                <div className="w-28">
+                  <ProgressBar percent={totalPercent} />
+                </div>
+              </Td>
+            </tr>
+          </tbody>
+        </TableWrap>
+      )}
     </div>
   );
 }
 
-function EnrollmentOverviewBlock({
-  reviews,
-  vokasi,
-  demands,
-}: {
-  reviews: PkwtReview[];
-  vokasi: VokasiRecord[];
-  demands: Demand[];
-}) {
-  const pkwt = pkwtEnrollmentStats(reviews, demands);
-  const vok = vokasiEnrollmentStats(vokasi, demands);
+function DemandSupplyBlock({ demands }: { demands: Demand[] }) {
+  const pkwtRows = demandSupplyRows(demands, "PKWT");
+  const vokasiRows = demandSupplyRows(demands, "Vokasi");
   return (
-    <Card title="Enrollment Overview">
-      <div className="grid gap-6 sm:grid-cols-2">
-        <EnrollmentColumn label="PKWT" monthLabel="Review Bulan Ini" stats={pkwt} />
-        <EnrollmentColumn label="Vokasi" monthLabel="Ended Bulan Ini" stats={vok} />
+    <Card title="Demand-Supply Overview">
+      <div className="grid gap-6 lg:grid-cols-2">
+        <DemandSupplyTable label="PKWT" rows={pkwtRows} />
+        <DemandSupplyTable label="Vokasi" rows={vokasiRows} />
       </div>
     </Card>
   );

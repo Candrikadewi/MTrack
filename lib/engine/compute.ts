@@ -1,5 +1,5 @@
 // Pure computed-field functions — see MTRACK_SPEC.md §12 "Aturan Bisnis & Field Turunan".
-import { addMonths, differenceInCalendarDays, differenceInCalendarMonths, format, parseISO } from "date-fns";
+import { addDays, addMonths, differenceInCalendarDays, differenceInCalendarMonths, format, parseISO } from "date-fns";
 import type { StatusKontrak, VokasiStatusSaatIni } from "../types";
 
 export function today(): Date {
@@ -20,10 +20,16 @@ export function fmtDate(date: string | null | undefined): string {
   }
 }
 
-/** §12: tgl_review = tgl_masuk + 24 bulan (Kontrak 1.1/1.2) atau +36 bulan (Kontrak 2) */
+/** §12: tgl_review = tgl_masuk + 24 bulan − 1 hari (Kontrak 1.1/1.2) atau +36 bulan − 1 hari (Kontrak 2) */
 export function computeReviewDate(tglMasuk: string, statusKontrak: StatusKontrak): string {
   const months = statusKontrak === "Kontrak 2" ? 36 : 24;
-  return format(addMonths(parseISO(tglMasuk), months), "yyyy-MM-dd");
+  return format(addDays(addMonths(parseISO(tglMasuk), months), -1), "yyyy-MM-dd");
+}
+
+/** §12: Vokasi tgl_ended = tgl_masuk + 6 bulan − 1 hari. */
+export function computeVokasiEndedDate(tglMasuk: string): string {
+  if (!tglMasuk) return "";
+  return format(addDays(addMonths(parseISO(tglMasuk), 6), -1), "yyyy-MM-dd");
 }
 
 /** §12: sisa_hari = tanggal_target − hari ini (bisa negatif) */

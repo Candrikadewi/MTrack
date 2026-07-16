@@ -32,7 +32,23 @@ export interface EmployeeRecord {
   tgl_lahir: string;
   gender: Gender;
   plant: string; // derived from division
+  posisi_struktural: string; // ZPAR "Posisi (Struktural)" column, free text
 }
+
+/** Dashboard §Total Manpower position-breakdown order & abbreviation, keyed by
+ * the raw posisi_struktural text (case-insensitive substring match). */
+export const POSISI_STRUKTURAL_GROUPS: { match: string; label: string }[] = [
+  { match: "department head", label: "DpH" },
+  { match: "master", label: "Master" },
+  { match: "senior officer", label: "SO" },
+  { match: "section head", label: "SH" },
+  { match: "staff", label: "Staff" },
+  { match: "group leader", label: "GL" },
+  { match: "team leader", label: "TL" },
+  { match: "group expert", label: "GX" },
+  { match: "team expert", label: "TX" },
+  { match: "team member", label: "TM" },
+];
 
 export interface ZparSnapshot {
   id: string;

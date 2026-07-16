@@ -15,7 +15,7 @@ const SERIES = [
   { key: "E2", label: "E2", light: "#5fc9dd", dark: "#38b6cf" },
   { key: "T", label: "T", light: "#6b7280", dark: "#8a93a3" },
   { key: "F", label: "F", light: "#d6537c", dark: "#c23f68" },
-  { key: "Other", label: "Other", light: "#c3c2b7", dark: "#52514e" },
+  { key: "Vokasi", label: "Vokasi", light: "#8b5cf6", dark: "#a78bfa" },
 ] as const;
 
 export function LaborTypeChart({ data }: { data: LaborTypeRow[] }) {

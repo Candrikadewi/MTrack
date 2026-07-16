@@ -1,7 +1,8 @@
 // Aggregation helpers for the Dashboard — pure functions over the raw
 // stores, read-only per MTRACK_SPEC.md §5 / §11.
 import { addMonths, endOfMonth, format, subMonths } from "date-fns";
-import type { Demand, DemandOriginType, EmployeeRecord, PkwtReview, VokasiRecord } from "../types";
+import { POSISI_STRUKTURAL_GROUPS } from "../types";
+import type { Demand, DemandCategory, DemandOriginType, EmployeeRecord, VokasiRecord } from "../types";
 
 export function directorates(employees: EmployeeRecord[]): string[] {
   return Array.from(new Set(employees.map((e) => e.directorat))).sort();
@@ -68,19 +69,43 @@ function isVokasiActiveAsOf(v: VokasiRecord, asOfIsoDate: string): boolean {
   return !v.tgl_ended || v.tgl_ended > asOfIsoDate;
 }
 
+export type MovementStatus = "Permanen" | "Kontrak" | "Vokasi";
+
+export interface MovementFilter {
+  org: OrgFilter;
+  laborTypes: string[];
+  statuses: MovementStatus[]; // empty = all three
+}
+
 /** Movement per FY month, sourced from the ZPAR snapshot whose `period` matches
- * that month (0 if no snapshot uploaded for it) + Vokasi active as of month-end. */
+ * that month (0 if no snapshot uploaded for it) + Vokasi active as of month-end.
+ * `filter` scopes both the ZPAR employees and the Vokasi records — Vokasi has no
+ * `directorat`, so only its div/dept are matched against `filter.org`. */
 export function manpowerMovementByFiscalYear(
   snapshotsByPeriod: Map<string, EmployeeRecord[]>,
   vokasi: VokasiRecord[],
+  filter: MovementFilter = { org: { directorates: [], divisions: [], depts: [] }, laborTypes: [], statuses: [] },
   refDate: Date = new Date()
 ): CompositionRow[] {
+  const statuses = filter.statuses.length ? filter.statuses : (["Permanen", "Kontrak", "Vokasi"] as MovementStatus[]);
+  const showPermanen = statuses.includes("Permanen");
+  const showKontrak = statuses.includes("Kontrak");
+  const showVokasi = statuses.includes("Vokasi");
+
   return fiscalYearMonths(refDate).map((month) => {
-    const employees = snapshotsByPeriod.get(month) ?? [];
-    const permanenRows = employees.filter((e) => e.status_kontrak === "Permanen");
-    const kontrakRows = employees.filter((e) => e.status_kontrak !== "Permanen");
+    const scoped = filterEmployees(snapshotsByPeriod.get(month) ?? [], filter.org).filter(
+      (e) => filter.laborTypes.length === 0 || filter.laborTypes.includes(e.labor_type)
+    );
+    const permanenRows = showPermanen ? scoped.filter((e) => e.status_kontrak === "Permanen") : [];
+    const kontrakRows = showKontrak ? scoped.filter((e) => e.status_kontrak !== "Permanen") : [];
     const monthEnd = format(endOfMonth(new Date(`${month}-01T00:00:00`)), "yyyy-MM-dd");
-    const vokasiRows = vokasi.filter((v) => isVokasiActiveAsOf(v, monthEnd));
+    const vokasiScoped = vokasi.filter(
+      (v) =>
+        (filter.org.divisions.length === 0 || filter.org.divisions.includes(v.div)) &&
+        (filter.org.depts.length === 0 || filter.org.depts.includes(v.dept)) &&
+        (filter.laborTypes.length === 0 || filter.laborTypes.includes(v.labor_type))
+    );
+    const vokasiRows = showVokasi ? vokasiScoped.filter((v) => isVokasiActiveAsOf(v, monthEnd)) : [];
     return {
       key: format(new Date(`${month}-01T00:00:00`), "MMM yy"),
       permanen: permanenRows.length,
@@ -115,15 +140,15 @@ export const LABOR_TYPE_GROUPS: { base: string; codes: string[] }[] = [
 export type LaborTypeRow = { key: string } & Record<string, number | string>;
 
 /** One row per base group (A,B,C,D,E,T,F); sub-codes (B1-4/C1-2/E1-2) become
- * separate stacked keys within the same bar. Unrecognized codes bucket as "Other". */
-export function laborTypeComposition(employees: EmployeeRecord[]): LaborTypeRow[] {
+ * separate stacked keys within the same bar. Vokasi (not a ZPAR labor_type code)
+ * is appended as its own bar from the caller-supplied active-Vokasi count. */
+export function laborTypeComposition(employees: EmployeeRecord[], activeVokasiCount = 0): LaborTypeRow[] {
   const counts = new Map<string, number>();
   for (const e of employees) {
     const code = e.labor_type.trim();
     if (!code) continue;
     counts.set(code, (counts.get(code) ?? 0) + 1);
   }
-  const known = new Set(LABOR_TYPE_GROUPS.flatMap((g) => g.codes));
   const rows: LaborTypeRow[] = LABOR_TYPE_GROUPS.map((g) => {
     const row: LaborTypeRow = { key: g.base };
     for (const code of g.codes) {
@@ -132,11 +157,26 @@ export function laborTypeComposition(employees: EmployeeRecord[]): LaborTypeRow[
     }
     return row;
   });
-  const otherCount = Array.from(counts.entries())
-    .filter(([code]) => !known.has(code))
-    .reduce((sum, [, c]) => sum + c, 0);
-  if (otherCount > 0) rows.push({ key: "Other", Other: otherCount });
+  if (activeVokasiCount > 0) rows.push({ key: "Vokasi", Vokasi: activeVokasiCount });
   return rows;
+}
+
+// ---------------------------------------------------------------------------
+// Total Manpower & Status — Posisi (Struktural) breakdown
+// ---------------------------------------------------------------------------
+
+export interface PositionBreakdownRow {
+  label: string;
+  count: number;
+}
+
+/** Counts employees per POSISI_STRUKTURAL_GROUPS bucket, in that fixed display
+ * order (first substring match wins). Unrecognized/blank positions are omitted. */
+export function positionBreakdown(employees: EmployeeRecord[]): PositionBreakdownRow[] {
+  return POSISI_STRUKTURAL_GROUPS.map((g) => ({
+    label: g.label,
+    count: employees.filter((e) => e.posisi_struktural?.toLowerCase().includes(g.match)).length,
+  })).filter((r) => r.count > 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -214,45 +254,28 @@ export function demandOriginLabel(d: Demand): string {
   return ORIGIN_LABELS[d.origin_type] ?? d.origin_type;
 }
 
-export interface ReplacementStats {
-  currentMonthCount: number;
-  needReplace: number;
-  fulfilled: number;
-  total: number;
+export interface DemandSupplyRow {
+  reason: string;
+  demand: number;
+  supply: number;
   percent: number;
-  composition: { key: string; count: number }[];
 }
 
-export function pkwtEnrollmentStats(reviews: PkwtReview[], demands: Demand[]): ReplacementStats {
-  const cm = currentMonthKey();
-  const reviewsThisMonth = reviews.filter((r) => r.tgl_review.slice(0, 7) === cm).length;
-  const pkwtDemands = demands.filter((d) => d.category === "PKWT");
-  const open = pkwtDemands.filter((d) => d.status === "Open");
-  const fulfilled = pkwtDemands.length - open.length;
-  return {
-    currentMonthCount: reviewsThisMonth,
-    needReplace: open.length,
-    fulfilled,
-    total: pkwtDemands.length,
-    percent: pkwtDemands.length ? (fulfilled / pkwtDemands.length) * 100 : 0,
-    composition: groupCountBy(open, demandOriginLabel),
-  };
-}
-
-export function vokasiEnrollmentStats(vokasi: VokasiRecord[], demands: Demand[]): ReplacementStats {
-  const cm = currentMonthKey();
-  const endedThisMonth = vokasi.filter((v) => v.tgl_ended?.slice(0, 7) === cm).length;
-  const vokasiDemands = demands.filter((d) => d.category === "Vokasi");
-  const open = vokasiDemands.filter((d) => d.status === "Open");
-  const fulfilled = vokasiDemands.length - open.length;
-  return {
-    currentMonthCount: endedThisMonth,
-    needReplace: open.length,
-    fulfilled,
-    total: vokasiDemands.length,
-    percent: vokasiDemands.length ? (fulfilled / vokasiDemands.length) * 100 : 0,
-    composition: groupCountBy(open, demandOriginLabel),
-  };
+/** One row per origin reason (Replacement Need) for the given category — Demand =
+ * every demand ever raised for that reason, Supply = how many are Fulfilled. */
+export function demandSupplyRows(demands: Demand[], category: DemandCategory): DemandSupplyRow[] {
+  const scoped = demands.filter((d) => d.category === category);
+  const counts = new Map<string, { demand: number; supply: number }>();
+  for (const d of scoped) {
+    const reason = demandOriginLabel(d);
+    const entry = counts.get(reason) ?? { demand: 0, supply: 0 };
+    entry.demand++;
+    if (d.status === "Fulfilled") entry.supply++;
+    counts.set(reason, entry);
+  }
+  return Array.from(counts.entries())
+    .map(([reason, v]) => ({ reason, demand: v.demand, supply: v.supply, percent: v.demand ? (v.supply / v.demand) * 100 : 0 }))
+    .sort((a, b) => b.demand - a.demand);
 }
 
 export { subMonths };

@@ -32,6 +32,18 @@ function pick<T>(arr: T[], i: number): T {
 }
 
 const LABOR_TYPE_CYCLE = ["A", "B1", "B2", "B3", "B4", "C1", "C2", "D", "E1", "E2", "F", "T"];
+const POSISI_CYCLE = [
+  "Team Member",
+  "Team Member",
+  "Team Leader",
+  "Staff",
+  "Group Leader",
+  "Team Expert",
+  "Section Head",
+  "Senior Officer",
+  "Group Expert",
+  "Department Head",
+];
 
 export function seedSampleData(): void {
   clearAllData();
@@ -72,6 +84,7 @@ export function seedSampleData(): void {
             tgl_lahir: iso(subMonths(now(), 300 + n)),
             gender,
             plant: div.plant,
+            posisi_struktural: pick(POSISI_CYCLE, n),
           });
         }
       }
