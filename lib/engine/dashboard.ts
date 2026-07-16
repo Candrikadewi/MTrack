@@ -190,17 +190,21 @@ export interface MonthBucket {
   isCurrent: boolean;
 }
 
+/** `refMonth` ("yyyy-MM") is the dashboard's viewing-month reference — the
+ * window is centered on it and it's what gets marked `isCurrent`, not
+ * necessarily today's real-world month. */
 export function monthBuckets<T>(
   items: T[],
   monthOf: (item: T) => string | undefined,
   monthsBefore = 3,
-  monthsAfter = 5
+  monthsAfter = 5,
+  refMonth: string = format(new Date(), "yyyy-MM")
 ): { buckets: MonthBucket[]; byMonth: Map<string, T[]> } {
-  const now = new Date();
+  const refDate = new Date(`${refMonth}-01T00:00:00`);
   const byMonth = new Map<string, T[]>();
   const months: string[] = [];
   for (let i = -monthsBefore; i <= monthsAfter; i++) {
-    const m = format(addMonths(now, i), "yyyy-MM");
+    const m = format(addMonths(refDate, i), "yyyy-MM");
     months.push(m);
     byMonth.set(m, []);
   }
@@ -208,12 +212,11 @@ export function monthBuckets<T>(
     const m = monthOf(item);
     if (m && byMonth.has(m)) byMonth.get(m)!.push(item);
   }
-  const currentMonth = format(now, "yyyy-MM");
   const buckets = months.map((m) => ({
     month: m,
     label: format(new Date(`${m}-01T00:00:00`), "MMM yy"),
     value: byMonth.get(m)?.length ?? 0,
-    isCurrent: m === currentMonth,
+    isCurrent: m === refMonth,
   }));
   return { buckets, byMonth };
 }

@@ -1,6 +1,6 @@
 "use client";
 import { useMemo } from "react";
-import { format } from "date-fns";
+import { addMonths, endOfMonth, format } from "date-fns";
 import { useSessionState } from "@/lib/useSessionState";
 import { CalendarRange, Users2, UserCheck, FileText, GraduationCap } from "lucide-react";
 import { Card } from "@/components/ui/Card";
@@ -84,6 +84,15 @@ export default function DashboardPage() {
   const [selDivisions, setSelDivisions] = useSessionState<string[]>("dash.b1.divisions", []);
   const [selDepts, setSelDepts] = useSessionState<string[]>("dash.b1.depts", []);
 
+  // "Bulan berjalan" — the dashboard's own viewing-month reference, independent
+  // of which ZPAR snapshot is selected/active (that's an Upload Center concern).
+  // Drives month-bucket highlighting/windowing across every section below.
+  const [refMonth, setRefMonth] = useSessionState<string>("dash.refMonth", currentMonthKey());
+  const refMonthOptions = useMemo(() => {
+    const base = new Date(`${currentMonthKey()}-01T00:00:00`);
+    return Array.from({ length: 13 }, (_, i) => format(addMonths(base, 6 - i), "yyyy-MM"));
+  }, []);
+
   if (sortedSnapshots.length === 0) {
     return (
       <div className="space-y-4">
@@ -127,20 +136,37 @@ export default function DashboardPage() {
             Ringkasan kondisi manpower — read-only, mengagregasi semua modul.
           </p>
         </div>
-        <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 dark:border-slate-800 dark:bg-slate-900">
-          <CalendarRange size={16} className="text-slate-400" />
-          <span className="text-xs font-medium text-slate-500">Periode ZPAR</span>
-          <Select
-            value={selectedSnapshot?.period ?? ""}
-            onChange={(e) => setPeriod(e.target.value)}
-            className="!w-auto border-none !p-0 !py-0 text-sm font-semibold shadow-none focus:ring-0"
-          >
-            {sortedSnapshots.map((s) => (
-              <option key={s.id} value={s.period}>
-                {s.period} {s.is_active ? "(aktif)" : ""}
-              </option>
-            ))}
-          </Select>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 dark:border-slate-800 dark:bg-slate-900">
+            <CalendarRange size={16} className="text-slate-400" />
+            <span className="text-xs font-medium text-slate-500">Bulan</span>
+            <Select
+              value={refMonth}
+              onChange={(e) => setRefMonth(e.target.value)}
+              className="!w-auto border-none !p-0 !py-0 text-sm font-semibold shadow-none focus:ring-0"
+            >
+              {refMonthOptions.map((m) => (
+                <option key={m} value={m}>
+                  {format(new Date(`${m}-01T00:00:00`), "MMM yyyy")}
+                </option>
+              ))}
+            </Select>
+          </div>
+          <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 dark:border-slate-800 dark:bg-slate-900">
+            <CalendarRange size={16} className="text-slate-400" />
+            <span className="text-xs font-medium text-slate-500">Periode ZPAR</span>
+            <Select
+              value={selectedSnapshot?.period ?? ""}
+              onChange={(e) => setPeriod(e.target.value)}
+              className="!w-auto border-none !p-0 !py-0 text-sm font-semibold shadow-none focus:ring-0"
+            >
+              {sortedSnapshots.map((s) => (
+                <option key={s.id} value={s.period}>
+                  {s.period} {s.is_active ? "(aktif)" : ""}
+                </option>
+              ))}
+            </Select>
+          </div>
         </div>
       </div>
 
@@ -203,15 +229,20 @@ export default function DashboardPage() {
       </Card>
 
       {/* 2. Manpower Movement */}
-      <ManpowerMovementBlock employees={employees} snapshotsByPeriod={snapshotsByPeriod} vokasi={vokasi} />
+      <ManpowerMovementBlock
+        employees={employees}
+        snapshotsByPeriod={snapshotsByPeriod}
+        vokasi={vokasi}
+        refMonth={refMonth}
+      />
 
       {/* 3. Komposisi by Labor Type */}
       <LaborTypeBlock employees={employees} vokasi={vokasi} demands={demands} />
 
       {/* 4 & 5. PKWT Review / Vokasi Ended per bulan */}
-      <div className="grid gap-6 lg:grid-cols-2">
-        <PkwtReviewChartBlock employees={employees} reviews={reviews} />
-        <VokasiEndedChartBlock employees={employees} vokasi={vokasi} />
+      <div className="space-y-6">
+        <PkwtReviewChartBlock employees={employees} reviews={reviews} refMonth={refMonth} />
+        <VokasiEndedChartBlock employees={employees} vokasi={vokasi} refMonth={refMonth} />
       </div>
 
       {/* 6. Demand-Supply Overview */}
@@ -220,7 +251,7 @@ export default function DashboardPage() {
       {/* 7 & 8. Project / Takt Time Summary */}
       <div className="grid gap-6 lg:grid-cols-2">
         <ProjectSummaryBlock projects={projects} demands={demands} />
-        <TaktSummaryBlock taktCases={taktCases} demands={demands} utilPool={utilPool} />
+        <TaktSummaryBlock taktCases={taktCases} demands={demands} utilPool={utilPool} refMonth={refMonth} />
       </div>
     </div>
   );
@@ -305,10 +336,12 @@ function ManpowerMovementBlock({
   employees,
   snapshotsByPeriod,
   vokasi,
+  refMonth,
 }: {
   employees: EmployeeRecord[];
   snapshotsByPeriod: Map<string, EmployeeRecord[]>;
   vokasi: VokasiRecord[];
+  refMonth: string;
 }) {
   const [selDirectorates, setSelDirectorates] = useSessionState<string[]>("dash.movement.directorates", []);
   const [selDivisions, setSelDivisions] = useSessionState<string[]>("dash.movement.divisions", []);
@@ -316,14 +349,20 @@ function ManpowerMovementBlock({
   const [selLaborTypes, setSelLaborTypes] = useSessionState<string[]>("dash.movement.laborTypes", []);
   const [selStatuses, setSelStatuses] = useSessionState<MovementStatus[]>("dash.movement.statuses", []);
 
+  const refDate = useMemo(() => new Date(`${refMonth}-01T00:00:00`), [refMonth]);
   const movementRows = useMemo(
     () =>
-      manpowerMovementByFiscalYear(snapshotsByPeriod, vokasi, {
-        org: { directorates: selDirectorates, divisions: selDivisions, depts: selDepts },
-        laborTypes: selLaborTypes,
-        statuses: selStatuses,
-      }),
-    [snapshotsByPeriod, vokasi, selDirectorates, selDivisions, selDepts, selLaborTypes, selStatuses]
+      manpowerMovementByFiscalYear(
+        snapshotsByPeriod,
+        vokasi,
+        {
+          org: { directorates: selDirectorates, divisions: selDivisions, depts: selDepts },
+          laborTypes: selLaborTypes,
+          statuses: selStatuses,
+        },
+        refDate
+      ),
+    [snapshotsByPeriod, vokasi, selDirectorates, selDivisions, selDepts, selLaborTypes, selStatuses, refDate]
   );
 
   return (
@@ -437,13 +476,21 @@ function CompactDetailList({ items, unit }: { items: { key: string; count: numbe
   );
 }
 
-function PkwtReviewChartBlock({ employees, reviews }: { employees: EmployeeRecord[]; reviews: PkwtReview[] }) {
+function PkwtReviewChartBlock({
+  employees,
+  reviews,
+  refMonth,
+}: {
+  employees: EmployeeRecord[];
+  reviews: PkwtReview[];
+  refMonth: string;
+}) {
   const [selDirectorates, setSelDirectorates] = useSessionState<string[]>("dash.pkwtReview.directorates", []);
   const [selDivisions, setSelDivisions] = useSessionState<string[]>("dash.pkwtReview.divisions", []);
   const [selDepts, setSelDepts] = useSessionState<string[]>("dash.pkwtReview.depts", []);
   const filteredReviews = filterByDivDept(reviews, selDivisions, selDepts);
-  const { buckets, byMonth } = monthBuckets(filteredReviews, (r) => r.tgl_review?.slice(0, 7));
-  const [selected, setSelected] = useSessionState("dash.pkwtReview.month", currentMonthKey());
+  const { buckets, byMonth } = monthBuckets(filteredReviews, (r) => r.tgl_review?.slice(0, 7), 3, 5, refMonth);
+  const [selected, setSelected] = useSessionState("dash.pkwtReview.month", refMonth);
   const detailItems = byMonth.get(selected) ?? [];
   const byStatusKontrak = groupCountBy(detailItems, (r) => r.status_kontrak);
   const byLaborType = groupCountBy(detailItems, (r) => r.labor_type || "Other");
@@ -480,13 +527,21 @@ function PkwtReviewChartBlock({ employees, reviews }: { employees: EmployeeRecor
   );
 }
 
-function VokasiEndedChartBlock({ employees, vokasi }: { employees: EmployeeRecord[]; vokasi: VokasiRecord[] }) {
+function VokasiEndedChartBlock({
+  employees,
+  vokasi,
+  refMonth,
+}: {
+  employees: EmployeeRecord[];
+  vokasi: VokasiRecord[];
+  refMonth: string;
+}) {
   const [selDirectorates, setSelDirectorates] = useSessionState<string[]>("dash.vokasiEnded.directorates", []);
   const [selDivisions, setSelDivisions] = useSessionState<string[]>("dash.vokasiEnded.divisions", []);
   const [selDepts, setSelDepts] = useSessionState<string[]>("dash.vokasiEnded.depts", []);
   const filteredVokasi = filterByDivDept(vokasi, selDivisions, selDepts);
-  const { buckets, byMonth } = monthBuckets(filteredVokasi, (v) => v.tgl_ended?.slice(0, 7));
-  const [selected, setSelected] = useSessionState("dash.vokasiEnded.month", currentMonthKey());
+  const { buckets, byMonth } = monthBuckets(filteredVokasi, (v) => v.tgl_ended?.slice(0, 7), 3, 5, refMonth);
+  const [selected, setSelected] = useSessionState("dash.vokasiEnded.month", refMonth);
   const detailItems = byMonth.get(selected) ?? [];
 
   return (
@@ -618,13 +673,15 @@ function TaktSummaryBlock({
   taktCases,
   demands,
   utilPool,
+  refMonth,
 }: {
   taktCases: TaktCase[];
   demands: Demand[];
   utilPool: UtilPoolEntry[];
+  refMonth: string;
 }) {
   const plants: Plant[] = ["Plant 1", "Plant 2"];
-  const todayStr = format(new Date(), "yyyy-MM-dd");
+  const todayStr = format(endOfMonth(new Date(`${refMonth}-01T00:00:00`)), "yyyy-MM-dd");
   return (
     <Card title="Takt Time Monitoring Summary">
       <div className="space-y-4">
