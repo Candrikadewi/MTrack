@@ -1,64 +1,14 @@
-// Aggregation & filtering helpers specific to Enrollment Monitoring (§6).
-import { format } from "date-fns";
+// Aggregation & filtering helpers specific to Enrollment Monitoring (§6) and
+// Supply-Demand.
 import { pkwtReviewStore } from "../repo";
-import type { Demand, DemandCategory } from "../types";
+import type { Demand } from "../types";
 
-export function relevantDate(d: Demand): string {
-  return d.tgl_ended_outgoing || d.fulfill_date || "";
-}
-
-export function relevantMonth(d: Demand): string {
-  return relevantDate(d).slice(0, 7);
-}
-
-export function demandsForTabAndMonth(demands: Demand[], category: DemandCategory, month: string): Demand[] {
-  // Sorted explicitly by created_at — Supabase's select("*") doesn't
-  // guarantee row order, and Store.refetch() (used after replacement RPCs)
-  // re-pulls the whole table, so without this rows visibly reshuffle every
-  // time an edit triggers a refetch.
-  return demands
-    .filter((d) => d.category === category && relevantMonth(d) === month)
-    .sort((a, b) => a.created_at.localeCompare(b.created_at));
-}
-
-export interface EnrollmentSummary {
-  total: number;
-  fulfilled: number;
-  percent: number;
-  byDate: { date: string; total: number; fulfilled: number }[];
-  takt: { total: number; fulfilled: number };
-  project: { total: number; fulfilled: number };
-}
-
-export function computeEnrollmentSummary(monthDemands: Demand[]): EnrollmentSummary {
-  const personBased = monthDemands.filter((d) => d.origin_type !== "Project" && d.origin_type !== "TaktUp");
-  const taktDemands = monthDemands.filter((d) => d.origin_type === "TaktUp");
-  const projectDemands = monthDemands.filter((d) => d.origin_type === "Project");
-
-  const byDateMap = new Map<string, { total: number; fulfilled: number }>();
-  for (const d of personBased) {
-    const date = relevantDate(d) || "—";
-    const entry = byDateMap.get(date) ?? { total: 0, fulfilled: 0 };
-    entry.total++;
-    if (d.status === "Fulfilled") entry.fulfilled++;
-    byDateMap.set(date, entry);
-  }
-
-  return {
-    total: monthDemands.length,
-    fulfilled: monthDemands.filter((d) => d.status === "Fulfilled").length,
-    percent: monthDemands.length
-      ? (monthDemands.filter((d) => d.status === "Fulfilled").length / monthDemands.length) * 100
-      : 0,
-    byDate: Array.from(byDateMap.entries())
-      .map(([date, v]) => ({ date, ...v }))
-      .sort((a, b) => a.date.localeCompare(b.date)),
-    takt: { total: taktDemands.length, fulfilled: taktDemands.filter((d) => d.status === "Fulfilled").length },
-    project: {
-      total: projectDemands.length,
-      fulfilled: projectDemands.filter((d) => d.status === "Fulfilled").length,
-    },
-  };
+/** Supply-Demand: "tanggal pemenuhan" — the target date the replacement must
+ * be active/present. `fulfill_date` is the shop-arrival date for Project/Takt
+ * Up (and once set, for any origin); falls back to `tgl_ended_outgoing` (the
+ * PKWT review date / Vokasi ended date) for PKWT Terminate / Vokasi Ended. */
+export function demandTargetDate(d: Demand): string {
+  return d.fulfill_date || d.tgl_ended_outgoing || "";
 }
 
 export function demandStatusLabel(d: Demand): string {
@@ -98,9 +48,4 @@ export function filterByDivDept<T extends { div: string; dept: string }>(
   return rows.filter(
     (r) => (divisions.length === 0 || divisions.includes(r.div)) && (depts.length === 0 || depts.includes(r.dept))
   );
-}
-
-export function monthLabel(month: string): string {
-  if (!month) return "-";
-  return format(new Date(`${month}-01T00:00:00`), "MMMM yyyy");
 }

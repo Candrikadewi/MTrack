@@ -83,6 +83,7 @@ function baseDemand(overrides: Partial<Demand>): Demand {
     replacement_employment_status: "",
     fs_status: "",
     status: "Open",
+    fulfillment_confirmed_date: "",
     created_at: new Date().toISOString(),
     ...overrides,
   };
@@ -273,7 +274,7 @@ export function setDemandReplacementByNoreg(
     dept = vokasi?.dept ?? emp?.dept ?? "";
     batch = vokasi?.batch ?? "";
     tglMasuk = vokasi?.tgl_masuk ?? emp?.tgl_masuk ?? null;
-    fs_status = demand.category === "PKWT" ? computeFsStatus(demand.dept, dept, vokasi?.tgl_ended) : "";
+    fs_status = computeFsStatus(demand.category, demand.dept, dept, vokasi?.tgl_ended);
     employmentStatus = getEmploymentStatus(noreg);
   }
 
@@ -329,6 +330,38 @@ export function setDemandNoReplace(demandId: string, reason: string): void {
 
 export function setDemandFulfillDate(demandId: string, date: string): void {
   demandStore.update(demandId, { fulfill_date: date });
+}
+
+/**
+ * Supply-Demand: confirms a mapped candidate actually signed contract (new
+ * hire) or was officially assigned to the destination department (MP Back
+ * Up/Excess) — separate from `setDemandReplacementByNoreg`, which only maps
+ * who the candidate is. Passing an empty date un-confirms it. Routed through
+ * `confirm_demand_fulfillment` (see supabase/migration_4.sql) so the same
+ * admin/shop-PKWT rule as replacement-mapping is enforced server-side.
+ */
+export function confirmDemandFulfillment(demandId: string, confirmedDate: string): void {
+  const previous = demandStore.get(demandId);
+  if (!previous) return;
+  demandStore.update(demandId, {
+    fulfillment_confirmed_date: confirmedDate,
+    status: confirmedDate ? "Fulfilled" : "Open",
+  });
+  const supabase = createClient();
+  supabase
+    .rpc("confirm_demand_fulfillment", { p_demand_id: demandId, p_confirmed_date: confirmedDate || null })
+    .then((res: { error: { message: string } | null }) => {
+      if (res.error) {
+        console.error("confirm_demand_fulfillment failed:", res.error.message);
+        demandStore.update(demandId, {
+          fulfillment_confirmed_date: previous.fulfillment_confirmed_date,
+          status: previous.status,
+        });
+        pushToast(`Gagal konfirmasi fulfillment: ${res.error.message}`);
+        return;
+      }
+      demandStore.refetch();
+    });
 }
 
 /** §4.2 auto-matching: new Vokasi batch upload -> fill Open Vokasi Demand of same dept. */
@@ -563,21 +596,26 @@ export function pushToUtilPool(input: {
   return entry;
 }
 
+/** Assigning a pool entry (MP Back Up/Excess) to a demand IS the "officially
+ * assigned to destination department" moment — so this both maps the
+ * candidate and confirms fulfillment in one step, unlike the New Hire path
+ * (map via setDemandReplacementByNoreg, confirm separately via
+ * confirmDemandFulfillment once contract is signed). */
 export function assignPoolEntryToDemand(poolEntryId: string, demandId: string): void {
   const entry = utilPoolStore.get(poolEntryId);
-  if (!entry) return;
+  const demand = demandStore.get(demandId);
+  if (!entry || !demand) return;
+  const confirmedDate = today().toISOString().slice(0, 10);
+  const fs_status = computeFsStatus(demand.category, demand.dept, entry.prev_dept, undefined);
   demandStore.update(demandId, {
     replacement_noreg: entry.noreg,
     replacement_nama: entry.nama,
     replacement_dept: entry.prev_dept,
     replacement_batch: "",
+    fs_status,
+    fulfillment_confirmed_date: confirmedDate,
     status: "Fulfilled",
   });
-  const demand = demandStore.get(demandId);
-  if (demand?.category === "PKWT") {
-    const fs_status = computeFsStatus(demand.dept, entry.prev_dept, undefined);
-    demandStore.update(demandId, { fs_status });
-  }
   utilPoolStore.update(poolEntryId, {
     status: "Assigned",
     action_note: `Assigned to demand ${demandId}`,

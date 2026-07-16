@@ -159,9 +159,14 @@ export interface Demand {
   replacement_dept: string; // department of the replacement (for fs_status)
   replacement_employment_status: EmploymentStatus;
 
-  fs_status: FsStatus; // PKWT only, computed
+  fs_status: FsStatus; // computed once a replacement source is known
 
   status: DemandStatus;
+  /** When the candidate mapping actually became official — contract signed
+   * (new hire) or officially assigned to destination dept (MP Back Up/
+   * Excess). This, not just having a name filled in, is what makes `status`
+   * "Fulfilled". Empty until confirmed. */
+  fulfillment_confirmed_date: string;
 
   created_at: string;
 }

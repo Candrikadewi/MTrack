@@ -1,0 +1,306 @@
+"use client";
+import { useMemo, useState } from "react";
+import { format, addMonths } from "date-fns";
+import { Card } from "@/components/ui/Card";
+import { FullWidthTabs } from "@/components/ui/Tabs";
+import { Badge, statusTone } from "@/components/ui/Badge";
+import { EmptyState, TableWrap, Td, Th } from "@/components/ui/Table";
+import { Select } from "@/components/ui/Form";
+import { MultiSelect } from "@/components/ui/MultiSelect";
+import { NoregInput, DateInput } from "@/components/enrollment/NoregInput";
+import { useStoreList } from "@/lib/useStore";
+import { demandStore } from "@/lib/repo";
+import { fmtDate, sisaHari, demandVisibleDate, fulfillmentDeadline } from "@/lib/engine/compute";
+import {
+  demandStatusLabel,
+  demandTargetDate,
+  deptsOfRows,
+  divisionsOfRows,
+  filterByDivDept,
+} from "@/lib/engine/enrollment";
+import { confirmDemandFulfillment, setDemandFulfillDate, setDemandNoReplace, setDemandReplacementByNoreg } from "@/lib/engine/actions";
+import { useRole } from "@/lib/RoleContext";
+import type { Demand, DemandCategory, ReplacementStatus } from "@/lib/types";
+
+const REPLACEMENT_STATUS_OPTIONS: ReplacementStatus[] = ["PKWT New Hire", "MP Excess", "MP Back Up", "No Replace"];
+
+function currentMonthKey(): string {
+  return format(new Date(), "yyyy-MM");
+}
+
+function monthOptions(): string[] {
+  const base = new Date(`${currentMonthKey()}-01T00:00:00`);
+  return Array.from({ length: 13 }, (_, i) => format(addMonths(base, 6 - i), "yyyy-MM"));
+}
+
+/** Label for the confirm-fulfillment date, matching whichever path this
+ * candidate came through. */
+function confirmLabel(d: Demand): string {
+  if (d.category === "Vokasi") return "Tgl Konfirmasi";
+  if (d.replacement_status === "PKWT New Hire") return "Tgl Sign Kontrak";
+  if (d.replacement_status === "MP Excess" || d.replacement_status === "MP Back Up") return "Tgl Assigned";
+  return "Tgl Konfirmasi";
+}
+
+export default function SupplyDemandPage() {
+  const role = useRole();
+  const [tab, setTab] = useState<DemandCategory>("PKWT");
+  const [month, setMonth] = useState(currentMonthKey());
+  const demands = useStoreList(demandStore);
+
+  const tabDemands = useMemo(() => demands.filter((d) => d.category === tab), [demands, tab]);
+  const monthDemands = useMemo(
+    () => tabDemands.filter((d) => demandVisibleDate(demandTargetDate(d)).slice(0, 7) === month),
+    [tabDemands, month]
+  );
+
+  const [divs, setDivs] = useState<string[]>([]);
+  const [depts, setDepts] = useState<string[]>([]);
+  const divOptions = divisionsOfRows(monthDemands);
+  const deptOptions = deptsOfRows(monthDemands, divs);
+  const filteredDemands = filterByDivDept(monthDemands, divs, depts)
+    .slice()
+    .sort((a, b) => demandTargetDate(a).localeCompare(demandTargetDate(b)));
+
+  const canEditReplacement = role === "admin" || role === "shop";
+  const canEditFulfillDate = role === "admin";
+
+  const totalCount = monthDemands.length;
+  const fulfilledCount = monthDemands.filter((d) => d.status === "Fulfilled").length;
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100">Supply-Demand</h1>
+          <p className="text-sm text-slate-500 dark:text-slate-400">
+            Semua demand (PKWT Terminate/Vokasi Ended/GST/Unfit/Resign/Pension dari Enrollment, Project, Takt Up)
+            dan candidate mapping — satu tempat untuk mengisi supply.
+          </p>
+        </div>
+        <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 dark:border-slate-800 dark:bg-slate-900">
+          <span className="text-xs font-medium text-slate-500">Bulan</span>
+          <Select
+            value={month}
+            onChange={(e) => {
+              setMonth(e.target.value);
+              setDivs([]);
+              setDepts([]);
+            }}
+            className="!w-auto border-none !p-0 !py-0 text-sm font-semibold shadow-none focus:ring-0"
+          >
+            {monthOptions().map((m) => (
+              <option key={m} value={m}>
+                {format(new Date(`${m}-01T00:00:00`), "MMM yyyy")}
+              </option>
+            ))}
+          </Select>
+        </div>
+      </div>
+
+      <FullWidthTabs
+        tabs={[
+          { key: "PKWT", label: "Kontrak (PKWT)" },
+          { key: "Vokasi", label: "Vokasi" },
+        ]}
+        active={tab}
+        onChange={(k) => {
+          setTab(k as DemandCategory);
+          setDivs([]);
+          setDepts([]);
+        }}
+      />
+
+      <Card
+        title={`Demand Pool — ${format(new Date(`${month}-01T00:00:00`), "MMMM yyyy")}`}
+        subtitle="Demand muncul H-4 minggu (hari kerja) dari tanggal pemenuhan — bulan yang dipilih di atas adalah bulan demand ini actionable, bukan bulan orangnya hadir."
+        action={
+          <div className="flex gap-2">
+            <MultiSelect
+              options={divOptions}
+              selected={divs}
+              onChange={(v) => {
+                setDivs(v);
+                setDepts([]);
+              }}
+              placeholder="Semua Divisi"
+              className="w-44"
+            />
+            <MultiSelect options={deptOptions} selected={depts} onChange={setDepts} placeholder="Semua Department" className="w-44" />
+          </div>
+        }
+      >
+        <div className="mb-3 text-sm text-slate-500 dark:text-slate-400">
+          {fulfilledCount}/{totalCount} MP fulfilled bulan ini.
+        </div>
+        {filteredDemands.length === 0 ? (
+          <EmptyState text="Tidak ada demand pada bulan/filter ini." />
+        ) : (
+          <TableWrap>
+            <thead>
+              <tr>
+                <Th>Replacement Need</Th>
+                <Th>Outgoing</Th>
+                <Th>Divisi</Th>
+                <Th>Department</Th>
+                <Th>Tanggal Pemenuhan</Th>
+                <Th>Demand Visible</Th>
+                <Th>Batas Fulfillment</Th>
+                {tab === "PKWT" && <Th>Status Replacement</Th>}
+                <Th>Noreg Pengganti</Th>
+                <Th>Nama Pengganti</Th>
+                <Th>Dept Pengganti</Th>
+                <Th>Status FS</Th>
+                <Th>{tab === "PKWT" ? "Sign Kontrak / Assigned" : "Konfirmasi"}</Th>
+                <Th>Status</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredDemands.map((d) => (
+                <SupplyDemandRow
+                  key={d.id}
+                  demand={d}
+                  tab={tab}
+                  canEditReplacement={canEditReplacement}
+                  canEditFulfillDate={canEditFulfillDate}
+                />
+              ))}
+            </tbody>
+          </TableWrap>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+function DeadlineCell({ deadline, fulfilled }: { deadline: string; fulfilled: boolean }) {
+  if (!deadline) return <Td className="text-slate-400">-</Td>;
+  const days = sisaHari(deadline);
+  const cls = fulfilled ? "" : days < 0 ? "text-red-600 font-semibold" : days <= 5 ? "text-amber-600 font-semibold" : "";
+  return <Td className={cls}>{fmtDate(deadline)}</Td>;
+}
+
+function SupplyDemandRow({
+  demand: d,
+  tab,
+  canEditReplacement,
+  canEditFulfillDate,
+}: {
+  demand: Demand;
+  tab: DemandCategory;
+  canEditReplacement: boolean;
+  canEditFulfillDate: boolean;
+}) {
+  const isLabelRow = d.origin_type === "Project" || d.origin_type === "TaktUp";
+  const target = demandTargetDate(d);
+  const visible = demandVisibleDate(target);
+  const deadline = fulfillmentDeadline(target, d.fs_status);
+  const isNoReplace = d.replacement_status === "No Replace";
+  const hasCandidate = Boolean(d.replacement_noreg);
+
+  return (
+    <tr>
+      <Td>{demandStatusLabel(d)}</Td>
+      {isLabelRow ? (
+        <Td className="italic text-slate-500">{d.outgoing_label}</Td>
+      ) : (
+        <Td>
+          {d.outgoing_nama} <span className="text-slate-400">({d.outgoing_noreg})</span>
+        </Td>
+      )}
+      <Td>{d.div}</Td>
+      <Td>{d.dept}</Td>
+      <Td>
+        {canEditFulfillDate ? (
+          <DateInput value={d.fulfill_date || target} onCommit={(v) => setDemandFulfillDate(d.id, v)} />
+        ) : (
+          fmtDate(target)
+        )}
+      </Td>
+      <Td className="text-slate-500">{fmtDate(visible)}</Td>
+      <DeadlineCell deadline={deadline} fulfilled={d.status === "Fulfilled"} />
+
+      {tab === "PKWT" && (
+        <Td>
+          {canEditReplacement ? (
+            <Select
+              value={d.replacement_status}
+              onChange={(e) => {
+                const status = e.target.value as ReplacementStatus;
+                if (status === "No Replace") setDemandNoReplace(d.id, d.no_replace_reason);
+                else setDemandReplacementByNoreg(d.id, d.replacement_noreg, status);
+              }}
+              className="min-w-[140px]"
+            >
+              <option value="">- pilih -</option>
+              {REPLACEMENT_STATUS_OPTIONS.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </Select>
+          ) : (
+            d.replacement_status || "-"
+          )}
+        </Td>
+      )}
+
+      {isNoReplace ? (
+        <>
+          <Td className="text-slate-400">
+            {canEditReplacement ? (
+              <NoregInput
+                value={d.no_replace_reason}
+                placeholder="Alasan tidak direplace..."
+                onCommit={(v) => setDemandNoReplace(d.id, v)}
+              />
+            ) : (
+              d.no_replace_reason || "-"
+            )}
+          </Td>
+          <Td className="text-slate-400">-</Td>
+          <Td className="text-slate-400">-</Td>
+          <Td className="text-slate-400">-</Td>
+          <Td className="text-slate-400">-</Td>
+        </>
+      ) : tab === "PKWT" && !d.replacement_status ? (
+        <Td colSpan={5} className="text-slate-400">
+          Pilih Status Replacement terlebih dahulu
+        </Td>
+      ) : (
+        <>
+          <Td>
+            {canEditReplacement ? (
+              <NoregInput
+                value={d.replacement_noreg}
+                onCommit={(v) => setDemandReplacementByNoreg(d.id, v, d.replacement_status)}
+              />
+            ) : (
+              d.replacement_noreg || "-"
+            )}
+          </Td>
+          <Td>{d.replacement_nama || "-"}</Td>
+          <Td>{d.replacement_dept || "-"}</Td>
+          <Td>{d.fs_status ? <Badge tone={statusTone(d.fs_status)}>{d.fs_status}</Badge> : "-"}</Td>
+          <Td>
+            {!hasCandidate ? (
+              <span className="text-slate-400">Isi kandidat dulu</span>
+            ) : (
+              <div>
+                <div className="mb-0.5 text-[11px] text-slate-400">{confirmLabel(d)}</div>
+                {canEditReplacement ? (
+                  <DateInput value={d.fulfillment_confirmed_date} onCommit={(v) => confirmDemandFulfillment(d.id, v)} />
+                ) : (
+                  fmtDate(d.fulfillment_confirmed_date)
+                )}
+              </div>
+            )}
+          </Td>
+        </>
+      )}
+      <Td>
+        <Badge tone={statusTone(d.status)}>{d.status}</Badge>
+      </Td>
+    </tr>
+  );
+}

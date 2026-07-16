@@ -1,6 +1,15 @@
 // Pure computed-field functions — see MTRACK_SPEC.md §12 "Aturan Bisnis & Field Turunan".
-import { addDays, addMonths, differenceInCalendarDays, differenceInCalendarMonths, format, parseISO } from "date-fns";
-import type { StatusKontrak, VokasiStatusSaatIni } from "../types";
+import {
+  addBusinessDays,
+  addDays,
+  addMonths,
+  differenceInCalendarDays,
+  differenceInCalendarMonths,
+  format,
+  parseISO,
+  subBusinessDays,
+} from "date-fns";
+import type { DemandCategory, FsStatus, StatusKontrak, VokasiStatusSaatIni } from "../types";
 
 export function today(): Date {
   return new Date(new Date().toDateString());
@@ -52,14 +61,20 @@ export function computeVokasiStatus(tglEnded: string, hasFulfilledReplacement: b
 }
 
 /**
- * §12: fs_status (PKWT Demand) — Need FS jika dept pengganti berbeda dari dept outgoing,
- * ATAU dept sama tapi vokasi pengganti sudah tgl_ended > 3 bulan lalu.
+ * §12: fs_status — Need FS jika:
+ *  - demand kategori Vokasi (semua penggantian Vokasi selalu new intake, selalu Need FS), ATAU
+ *  - dept pengganti berbeda dari dept outgoing (cross-shop, berlaku utk New Hire maupun MP Back Up/Excess), ATAU
+ *  - dept sama tapi pengganti sebelumnya Vokasi yang sudah ended > 3 bulan lalu.
+ * Sebelum dept pengganti diketahui (belum ada source), caller belum boleh
+ * panggil ini — fs_status tetap "" di level Demand sampai source terisi.
  */
 export function computeFsStatus(
+  category: DemandCategory,
   outgoingDept: string,
   replacementDept: string,
   replacementVokasiTglEnded: string | undefined
-): "Need FS" | "No Need FS" {
+): FsStatus {
+  if (category === "Vokasi") return "Need FS";
   if (!replacementDept) return "No Need FS";
   if (replacementDept !== outgoingDept) return "Need FS";
   if (replacementVokasiTglEnded) {
@@ -67,6 +82,29 @@ export function computeFsStatus(
     if (monthsSinceEnded > 3) return "Need FS";
   }
   return "No Need FS";
+}
+
+/**
+ * §12 lead time (Supply-Demand): sebuah demand "muncul" / actionable
+ * H-4 minggu (20 hari kerja Senin-Jumat) sebelum tanggal pemenuhan (target
+ * date orang itu harus hadir/aktif).
+ */
+export function demandVisibleDate(targetDate: string): string {
+  if (!targetDate) return "";
+  return format(subBusinessDays(parseISO(targetDate), 20), "yyyy-MM-dd");
+}
+
+/**
+ * §12 lead time: batas MP harus sudah terfulfill (sign kontrak / resmi
+ * assigned) dihitung dari tanggal demand muncul — +2 minggu (10 hari kerja)
+ * selama fs_status masih "" (default, belum diketahui) atau "Need FS";
+ * +3 minggu (15 hari kerja) begitu source pengganti diketahui tidak perlu FS.
+ */
+export function fulfillmentDeadline(targetDate: string, fsStatus: FsStatus): string {
+  const visible = demandVisibleDate(targetDate);
+  if (!visible) return "";
+  const days = fsStatus === "No Need FS" ? 15 : 10;
+  return format(addBusinessDays(parseISO(visible), days), "yyyy-MM-dd");
 }
 
 export type ContractUrgency = "red" | "orange" | "green" | "none";
