@@ -19,6 +19,7 @@ import { Calendar, ChevronLeft, ChevronRight } from "lucide-react";
 
 const WEEKDAY_LABELS = ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"];
 const PANEL_WIDTH = 264;
+const PANEL_HEIGHT = 320; // approx rendered height (6-row month), used for viewport flip
 
 /** Custom calendar dropdown replacing the native `<input type="date">` OS
  * chrome (calendar icon + dd/mm/yyyy text) that clashes with the rest of the
@@ -59,8 +60,10 @@ export function DatePicker({
     setViewMonth(selected ?? new Date());
     const rect = triggerRef.current?.getBoundingClientRect();
     if (rect) {
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const openUpward = spaceBelow < PANEL_HEIGHT + 8 && rect.top > spaceBelow;
       setPos({
-        top: rect.bottom + 4,
+        top: openUpward ? Math.max(8, rect.top - PANEL_HEIGHT - 4) : rect.bottom + 4,
         left: Math.min(rect.left, window.innerWidth - PANEL_WIDTH - 8),
       });
     }

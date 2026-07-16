@@ -84,6 +84,7 @@ function baseDemand(overrides: Partial<Demand>): Demand {
     fs_status: "",
     status: "Open",
     fulfillment_confirmed_date: "",
+    shop_confirmed_date: "",
     created_at: new Date().toISOString(),
     ...overrides,
   };
@@ -358,6 +359,35 @@ export function confirmDemandFulfillment(demandId: string, confirmedDate: string
           status: previous.status,
         });
         pushToast(`Gagal konfirmasi fulfillment: ${res.error.message}`);
+        return;
+      }
+      demandStore.refetch();
+    });
+}
+
+/**
+ * Supply-Demand: shop floor confirms the replacement candidate has actually
+ * reported for duty — separate from `confirmDemandFulfillment` (Sign
+ * Kontrak/Assigned), which only reflects the HR/admin paperwork step.
+ * Passing an empty date un-confirms it. Routed through
+ * `confirm_shop_receipt` (see supabase/migration_5.sql) so the same
+ * admin/shop-PKWT rule as replacement-mapping is enforced server-side. Does
+ * not touch `status`/`fulfillment_confirmed_date` — the granular
+ * Open/DELAY/Need Replace ASAP/Fulfilled Ontime/Fulfilled but Delay label is
+ * derived client-side (see `supplyDemandStatus` in compute.ts).
+ */
+export function confirmShopReceipt(demandId: string, confirmedDate: string): void {
+  const previous = demandStore.get(demandId);
+  if (!previous) return;
+  demandStore.update(demandId, { shop_confirmed_date: confirmedDate });
+  const supabase = createClient();
+  supabase
+    .rpc("confirm_shop_receipt", { p_demand_id: demandId, p_confirmed_date: confirmedDate || null })
+    .then((res: { error: { message: string } | null }) => {
+      if (res.error) {
+        console.error("confirm_shop_receipt failed:", res.error.message);
+        demandStore.update(demandId, { shop_confirmed_date: previous.shop_confirmed_date });
+        pushToast(`Gagal konfirmasi shop: ${res.error.message}`);
         return;
       }
       demandStore.refetch();

@@ -1,6 +1,7 @@
 // Aggregation & filtering helpers specific to Enrollment Monitoring (§6) and
 // Supply-Demand.
 import { pkwtReviewStore } from "../repo";
+import { fulfillmentDeadline, supplyDemandStatus, type SupplyStatus } from "./compute";
 import type { Demand } from "../types";
 
 /** Supply-Demand: "tanggal pemenuhan" — the target date the replacement must
@@ -9,6 +10,13 @@ import type { Demand } from "../types";
  * PKWT review date / Vokasi ended date) for PKWT Terminate / Vokasi Ended. */
 export function demandTargetDate(d: Demand): string {
   return d.fulfill_date || d.tgl_ended_outgoing || "";
+}
+
+/** Supply-Demand page's granular status column — see supplyDemandStatus. */
+export function demandGranularStatus(d: Demand): SupplyStatus {
+  const target = demandTargetDate(d);
+  const deadline = fulfillmentDeadline(target, d.fs_status);
+  return supplyDemandStatus(target, deadline, d.shop_confirmed_date);
 }
 
 export function demandStatusLabel(d: Demand): string {

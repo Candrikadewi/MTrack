@@ -168,6 +168,13 @@ export interface Demand {
    * "Fulfilled". Empty until confirmed. */
   fulfillment_confirmed_date: string;
 
+  /** Shop floor confirms the replacement has actually reported for duty —
+   * separate from `fulfillment_confirmed_date` (HR/admin contract-sign or
+   * assignment step). Empty until confirmed. Drives the granular
+   * Open/DELAY/Need Replace ASAP/Fulfilled Ontime/Fulfilled but Delay status
+   * shown on the Supply-Demand page (see `supplyDemandStatus` in compute.ts). */
+  shop_confirmed_date: string;
+
   created_at: string;
 }
 

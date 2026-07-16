@@ -11,15 +11,22 @@ import { MultiSelect } from "@/components/ui/MultiSelect";
 import { NoregInput, DateInput } from "@/components/enrollment/NoregInput";
 import { useStoreList } from "@/lib/useStore";
 import { demandStore } from "@/lib/repo";
-import { fmtDate, sisaHari, demandVisibleDate, fulfillmentDeadline } from "@/lib/engine/compute";
+import { fmtDate, sisaHari, demandVisibleDate, fulfillmentDeadline, supplyDemandStatus } from "@/lib/engine/compute";
 import {
+  demandGranularStatus,
   demandStatusLabel,
   demandTargetDate,
   deptsOfRows,
   divisionsOfRows,
   filterByDivDept,
 } from "@/lib/engine/enrollment";
-import { confirmDemandFulfillment, setDemandFulfillDate, setDemandNoReplace, setDemandReplacementByNoreg } from "@/lib/engine/actions";
+import {
+  confirmDemandFulfillment,
+  confirmShopReceipt,
+  setDemandFulfillDate,
+  setDemandNoReplace,
+  setDemandReplacementByNoreg,
+} from "@/lib/engine/actions";
 import { useRole } from "@/lib/RoleContext";
 import type { Demand, DemandCategory, ReplacementStatus } from "@/lib/types";
 
@@ -67,7 +74,7 @@ export default function SupplyDemandPage() {
   const canEditFulfillDate = role === "admin";
 
   const totalCount = monthDemands.length;
-  const fulfilledCount = monthDemands.filter((d) => d.status === "Fulfilled").length;
+  const fulfilledCount = monthDemands.filter((d) => demandGranularStatus(d).startsWith("Fulfilled")).length;
 
   return (
     <div className="space-y-6">
@@ -168,6 +175,7 @@ export default function SupplyDemandPage() {
                 <Th>Dept Pengganti</Th>
                 <Th>Status FS</Th>
                 <Th>{tab === "PKWT" ? "Sign Kontrak / Assigned" : "Konfirmasi"}</Th>
+                <Th>Shop Confirmation</Th>
                 <Th>Status</Th>
               </tr>
             </thead>
@@ -196,6 +204,36 @@ function DeadlineCell({ deadline, fulfilled }: { deadline: string; fulfilled: bo
   return <Td className={cls}>{fmtDate(deadline)}</Td>;
 }
 
+/** Shop Confirmation: checklist that marks a replacement as physically
+ * received on the shop floor, separate from the HR/admin Sign Kontrak /
+ * Assigned step. Checking it asks for the confirmation date; unchecking
+ * clears it. */
+function ShopConfirmCell({
+  value,
+  canEdit,
+  onChange,
+}: {
+  value: string;
+  canEdit: boolean;
+  onChange: (date: string) => void;
+}) {
+  const checked = Boolean(value);
+  if (!canEdit) {
+    return checked ? <span>{fmtDate(value)}</span> : <span className="text-slate-400">Belum</span>;
+  }
+  return (
+    <div className="flex items-center gap-2">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked ? format(new Date(), "yyyy-MM-dd") : "")}
+        className="h-4 w-4 shrink-0 rounded border-slate-300 text-blue-600 focus:ring-1 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-900"
+      />
+      {checked && <DateInput value={value} onCommit={onChange} />}
+    </div>
+  );
+}
+
 function SupplyDemandRow({
   demand: d,
   tab,
@@ -213,6 +251,7 @@ function SupplyDemandRow({
   const deadline = fulfillmentDeadline(target, d.fs_status);
   const isNoReplace = d.replacement_status === "No Replace";
   const hasCandidate = Boolean(d.replacement_noreg);
+  const status = supplyDemandStatus(target, deadline, d.shop_confirmed_date);
 
   return (
     <tr>
@@ -234,7 +273,7 @@ function SupplyDemandRow({
         )}
       </Td>
       <Td className="text-slate-500">{fmtDate(visible)}</Td>
-      <DeadlineCell deadline={deadline} fulfilled={d.status === "Fulfilled"} />
+      <DeadlineCell deadline={deadline} fulfilled={status.startsWith("Fulfilled")} />
 
       {tab === "PKWT" && (
         <Td>
@@ -242,9 +281,9 @@ function SupplyDemandRow({
             <Select
               value={d.replacement_status}
               onChange={(e) => {
-                const status = e.target.value as ReplacementStatus;
-                if (status === "No Replace") setDemandNoReplace(d.id, d.no_replace_reason);
-                else setDemandReplacementByNoreg(d.id, d.replacement_noreg, status);
+                const replStatus = e.target.value as ReplacementStatus;
+                if (replStatus === "No Replace") setDemandNoReplace(d.id, d.no_replace_reason);
+                else setDemandReplacementByNoreg(d.id, d.replacement_noreg, replStatus);
               }}
               className="min-w-[140px]"
             >
@@ -278,9 +317,10 @@ function SupplyDemandRow({
           <Td className="text-slate-400">-</Td>
           <Td className="text-slate-400">-</Td>
           <Td className="text-slate-400">-</Td>
+          <Td className="text-slate-400">-</Td>
         </>
       ) : tab === "PKWT" && !d.replacement_status ? (
-        <Td colSpan={5} className="text-slate-400">
+        <Td colSpan={6} className="text-slate-400">
           Pilih Status Replacement terlebih dahulu
         </Td>
       ) : (
@@ -312,10 +352,21 @@ function SupplyDemandRow({
               </div>
             )}
           </Td>
+          <Td>
+            {!hasCandidate ? (
+              <span className="text-slate-400">-</span>
+            ) : (
+              <ShopConfirmCell
+                value={d.shop_confirmed_date}
+                canEdit={canEditReplacement}
+                onChange={(v) => confirmShopReceipt(d.id, v)}
+              />
+            )}
+          </Td>
         </>
       )}
       <Td>
-        <Badge tone={statusTone(d.status)}>{d.status}</Badge>
+        <Badge tone={statusTone(status)}>{status}</Badge>
       </Td>
     </tr>
   );

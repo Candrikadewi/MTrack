@@ -107,6 +107,26 @@ export function fulfillmentDeadline(targetDate: string, fsStatus: FsStatus): str
   return format(addBusinessDays(parseISO(visible), days), "yyyy-MM-dd");
 }
 
+export type SupplyStatus = "Open" | "DELAY" | "Need Replace ASAP" | "Fulfilled Ontime" | "Fulfilled but Delay";
+
+/**
+ * Supply-Demand status ladder shown on the Supply-Demand page's Status
+ * column. Layers timing on top of the shop-floor confirmation checkbox:
+ * - confirmed on/before tanggal pemenuhan -> Fulfilled Ontime
+ * - confirmed after tanggal pemenuhan -> Fulfilled but Delay
+ * - not confirmed, past batas fulfillment -> Need Replace ASAP
+ * - not confirmed, past tanggal pemenuhan (but within batas fulfillment) -> DELAY
+ * - otherwise -> Open
+ */
+export function supplyDemandStatus(targetDate: string, deadline: string, shopConfirmedDate: string): SupplyStatus {
+  if (shopConfirmedDate) {
+    return targetDate && shopConfirmedDate > targetDate ? "Fulfilled but Delay" : "Fulfilled Ontime";
+  }
+  if (deadline && sisaHari(deadline) < 0) return "Need Replace ASAP";
+  if (targetDate && sisaHari(targetDate) < 0) return "DELAY";
+  return "Open";
+}
+
 export type ContractUrgency = "red" | "orange" | "green" | "none";
 
 /** §12: Sisa Kontrak (Util Pool) — merah ≤30 hari, oranye ≤60 hari, hijau selebihnya. */
