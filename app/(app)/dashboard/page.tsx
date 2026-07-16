@@ -10,6 +10,7 @@ import { MultiSelect } from "@/components/ui/MultiSelect";
 import { MonthBarChart } from "@/components/ui/MonthBarChart";
 import { CompositionChart } from "@/components/ui/CompositionChart";
 import { LaborTypeChart } from "@/components/ui/LaborTypeChart";
+import { DonutChart, DonutLegend } from "@/components/ui/DonutChart";
 import { Badge } from "@/components/ui/Badge";
 import { EmptyState, TableWrap, Td, Th } from "@/components/ui/Table";
 import { useStoreList } from "@/lib/useStore";
@@ -135,13 +136,14 @@ export default function DashboardPage() {
         <div>
           <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100">Dashboard</h1>
           <p className="text-sm text-slate-500 dark:text-slate-400">
-            Ringkasan kondisi manpower — read-only, mengagregasi semua modul.
+            Ringkasan kondisi manpower, read-only, mengagregasi semua modul.
           </p>
         </div>
         <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 dark:border-slate-800 dark:bg-slate-900">
           <CalendarRange size={16} className="text-slate-400" />
           <span className="text-xs font-medium text-slate-500">Bulan</span>
           <Select
+            bare
             value={refMonth}
             onChange={(e) => setRefMonth(e.target.value)}
             className="!w-auto border-none !p-0 !py-0 text-sm font-semibold shadow-none focus:ring-0"
@@ -183,7 +185,7 @@ export default function DashboardPage() {
           <MultiSelect label="Department" options={deptOptions} selected={selDepts} onChange={setSelDepts} />
         </div>
         <TotalManpowerCard total={filteredEmployees.length + vokasiActive.length} employees={filteredEmployees} />
-        <div className="mt-3 grid gap-3 sm:grid-cols-3">
+        <div className="mt-3 grid gap-3 sm:grid-cols-3 lg:grid-cols-4">
           <StatTile
             label="Permanen"
             value={permanenCount.length}
@@ -205,6 +207,28 @@ export default function DashboardPage() {
             tone="violet"
             icon={GraduationCap}
           />
+          <div className="rounded-2xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900">
+            <div className="mb-1 text-xs font-medium text-slate-500 dark:text-slate-400">Komposisi</div>
+            <div className="flex items-center gap-2">
+              <div className="h-20 w-20 shrink-0">
+                <DonutChart
+                  heightClass="h-full"
+                  data={[
+                    { key: "permanen", label: "Permanen", value: permanenCount.length, color: "#10b981" },
+                    { key: "kontrak", label: "Kontrak", value: kontrakCount.length, color: "#f59e0b" },
+                    { key: "vokasi", label: "Vokasi", value: vokasiActive.length, color: "#8b5cf6" },
+                  ]}
+                />
+              </div>
+              <DonutLegend
+                data={[
+                  { key: "permanen", label: "Permanen", value: permanenCount.length, color: "#10b981" },
+                  { key: "kontrak", label: "Kontrak", value: kontrakCount.length, color: "#f59e0b" },
+                  { key: "vokasi", label: "Vokasi", value: vokasiActive.length, color: "#8b5cf6" },
+                ]}
+              />
+            </div>
+          </div>
         </div>
       </Card>
 
@@ -504,7 +528,7 @@ function PkwtReviewChartBlock({
       <div className="space-y-4">
         <MonthBarChart data={buckets} selectedMonth={selected} onSelect={setSelected} showValueLabels />
         <div>
-          <div className="text-xs font-semibold text-slate-500">Detail — {selected}</div>
+          <div className="text-xs font-semibold text-slate-500">Detail: {selected}</div>
           <div className="mt-1 text-2xl font-bold text-slate-800 dark:text-slate-100">
             {detailItems.length} <span className="text-sm font-normal text-slate-500">orang review</span>
           </div>
@@ -555,7 +579,7 @@ function VokasiEndedChartBlock({
       <div className="space-y-4">
         <MonthBarChart data={buckets} selectedMonth={selected} onSelect={setSelected} showValueLabels />
         <div>
-          <div className="text-xs font-semibold text-slate-500">Detail — {selected}</div>
+          <div className="text-xs font-semibold text-slate-500">Detail: {selected}</div>
           <div className="mt-1 text-2xl font-bold text-slate-800 dark:text-slate-100">
             {detailItems.length} <span className="text-sm font-normal text-slate-500">ended</span>
           </div>

@@ -88,7 +88,7 @@ export function NewProjectModal({ open, onClose, project }: { open: boolean; onC
     onClose();
   }
 
-  const title = isEdit ? `Edit Project — ${project!.name}` : step === "preview" ? "Preview Project" : "+ New Project";
+  const title = isEdit ? `Edit Project: ${project!.name}` : step === "preview" ? "Preview Project" : "+ New Project";
 
   return (
     <Modal open={open} onClose={onClose} title={title} width="max-w-5xl">
@@ -226,7 +226,7 @@ export function NewProjectModal({ open, onClose, project }: { open: boolean; onC
               <Badge tone="blue">Ongoing</Badge>
             </div>
             <div className="text-xs text-slate-500">
-              {fmtDate(startDate)} – {fmtDate(endDate)}
+              {fmtDate(startDate)} - {fmtDate(endDate)}
             </div>
           </div>
 
@@ -253,7 +253,7 @@ export function NewProjectModal({ open, onClose, project }: { open: boolean; onC
             </tbody>
           </TableWrap>
           <p className="text-xs text-slate-400">
-            Total kebutuhan: {validRows().reduce((sum, r) => sum + r.qty, 0)} orang — periksa dulu sebelum register, demand akan langsung dibuat begitu di-register.
+            Total kebutuhan: {validRows().reduce((sum, r) => sum + r.qty, 0)} orang. Periksa dulu sebelum register, demand akan langsung dibuat begitu di-register.
           </p>
 
           <div className="flex justify-end gap-2 pt-2">

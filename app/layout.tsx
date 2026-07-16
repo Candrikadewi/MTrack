@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "M-TRACK — Manpower Tracking",
+  title: "M-TRACK - Manpower Tracking",
   description: "Control tower untuk kebutuhan, ketersediaan, dan pergerakan manpower.",
 };
 

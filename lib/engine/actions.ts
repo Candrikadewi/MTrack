@@ -121,7 +121,7 @@ export function createDemandsFromTaktRow(takt: TaktCase, row: ProjectMpNeedRow):
     row,
     "TaktUp",
     takt.id,
-    `Takt Up ${takt.plant} — ${row.division} — ${row.dept}`
+    `Takt Up ${takt.plant} - ${row.division} - ${row.dept}`
   );
 }
 

@@ -108,7 +108,7 @@ export function UploadCenterClient() {
         <div>
           <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100">Upload Center</h1>
           <p className="text-sm text-slate-500 dark:text-slate-400">
-            Sumber data mentah — ZPAR (snapshot bulanan) & Vokasi (database kumulatif).
+            Sumber data mentah: ZPAR (snapshot bulanan) & Vokasi (database kumulatif).
           </p>
         </div>
         <div className="flex gap-2">
@@ -188,7 +188,7 @@ export function UploadCenterClient() {
         </div>
       </Card>
 
-      <Card title="Upload Vokasi (Database Kumulatif)" subtitle="Compiling — setiap upload menambah, tidak menimpa">
+      <Card title="Upload Vokasi (Database Kumulatif)" subtitle="Compiling: setiap upload menambah, tidak menimpa">
         <div className="grid gap-4 sm:grid-cols-4">
           <Field label="Batch (nama/nomor)">
             <Input value={vokasiBatch} onChange={(e) => setVokasiBatch(e.target.value)} placeholder="Batch 2026-A" />

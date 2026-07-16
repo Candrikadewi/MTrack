@@ -64,7 +64,7 @@ export function HandoverClient() {
           {forms.map((f) => (
             <Card
               key={f.id}
-              title={`${f.dept} — ${f.period}`}
+              title={`${f.dept}: ${f.period}`}
               action={
                 <div className="flex items-center gap-2">
                   <Badge tone={statusTone(f.status)}>{f.status}</Badge>

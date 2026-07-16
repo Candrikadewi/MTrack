@@ -172,7 +172,7 @@ export function TaktDownModal({ open, onClose }: { open: boolean; onClose: () =>
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="Takt Down — Lepas Personil" width="max-w-5xl">
+    <Modal open={open} onClose={onClose} title="Takt Down: Lepas Personil" width="max-w-5xl">
       <div className="space-y-4">
         <div className="grid grid-cols-4 gap-4">
           <Field label="Plant">
@@ -339,7 +339,7 @@ export function TaktDownModal({ open, onClose }: { open: boolean; onClose: () =>
                     className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-800"
                   >
                     <span>
-                      {c.noreg} — {c.nama} <span className="text-slate-400">({c.dept})</span>
+                      {c.noreg} - {c.nama} <span className="text-slate-400">({c.dept})</span>
                     </span>
                     <span className="text-xs text-slate-400">{c.type}</span>
                   </button>
@@ -361,7 +361,7 @@ export function TaktDownModal({ open, onClose }: { open: boolean; onClose: () =>
                   className="flex items-center justify-between rounded-lg border border-slate-100 px-3 py-1.5 text-sm dark:border-slate-800"
                 >
                   <span>
-                    {s.noreg} — {s.nama} ({s.type}, {s.dept})
+                    {s.noreg} - {s.nama} ({s.type}, {s.dept})
                   </span>
                   <button onClick={() => removeCandidate(s.noreg)} className="text-red-500 hover:text-red-700">
                     Hapus

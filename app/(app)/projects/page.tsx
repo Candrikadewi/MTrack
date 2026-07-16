@@ -11,7 +11,14 @@ import { demandStore, projectStore } from "@/lib/repo";
 import { autoProjectFinishCheck, projectSuppliedCount } from "@/lib/engine/actions";
 import { fmtDate } from "@/lib/engine/compute";
 import { useRole } from "@/lib/RoleContext";
-import type { Project } from "@/lib/types";
+import type { MpStatusKategori, Project } from "@/lib/types";
+
+const MP_STATUS_TONE: Record<MpStatusKategori, "green" | "amber" | "violet"> = {
+  Permanen: "green",
+  Vokasi: "violet",
+  PKWT: "amber",
+  AKTI: "amber",
+};
 
 export default function ProjectsPage() {
   const role = useRole();
@@ -33,7 +40,7 @@ export default function ProjectsPage() {
         <div>
           <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100">Project Monitoring</h1>
           <p className="text-sm text-slate-500 dark:text-slate-400">
-            Mendefinisikan kebutuhan MP — assignment kandidat dilakukan di Enrollment Monitoring.
+            Mendefinisikan kebutuhan MP. Candidate mapping dilakukan di menu Supply-Demand.
           </p>
         </div>
         {role === "admin" && (
@@ -60,7 +67,7 @@ export default function ProjectsPage() {
                       <Badge tone={statusTone(p.status)}>{p.status}</Badge>
                     </div>
                     <div className="text-xs text-slate-500">
-                      {fmtDate(p.start_date)} – {fmtDate(p.end_date)}
+                      {fmtDate(p.start_date)} - {fmtDate(p.end_date)}
                     </div>
                   </div>
                   <div className="flex items-center gap-4 text-sm">
@@ -102,7 +109,9 @@ export default function ProjectsPage() {
                           <tr key={r.id}>
                             <Td>{r.division}</Td>
                             <Td>{r.dept}</Td>
-                            <Td>{r.status_mp}</Td>
+                            <Td>
+                              <Badge tone={MP_STATUS_TONE[r.status_mp]}>{r.status_mp}</Badge>
+                            </Td>
                             <Td>{r.qty}</Td>
                             <Td>{fmtDate(r.fulfill_date)}</Td>
                             <Td>

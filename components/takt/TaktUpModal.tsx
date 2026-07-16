@@ -40,7 +40,7 @@ export function TaktUpModal({ open, onClose }: { open: boolean; onClose: () => v
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="Takt Up — Tambah Kebutuhan MP" width="max-w-4xl">
+    <Modal open={open} onClose={onClose} title="Takt Up: Tambah Kebutuhan MP" width="max-w-4xl">
       <div className="space-y-4">
         <div className="grid grid-cols-4 gap-4">
           <Field label="Plant">

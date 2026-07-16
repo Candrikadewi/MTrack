@@ -5,6 +5,7 @@ import { Card } from "@/components/ui/Card";
 import { FullWidthTabs } from "@/components/ui/Tabs";
 import { Badge, statusTone } from "@/components/ui/Badge";
 import { EmptyState, TableWrap, Td, Th } from "@/components/ui/Table";
+import { DonutChart } from "@/components/ui/DonutChart";
 import { Select } from "@/components/ui/Form";
 import { MultiSelect } from "@/components/ui/MultiSelect";
 import { NoregInput, DateInput } from "@/components/enrollment/NoregInput";
@@ -75,12 +76,13 @@ export default function SupplyDemandPage() {
           <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100">Supply-Demand</h1>
           <p className="text-sm text-slate-500 dark:text-slate-400">
             Semua demand (PKWT Terminate/Vokasi Ended/GST/Unfit/Resign/Pension dari Enrollment, Project, Takt Up)
-            dan candidate mapping — satu tempat untuk mengisi supply.
+            dan candidate mapping, satu tempat untuk mengisi supply.
           </p>
         </div>
         <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 dark:border-slate-800 dark:bg-slate-900">
           <span className="text-xs font-medium text-slate-500">Bulan</span>
           <Select
+            bare
             value={month}
             onChange={(e) => {
               setMonth(e.target.value);
@@ -112,8 +114,8 @@ export default function SupplyDemandPage() {
       />
 
       <Card
-        title={`Demand Pool — ${format(new Date(`${month}-01T00:00:00`), "MMMM yyyy")}`}
-        subtitle="Demand muncul H-4 minggu (hari kerja) dari tanggal pemenuhan — bulan yang dipilih di atas adalah bulan demand ini actionable, bukan bulan orangnya hadir."
+        title={`Demand Pool: ${format(new Date(`${month}-01T00:00:00`), "MMMM yyyy")}`}
+        subtitle="Demand muncul H-4 minggu (hari kerja) dari tanggal pemenuhan. Bulan yang dipilih di atas adalah bulan demand ini actionable, bukan bulan orangnya hadir."
         action={
           <div className="flex gap-2">
             <MultiSelect
@@ -130,8 +132,22 @@ export default function SupplyDemandPage() {
           </div>
         }
       >
-        <div className="mb-3 text-sm text-slate-500 dark:text-slate-400">
-          {fulfilledCount}/{totalCount} MP fulfilled bulan ini.
+        <div className="mb-4 flex items-center gap-3">
+          <div className="h-14 w-14 shrink-0">
+            <DonutChart
+              heightClass="h-full"
+              data={[
+                { key: "fulfilled", label: "Fulfilled", value: fulfilledCount, color: "#2563eb" },
+                { key: "open", label: "Open", value: Math.max(totalCount - fulfilledCount, 0), color: "#94a3b8" },
+              ]}
+            />
+          </div>
+          <div className="text-sm text-slate-500 dark:text-slate-400">
+            <span className="font-semibold text-slate-800 dark:text-slate-100">
+              {fulfilledCount}/{totalCount}
+            </span>{" "}
+            MP fulfilled bulan ini.
+          </div>
         </div>
         {filteredDemands.length === 0 ? (
           <EmptyState text="Tidak ada demand pada bulan/filter ini." />

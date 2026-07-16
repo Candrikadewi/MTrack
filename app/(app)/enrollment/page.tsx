@@ -4,7 +4,7 @@ import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Input, Select } from "@/components/ui/Form";
 import { FullWidthTabs } from "@/components/ui/Tabs";
-import { Badge } from "@/components/ui/Badge";
+import { Badge, statusTone } from "@/components/ui/Badge";
 import { EmptyState, TableWrap, Td, Th } from "@/components/ui/Table";
 import { ManualDemandModal } from "@/components/enrollment/ManualDemandModal";
 import { MultiSelect } from "@/components/ui/MultiSelect";
@@ -31,7 +31,7 @@ export default function EnrollmentPage() {
         <div>
           <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100">Enrollment Monitoring</h1>
           <p className="text-sm text-slate-500 dark:text-slate-400">
-            Tempat identifikasi demand — review PKWT (Continue/Terminate), Vokasi yang perlu replace saat ended, dan
+            Tempat identifikasi demand: review PKWT (Continue/Terminate), Vokasi yang perlu replace saat ended, dan
             demand tambahan (GST/Unfit/Resign/Pension). Candidate mapping & fulfillment ada di menu Supply-Demand.
           </p>
         </div>
@@ -136,7 +136,9 @@ function ReviewSection({
                 <tr key={r.id}>
                   <Td>{r.noreg}</Td>
                   <Td>{r.nama}</Td>
-                  <Td>{r.status_kontrak}</Td>
+                  <Td>
+                    <Badge tone={r.status_kontrak === "Permanen" ? "green" : "amber"}>{r.status_kontrak}</Badge>
+                  </Td>
                   <Td>{r.div}</Td>
                   <Td>{r.dept}</Td>
                   <Td>{fmtDate(r.tgl_masuk)}</Td>
@@ -153,8 +155,10 @@ function ReviewSection({
                         <option value="Continue">Continue</option>
                         <option value="Terminate">Terminate</option>
                       </Select>
+                    ) : r.review_result ? (
+                      <Badge tone={statusTone(r.review_result)}>{r.review_result}</Badge>
                     ) : (
-                      r.review_result || "-"
+                      "-"
                     )}
                   </Td>
                 </tr>
@@ -189,7 +193,7 @@ function VokasiEndedSection({ period, vokasi }: { period: string; vokasi: Vokasi
   return (
     <Card
       title="Vokasi Ended"
-      subtitle={`${filtered.length} vokasi ended pada periode ini — perlu replace. Isi kandidat di menu Supply-Demand.`}
+      subtitle={`${filtered.length} vokasi ended pada periode ini, perlu replace. Isi kandidat di menu Supply-Demand.`}
       action={
         <div className="flex gap-2">
           <MultiSelect

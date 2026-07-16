@@ -29,7 +29,7 @@ export default function UtilPoolPage() {
       <div>
         <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100">Utilization Pool</h1>
         <p className="text-sm text-slate-500 dark:text-slate-400">
-          Personil sementara tidak bertugas — dari Project Finish atau Takt Down.
+          Personil sementara tidak bertugas, dari Project Finish atau Takt Down.
         </p>
       </div>
 
@@ -60,7 +60,7 @@ export default function UtilPoolPage() {
                     <Td>{e.nama}</Td>
                     <Td>{e.type}</Td>
                     <Td>
-                      {e.source} — {e.source_label}
+                      {e.source}: {e.source_label}
                     </Td>
                     <Td>{e.prev_dept}</Td>
                     <Td>{fmtDate(e.entered_pool_date)}</Td>
