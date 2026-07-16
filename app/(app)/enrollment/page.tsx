@@ -269,7 +269,7 @@ function KontrakDetail({
         {filteredReviews.length === 0 ? (
           <EmptyState text="Tidak ada PKWT jatuh tempo review pada periode/filter ini." />
         ) : (
-          <TableWrap>
+          <TableWrap maxHeightClass="max-h-[520px]">
             <thead>
               <tr>
                 <Th>Noreg</Th>

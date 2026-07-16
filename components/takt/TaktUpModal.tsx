@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Modal } from "@/components/ui/Modal";
 import { Field, Input, Select } from "@/components/ui/Form";
 import { Button } from "@/components/ui/Button";
+import { X } from "lucide-react";
 import { createTaktUp } from "@/lib/engine/actions";
 import type { MpStatusKategori, Plant, ProjectMpNeedRow } from "@/lib/types";
 
@@ -20,6 +21,10 @@ export function TaktUpModal({ open, onClose }: { open: boolean; onClose: () => v
     setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
   }
 
+  function removeRow(idx: number) {
+    setRows((prev) => prev.filter((_, i) => i !== idx));
+  }
+
   function reset() {
     setRows([emptyRow()]);
     setTaktBefore(0);
@@ -35,7 +40,7 @@ export function TaktUpModal({ open, onClose }: { open: boolean; onClose: () => v
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="Takt Up — Tambah Kebutuhan MP" width="max-w-2xl">
+    <Modal open={open} onClose={onClose} title="Takt Up — Tambah Kebutuhan MP" width="max-w-4xl">
       <div className="space-y-4">
         <div className="grid grid-cols-4 gap-4">
           <Field label="Plant">
@@ -47,11 +52,21 @@ export function TaktUpModal({ open, onClose }: { open: boolean; onClose: () => v
           <Field label="Tanggal">
             <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
           </Field>
-          <Field label="Takt Before (s)">
-            <Input type="number" value={taktBefore} onChange={(e) => setTaktBefore(Number(e.target.value))} />
+          <Field label="Takt Before (menit)">
+            <Input
+              type="number"
+              step="0.01"
+              value={taktBefore}
+              onChange={(e) => setTaktBefore(Number(e.target.value))}
+            />
           </Field>
-          <Field label="Takt After (s)">
-            <Input type="number" value={taktAfter} onChange={(e) => setTaktAfter(Number(e.target.value))} />
+          <Field label="Takt After (menit)">
+            <Input
+              type="number"
+              step="0.01"
+              value={taktAfter}
+              onChange={(e) => setTaktAfter(Number(e.target.value))}
+            />
           </Field>
         </div>
 
@@ -64,42 +79,58 @@ export function TaktUpModal({ open, onClose }: { open: boolean; onClose: () => v
           </div>
           <div className="space-y-2">
             {rows.map((row, idx) => (
-              <div key={idx} className="grid grid-cols-12 gap-2 rounded-lg border border-slate-100 p-2 dark:border-slate-800">
-                <Input
-                  className="col-span-3"
-                  placeholder="Divisi"
-                  value={row.division}
-                  onChange={(e) => updateRow(idx, { division: e.target.value })}
-                />
-                <Input
-                  className="col-span-3"
-                  placeholder="Department"
-                  value={row.dept}
-                  onChange={(e) => updateRow(idx, { dept: e.target.value })}
-                />
-                <Select
-                  className="col-span-2"
-                  value={row.status_mp}
-                  onChange={(e) => updateRow(idx, { status_mp: e.target.value as MpStatusKategori })}
-                >
-                  <option value="Vokasi">Vokasi</option>
-                  <option value="PKWT">PKWT</option>
-                  <option value="Permanen">Permanen</option>
-                  <option value="AKTI">AKTI</option>
-                </Select>
-                <Input
-                  type="number"
-                  min={1}
-                  className="col-span-1"
-                  value={row.qty}
-                  onChange={(e) => updateRow(idx, { qty: Number(e.target.value) })}
-                />
-                <Input
-                  type="date"
-                  className="col-span-3"
-                  value={row.fulfill_date}
-                  onChange={(e) => updateRow(idx, { fulfill_date: e.target.value })}
-                />
+              <div
+                key={idx}
+                className="flex flex-wrap items-end gap-2 rounded-lg border border-slate-100 p-2 dark:border-slate-800"
+              >
+                <div className="min-w-[150px] flex-1">
+                  <span className="mb-1 block text-[11px] font-medium text-slate-500">Divisi</span>
+                  <Input value={row.division} onChange={(e) => updateRow(idx, { division: e.target.value })} />
+                </div>
+                <div className="min-w-[150px] flex-1">
+                  <span className="mb-1 block text-[11px] font-medium text-slate-500">Department</span>
+                  <Input value={row.dept} onChange={(e) => updateRow(idx, { dept: e.target.value })} />
+                </div>
+                <div className="w-32">
+                  <span className="mb-1 block text-[11px] font-medium text-slate-500">Status MP</span>
+                  <Select
+                    value={row.status_mp}
+                    onChange={(e) => updateRow(idx, { status_mp: e.target.value as MpStatusKategori })}
+                  >
+                    <option value="Vokasi">Vokasi</option>
+                    <option value="PKWT">PKWT</option>
+                    <option value="Permanen">Permanen</option>
+                    <option value="AKTI">AKTI</option>
+                  </Select>
+                </div>
+                <div className="w-24">
+                  <span className="mb-1 block text-[11px] font-medium text-slate-500">Qty</span>
+                  <Input
+                    type="number"
+                    min={1}
+                    className="text-center text-base font-semibold"
+                    value={row.qty}
+                    onChange={(e) => updateRow(idx, { qty: Number(e.target.value) })}
+                  />
+                </div>
+                <div className="min-w-[160px]">
+                  <span className="mb-1 block text-[11px] font-medium text-slate-500">Tanggal Pemenuhan</span>
+                  <Input
+                    type="date"
+                    value={row.fulfill_date}
+                    onChange={(e) => updateRow(idx, { fulfill_date: e.target.value })}
+                  />
+                </div>
+                {rows.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => removeRow(idx)}
+                    className="mb-1.5 rounded-md p-2 text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950"
+                    aria-label="Hapus baris"
+                  >
+                    <X size={16} />
+                  </button>
+                )}
               </div>
             ))}
           </div>

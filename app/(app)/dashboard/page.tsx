@@ -537,7 +537,7 @@ function TaktSummaryBlock({
                 <div className="flex items-center justify-between text-xs">
                   <span className="text-slate-500">Takt Saat Ini ({current.date})</span>
                   <span className="font-semibold text-slate-800 dark:text-slate-100">
-                    {current.takt_after}s{" "}
+                    {current.takt_after} menit{" "}
                     <span className={taktMpDelta(current) >= 0 ? "text-emerald-600" : "text-rose-600"}>
                       ({taktMpDelta(current) >= 0 ? "+" : ""}
                       {taktMpDelta(current)} MP)
@@ -554,7 +554,7 @@ function TaktSummaryBlock({
                     <div className="flex items-center justify-between">
                       <span className="text-slate-500">Next Takt Time Prep</span>
                       <span className="font-semibold text-slate-800 dark:text-slate-100">
-                        {next.takt_after}s · mulai {next.date}
+                        {next.takt_after} menit · mulai {next.date}
                       </span>
                     </div>
                     <div className="mt-1 flex items-center justify-between">

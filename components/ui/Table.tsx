@@ -1,9 +1,14 @@
 import type { ReactNode } from "react";
 
-export function TableWrap({ children }: { children: ReactNode }) {
+export function TableWrap({ children, maxHeightClass = "" }: { children: ReactNode; maxHeightClass?: string }) {
+  const scrollable = Boolean(maxHeightClass);
   return (
-    <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800">
-      <table className="w-full min-w-max border-collapse text-sm [&_tbody_tr:hover]:bg-slate-50 dark:[&_tbody_tr:hover]:bg-slate-800/40 [&_tbody_tr:nth-child(even)]:bg-slate-50/60 dark:[&_tbody_tr:nth-child(even)]:bg-slate-800/20">
+    <div
+      className={`overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800 ${scrollable ? `${maxHeightClass} overflow-y-auto` : ""}`}
+    >
+      <table
+        className={`w-full min-w-max border-collapse text-sm [&_tbody_tr:hover]:bg-slate-50 dark:[&_tbody_tr:hover]:bg-slate-800/40 [&_tbody_tr:nth-child(even)]:bg-slate-50/60 dark:[&_tbody_tr:nth-child(even)]:bg-slate-800/20 ${scrollable ? "[&_thead_th]:sticky [&_thead_th]:top-0 [&_thead_th]:z-10" : ""}`}
+      >
         {children}
       </table>
     </div>

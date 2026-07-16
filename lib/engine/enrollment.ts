@@ -12,7 +12,13 @@ export function relevantMonth(d: Demand): string {
 }
 
 export function demandsForTabAndMonth(demands: Demand[], category: DemandCategory, month: string): Demand[] {
-  return demands.filter((d) => d.category === category && relevantMonth(d) === month);
+  // Sorted explicitly by created_at — Supabase's select("*") doesn't
+  // guarantee row order, and Store.refetch() (used after replacement RPCs)
+  // re-pulls the whole table, so without this rows visibly reshuffle every
+  // time an edit triggers a refetch.
+  return demands
+    .filter((d) => d.category === category && relevantMonth(d) === month)
+    .sort((a, b) => a.created_at.localeCompare(b.created_at));
 }
 
 export interface EnrollmentSummary {
@@ -58,7 +64,7 @@ export function computeEnrollmentSummary(monthDemands: Demand[]): EnrollmentSumm
 export function demandStatusLabel(d: Demand): string {
   if (d.origin_type === "PkwtTerminate") {
     const review = pkwtReviewStore.get(d.origin_ref);
-    if (review) return review.status_kontrak;
+    return review ? review.status_kontrak : "PKWT Terminate";
   }
   const labels: Record<string, string> = {
     Project: "Project",

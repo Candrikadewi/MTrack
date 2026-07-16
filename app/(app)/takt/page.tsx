@@ -70,8 +70,8 @@ export default function TaktPage() {
                     <Td>
                       <Badge tone={isUp ? "blue" : "violet"}>{isUp ? "Takt Up" : "Takt Down"}</Badge>
                     </Td>
-                    <Td>{c.takt_before}s</Td>
-                    <Td>{c.takt_after}s</Td>
+                    <Td>{c.takt_before} menit</Td>
+                    <Td>{c.takt_after} menit</Td>
                     <Td>
                       {isUp
                         ? `${c.demand_ids.length} demand dibuat`

@@ -91,7 +91,7 @@ export function NewProjectModal({ open, onClose, project }: { open: boolean; onC
   const title = isEdit ? `Edit Project — ${project!.name}` : step === "preview" ? "Preview Project" : "+ New Project";
 
   return (
-    <Modal open={open} onClose={onClose} title={title} width="max-w-3xl">
+    <Modal open={open} onClose={onClose} title={title} width="max-w-5xl">
       {step === "form" || isEdit ? (
         <div className="space-y-4">
           <div className="grid grid-cols-3 gap-4">
