@@ -1,21 +1,22 @@
 // Aggregation & filtering helpers specific to Enrollment Monitoring (§6) and
 // Supply-Demand.
-import { format, parseISO, subDays } from "date-fns";
+import { format, parseISO, subBusinessDays } from "date-fns";
 import { pkwtReviewStore } from "../repo";
 import { fulfillmentDeadline, supplyDemandStatus, type SupplyStatus } from "./compute";
 import type { Demand, DemandCategory } from "../types";
 
 /** Supply-Demand: "Arrival to Shop" — the target date the replacement must
  * be active/present. `fulfill_date` is the shop-arrival date once explicitly
- * set (for any origin, and always for Project/Takt Up). Before that:
- * - Vokasi Ended (regular enrollment, not a manual/additional demand)
- *   defaults to 2 weeks before the outgoing person's vokasi-ended date, so
- *   there's runway to onboard the replacement before the seat is vacated.
- * - PKWT Terminate falls back to the review date itself. */
+ * set (for any origin, and always for Project/Takt Up). Before that, both
+ * Vokasi Ended and PKWT Terminate (regular enrollment, not a manual/
+ * additional demand) default to 2 weeks (10 hari kerja) before the outgoing
+ * person's actual end date, so there's runway to onboard/train the
+ * replacement before the seat is vacated — matching the shop-training
+ * overlap the real handover needs. */
 export function demandTargetDate(d: Demand): string {
   if (d.fulfill_date) return d.fulfill_date;
-  if (d.origin_type === "VokasiEnded" && d.tgl_ended_outgoing) {
-    return format(subDays(parseISO(d.tgl_ended_outgoing), 14), "yyyy-MM-dd");
+  if ((d.origin_type === "VokasiEnded" || d.origin_type === "PkwtTerminate") && d.tgl_ended_outgoing) {
+    return format(subBusinessDays(parseISO(d.tgl_ended_outgoing), 10), "yyyy-MM-dd");
   }
   return d.tgl_ended_outgoing || "";
 }

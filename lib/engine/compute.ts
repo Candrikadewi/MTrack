@@ -107,6 +107,26 @@ export function fulfillmentDeadline(targetDate: string, fsStatus: FsStatus): str
   return format(addBusinessDays(parseISO(visible), days), "yyyy-MM-dd");
 }
 
+/**
+ * §12 lead time (Enrollment, PKWT): the "Need to Review" stage that precedes
+ * a demand even existing. `tglReview` is the PKWT review due date. Mirrors
+ * the demand-side chain (H-2 minggu / 10 hari kerja per stage) so a review
+ * left unfilled surfaces with the same runway as everything downstream of
+ * it — reminder appears H-4 minggu before the review-fill deadline, which
+ * itself lands exactly on demandVisibleDate of the eventual Arrival to Shop
+ * (tglReview - 10 hari kerja), so a filled-on-time review flows straight
+ * into an already-visible demand with no gap.
+ */
+export function reviewReminderDate(tglReview: string): string {
+  if (!tglReview) return "";
+  return format(subBusinessDays(parseISO(tglReview), 40), "yyyy-MM-dd");
+}
+
+export function reviewFillDeadline(tglReview: string): string {
+  if (!tglReview) return "";
+  return format(subBusinessDays(parseISO(tglReview), 30), "yyyy-MM-dd");
+}
+
 export type SupplyStatus = "Open" | "DELAY" | "Need Replace ASAP" | "Fulfilled Ontime" | "Fulfilled but Delay";
 
 /**

@@ -1,8 +1,9 @@
 "use client";
 import { useMemo } from "react";
+import Link from "next/link";
 import { addMonths, endOfMonth, format } from "date-fns";
 import { useSessionState } from "@/lib/useSessionState";
-import { CalendarRange, Users2, UserCheck, FileText, GraduationCap } from "lucide-react";
+import { CalendarRange, CheckCircle2, ClipboardList, Users2, UserCheck, FileText, GraduationCap, HardHat } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { StatTile, ProgressBar } from "@/components/ui/StatTile";
 import { Select } from "@/components/ui/Form";
@@ -16,6 +17,8 @@ import { useStoreList } from "@/lib/useStore";
 import { demandStore, pkwtReviewStore, projectStore, taktStore, utilPoolStore, vokasiStore, zparStore } from "@/lib/repo";
 import {
   currentMonthKey,
+  demandsNeedingCandidate,
+  demandsNeedingShopConfirm,
   demandSupplyRows,
   deptsOfAny,
   directorates,
@@ -26,6 +29,9 @@ import {
   manpowerMovementByFiscalYear,
   monthBuckets,
   positionBreakdown,
+  reviewsNeedingAction,
+  type ActionItem,
+  type ActionKind,
   type DemandSupplyRow,
   type MovementStatus,
 } from "@/lib/engine/dashboard";
@@ -156,6 +162,9 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      {/* 0. Action Needed */}
+      <ActionNeededBlock reviews={reviews} demands={demands} />
+
       {/* 1. Total Manpower & Status */}
       <Card
         title="Total Manpower & Status"
@@ -235,6 +244,82 @@ export default function DashboardPage() {
         <TaktSummaryBlock taktCases={taktCases} demands={demands} utilPool={utilPool} refMonth={refMonth} />
       </div>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 0. Action Needed — cross-stage worklist (review fill -> candidate sign ->
+// shop confirm), each item due or overdue within the next 7 days.
+// ---------------------------------------------------------------------------
+
+const ACTION_KIND_ICON: Record<ActionKind, typeof ClipboardList> = {
+  review: ClipboardList,
+  candidate: Users2,
+  shop_confirm: HardHat,
+};
+
+const ACTION_LIST_CAP = 8;
+
+function ActionNeededBlock({ reviews, demands }: { reviews: PkwtReview[]; demands: Demand[] }) {
+  const items = useMemo(
+    () =>
+      [...reviewsNeedingAction(reviews), ...demandsNeedingCandidate(demands), ...demandsNeedingShopConfirm(demands)].sort(
+        (a, b) => a.daysRemaining - b.daysRemaining
+      ),
+    [reviews, demands]
+  );
+  const shown = items.slice(0, ACTION_LIST_CAP);
+  const hiddenCount = items.length - shown.length;
+
+  return (
+    <Card title="Action Needed" subtitle="Tahap review, candidate mapping, dan shop confirmation yang jatuh tempo dalam 7 hari.">
+      {items.length === 0 ? (
+        <div className="flex items-center gap-2 py-2 text-sm text-emerald-600 dark:text-emerald-400">
+          <CheckCircle2 size={16} /> Semua tahap on-track, tidak ada yang jatuh tempo dalam 7 hari ke depan.
+        </div>
+      ) : (
+        <>
+          <div className="divide-y divide-slate-100 dark:divide-slate-800">
+            {shown.map((item) => (
+              <ActionRow key={`${item.kind}-${item.id}`} item={item} />
+            ))}
+          </div>
+          {hiddenCount > 0 && (
+            <p className="pt-2 text-xs text-slate-400">
+              {`+${hiddenCount} lainnya`} — cek Enrollment Monitoring &amp; Demand Pool untuk daftar lengkap.
+            </p>
+          )}
+        </>
+      )}
+    </Card>
+  );
+}
+
+function ActionRow({ item }: { item: ActionItem }) {
+  const Icon = ACTION_KIND_ICON[item.kind];
+  const overdue = item.daysRemaining < 0;
+  return (
+    <Link
+      href={item.href}
+      className="flex items-center gap-3 py-2.5 text-sm transition-colors hover:bg-slate-50 dark:hover:bg-slate-900/60"
+    >
+      <div
+        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
+          overdue ? "bg-red-50 text-red-600 dark:bg-red-950 dark:text-red-400" : "bg-amber-50 text-amber-600 dark:bg-amber-950 dark:text-amber-400"
+        }`}
+      >
+        <Icon size={15} />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="truncate font-medium text-slate-800 dark:text-slate-100">
+          {item.nama} <span className="font-normal text-slate-400">({item.noreg})</span>
+        </div>
+        <div className="truncate text-xs text-slate-500 dark:text-slate-400">
+          {item.label} · {item.dept}
+        </div>
+      </div>
+      <Badge tone={overdue ? "red" : "amber"}>{overdue ? `Telat ${Math.abs(item.daysRemaining)}h` : `${item.daysRemaining}h lagi`}</Badge>
+    </Link>
   );
 }
 

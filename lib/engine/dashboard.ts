@@ -1,8 +1,10 @@
 // Aggregation helpers for the Dashboard — pure functions over the raw
 // stores, read-only per MTRACK_SPEC.md §5 / §11.
 import { addMonths, endOfMonth, format, subMonths } from "date-fns";
+import { fulfillmentDeadline, reviewFillDeadline, sisaHari } from "./compute";
+import { demandTargetDate } from "./enrollment";
 import { POSISI_STRUKTURAL_GROUPS } from "../types";
-import type { Demand, DemandCategory, DemandOriginType, EmployeeRecord, VokasiRecord } from "../types";
+import type { Demand, DemandCategory, DemandOriginType, EmployeeRecord, PkwtReview, VokasiRecord } from "../types";
 
 export function directorates(employees: EmployeeRecord[]): string[] {
   return Array.from(new Set(employees.map((e) => e.directorat))).sort();
@@ -279,6 +281,104 @@ export function demandSupplyRows(demands: Demand[], category: DemandCategory): D
   return Array.from(counts.entries())
     .map(([reason, v]) => ({ reason, demand: v.demand, supply: v.supply, percent: v.demand ? (v.supply / v.demand) * 100 : 0 }))
     .sort((a, b) => b.demand - a.demand);
+}
+
+// ---------------------------------------------------------------------------
+// Action Needed (Dashboard) — cross-stage worklist surfacing what's overdue
+// or due soon across the PKWT enrollment -> demand -> fulfillment chain, so
+// no single stage silently slips. See MTRACK_SPEC.md §12 lead-time chain.
+// ---------------------------------------------------------------------------
+
+const ACTION_WINDOW_DAYS = 7;
+
+export type ActionKind = "review" | "candidate" | "shop_confirm";
+
+export interface ActionItem {
+  id: string;
+  noreg: string;
+  nama: string;
+  dept: string;
+  kind: ActionKind;
+  label: string;
+  dueDate: string;
+  daysRemaining: number;
+  href: string;
+}
+
+function withinActionWindow(dueDate: string): boolean {
+  return Boolean(dueDate) && sisaHari(dueDate) <= ACTION_WINDOW_DAYS;
+}
+
+/** Stage 1: PKWT reviews not yet filled (Continue/Terminate), due or overdue
+ * for their fill deadline (tgl_review - 30 hari kerja). */
+export function reviewsNeedingAction(reviews: PkwtReview[]): ActionItem[] {
+  return reviews
+    .filter((r) => r.review_result === "")
+    .map((r): ActionItem => {
+      const dueDate = reviewFillDeadline(r.tgl_review);
+      return {
+        id: r.id,
+        noreg: r.noreg,
+        nama: r.nama,
+        dept: r.dept,
+        kind: "review",
+        label: "Isi review PKWT",
+        dueDate,
+        daysRemaining: sisaHari(dueDate),
+        href: "/enrollment",
+      };
+    })
+    .filter((item) => withinActionWindow(item.dueDate))
+    .sort((a, b) => a.daysRemaining - b.daysRemaining);
+}
+
+/** Stage 2: demands not yet signed/assigned (no Source chosen, no candidate
+ * mapped, or mapped but not yet confirmed) — excludes No Replace, which
+ * deliberately never gets a candidate. Due at the fulfillment deadline
+ * (Due Date Sign Contract / Assigned). */
+export function demandsNeedingCandidate(demands: Demand[]): ActionItem[] {
+  return demands
+    .filter((d) => d.replacement_status !== "No Replace" && !d.fulfillment_confirmed_date)
+    .map((d): ActionItem => {
+      const target = demandTargetDate(d);
+      const dueDate = fulfillmentDeadline(target, d.fs_status);
+      return {
+        id: d.id,
+        noreg: d.outgoing_noreg || d.outgoing_label,
+        nama: d.outgoing_nama || d.outgoing_label,
+        dept: d.dept,
+        kind: "candidate",
+        label: "Cari & sign kandidat pengganti",
+        dueDate,
+        daysRemaining: sisaHari(dueDate),
+        href: "/supply-demand",
+      };
+    })
+    .filter((item) => withinActionWindow(item.dueDate))
+    .sort((a, b) => a.daysRemaining - b.daysRemaining);
+}
+
+/** Stage 3: candidate already signed/assigned but the shop hasn't confirmed
+ * receipt yet. Due at Arrival to Shop itself. */
+export function demandsNeedingShopConfirm(demands: Demand[]): ActionItem[] {
+  return demands
+    .filter((d) => d.fulfillment_confirmed_date && !d.shop_confirmed_date)
+    .map((d): ActionItem => {
+      const dueDate = demandTargetDate(d);
+      return {
+        id: d.id,
+        noreg: d.replacement_noreg,
+        nama: d.replacement_nama || d.replacement_noreg,
+        dept: d.dept,
+        kind: "shop_confirm",
+        label: "Konfirmasi kedatangan di shop",
+        dueDate,
+        daysRemaining: sisaHari(dueDate),
+        href: "/supply-demand",
+      };
+    })
+    .filter((item) => withinActionWindow(item.dueDate))
+    .sort((a, b) => a.daysRemaining - b.daysRemaining);
 }
 
 export { subMonths };
