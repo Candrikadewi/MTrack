@@ -144,6 +144,11 @@ export function ensureVokasiEndedDemands(): void {
         dept: v.dept,
         tgl_masuk_outgoing: v.tgl_masuk,
         tgl_ended_outgoing: v.tgl_ended,
+        // Regular enrollment default: most vokasi seats get backfilled by a
+        // fresh vokasi intake, so pre-select the Source rather than forcing
+        // every row through the picker — still changeable to MP Excess/Back
+        // Up/No Replace on the Supply-Demand page.
+        replacement_status: "Vokasi New Hire",
       })
     );
   }
@@ -275,7 +280,7 @@ export function setDemandReplacementByNoreg(
     dept = vokasi?.dept ?? emp?.dept ?? "";
     batch = vokasi?.batch ?? "";
     tglMasuk = vokasi?.tgl_masuk ?? emp?.tgl_masuk ?? null;
-    fs_status = computeFsStatus(demand.category, demand.dept, dept, vokasi?.tgl_ended);
+    fs_status = computeFsStatus(replacementStatus, demand.dept, dept, vokasi?.tgl_ended);
     employmentStatus = getEmploymentStatus(noreg);
   }
 
@@ -394,7 +399,10 @@ export function confirmShopReceipt(demandId: string, confirmedDate: string): voi
     });
 }
 
-/** §4.2 auto-matching: new Vokasi batch upload -> fill Open Vokasi Demand of same dept. */
+/** §4.2 auto-matching: new Vokasi batch upload -> fill Open Demand whose
+ * Source is "Vokasi New Hire" (regardless of which tab it lives on — a PKWT
+ * demand backfilled from the Vokasi pipeline is just as eligible as a
+ * Vokasi-origin one) with a same-dept candidate from the batch. */
 export function autoMatchVokasiBatch(newRecords: VokasiRecord[]): number {
   const usedNoreg = new Set(
     demandStore
@@ -404,14 +412,14 @@ export function autoMatchVokasiBatch(newRecords: VokasiRecord[]): number {
   );
   const openDemands = demandStore
     .list()
-    .filter((d) => d.category === "Vokasi" && d.status === "Open" && !d.replacement_noreg);
+    .filter((d) => d.replacement_status === "Vokasi New Hire" && d.status === "Open" && !d.replacement_noreg);
 
   let matched = 0;
   for (const demand of openDemands) {
     const candidate = newRecords.find((r) => r.dept === demand.dept && !usedNoreg.has(r.noreg));
     if (!candidate) continue;
     usedNoreg.add(candidate.noreg);
-    setDemandReplacementByNoreg(demand.id, candidate.noreg);
+    setDemandReplacementByNoreg(demand.id, candidate.noreg, "Vokasi New Hire");
     matched++;
   }
   return matched;
@@ -512,7 +520,7 @@ export function autoProjectFinishCheck(): void {
 
     for (const d of fulfilledDemands) {
       const type: MpStatusKategori =
-        d.category === "Vokasi" ? "Vokasi" : d.replacement_batch ? "Vokasi" : "PKWT";
+        d.replacement_status === "Vokasi New Hire" || d.replacement_batch ? "Vokasi" : "PKWT";
       const contractEnd = estimateContractEnd(d.replacement_noreg, type);
       const stillValid = contractEnd === null || sisaHari(contractEnd) >= 0;
       if (!stillValid) continue;
@@ -636,8 +644,18 @@ export function assignPoolEntryToDemand(poolEntryId: string, demandId: string): 
   const demand = demandStore.get(demandId);
   if (!entry || !demand) return;
   const confirmedDate = today().toISOString().slice(0, 10);
-  const fs_status = computeFsStatus(demand.category, demand.dept, entry.prev_dept, undefined);
+  // Util Pool assign is always an MP Back Up/Excess-style redeployment
+  // (someone already employed, not a fresh hire) — default the Source to
+  // MP Excess if it wasn't already set via the Demand Supply page, so the
+  // row doesn't get stuck behind the "pick Source first" gate despite
+  // already being fully mapped and confirmed here.
+  const replacement_status: ReplacementStatus =
+    demand.replacement_status === "" || demand.replacement_status === "No Replace"
+      ? "MP Excess"
+      : demand.replacement_status;
+  const fs_status = computeFsStatus(replacement_status, demand.dept, entry.prev_dept, undefined);
   demandStore.update(demandId, {
+    replacement_status,
     replacement_noreg: entry.noreg,
     replacement_nama: entry.nama,
     replacement_dept: entry.prev_dept,

@@ -10,7 +10,6 @@ import { MultiSelect } from "@/components/ui/MultiSelect";
 import { MonthBarChart } from "@/components/ui/MonthBarChart";
 import { CompositionChart } from "@/components/ui/CompositionChart";
 import { LaborTypeChart } from "@/components/ui/LaborTypeChart";
-import { DonutChart, DonutLegend } from "@/components/ui/DonutChart";
 import { Badge } from "@/components/ui/Badge";
 import { EmptyState, TableWrap, Td, Th } from "@/components/ui/Table";
 import { useStoreList } from "@/lib/useStore";
@@ -185,7 +184,7 @@ export default function DashboardPage() {
           <MultiSelect label="Department" options={deptOptions} selected={selDepts} onChange={setSelDepts} />
         </div>
         <TotalManpowerCard total={filteredEmployees.length + vokasiActive.length} employees={filteredEmployees} />
-        <div className="mt-3 grid gap-3 sm:grid-cols-3 lg:grid-cols-4">
+        <div className="mt-3 grid gap-3 sm:grid-cols-3">
           <StatTile
             label="Permanen"
             value={permanenCount.length}
@@ -207,28 +206,6 @@ export default function DashboardPage() {
             tone="violet"
             icon={GraduationCap}
           />
-          <div className="rounded-2xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900">
-            <div className="mb-1 text-xs font-medium text-slate-500 dark:text-slate-400">Komposisi</div>
-            <div className="flex items-center gap-2">
-              <div className="h-20 w-20 shrink-0">
-                <DonutChart
-                  heightClass="h-full"
-                  data={[
-                    { key: "permanen", label: "Permanen", value: permanenCount.length, color: "#10b981" },
-                    { key: "kontrak", label: "Kontrak", value: kontrakCount.length, color: "#f59e0b" },
-                    { key: "vokasi", label: "Vokasi", value: vokasiActive.length, color: "#8b5cf6" },
-                  ]}
-                />
-              </div>
-              <DonutLegend
-                data={[
-                  { key: "permanen", label: "Permanen", value: permanenCount.length, color: "#10b981" },
-                  { key: "kontrak", label: "Kontrak", value: kontrakCount.length, color: "#f59e0b" },
-                  { key: "vokasi", label: "Vokasi", value: vokasiActive.length, color: "#8b5cf6" },
-                ]}
-              />
-            </div>
-          </div>
         </div>
       </Card>
 

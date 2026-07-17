@@ -5,7 +5,7 @@ import { EmptyState, TableWrap, Td, Th } from "@/components/ui/Table";
 import { useStoreList } from "@/lib/useStore";
 import { demandStore } from "@/lib/repo";
 import { assignPoolEntryToDemand } from "@/lib/engine/actions";
-import { demandStatusLabel } from "@/lib/engine/enrollment";
+import { demandStatusLabel, effectiveDemandCategory } from "@/lib/engine/enrollment";
 import type { DemandCategory, UtilPoolEntry } from "@/lib/types";
 
 export function AssignModal({
@@ -21,7 +21,7 @@ export function AssignModal({
   const open = entry !== null;
   const openDemands = entry
     ? demands
-        .filter((d) => d.category === category && d.status === "Open")
+        .filter((d) => effectiveDemandCategory(d) === category && d.status === "Open")
         .sort((a, b) => (a.dept === entry.prev_dept ? -1 : 0) - (b.dept === entry.prev_dept ? -1 : 0))
     : [];
 

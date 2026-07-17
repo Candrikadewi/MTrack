@@ -35,6 +35,10 @@ export function NewProjectModal({ open, onClose, project }: { open: boolean; onC
   const isEdit = !!project;
   const snapshots = useStoreList(zparStore);
   const employees = snapshots.find((s) => s.is_active)?.employees ?? [];
+  // ZPAR data hydrates async on the client; while it's still loading (or if
+  // no snapshot has ever been uploaded) the Divisi/Department selects would
+  // otherwise silently show no options — surface that explicitly instead.
+  const employeesLoading = !zparStore.ready();
 
   const [name, setName] = useState(project?.name ?? "");
   const [startDate, setStartDate] = useState(project?.start_date ?? "");
@@ -127,10 +131,10 @@ export function NewProjectModal({ open, onClose, project }: { open: boolean; onC
                       <span className="mb-1 block text-[11px] font-medium text-slate-500">Divisi</span>
                       <Select
                         value={row.division}
-                        disabled={locked}
+                        disabled={locked || employeesLoading}
                         onChange={(e) => updateRow(idx, { division: e.target.value, dept: "" })}
                       >
-                        <option value="">Pilih Divisi</option>
+                        <option value="">{employeesLoading ? "Memuat data..." : "Pilih Divisi"}</option>
                         {divisionOptions.map((d) => (
                           <option key={d} value={d}>
                             {d}

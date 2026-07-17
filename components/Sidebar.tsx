@@ -17,14 +17,24 @@ import { logout } from "@/app/login/actions";
 import { canAccessModule, type Role } from "@/lib/roles";
 import { clearSessionState } from "@/lib/useSessionState";
 
-const NAV = [
+const NAV_TOP = [
   { href: "/upload", label: "Upload Center", icon: Upload },
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/supply-demand", label: "Demand Supply", icon: ArrowLeftRight },
+];
+
+/** These three menus are where demand actually gets entered/generated (PKWT
+ * terminate reviews, project MP needs, takt-driven needs) — grouped visually
+ * so it's clear they feed the Demand Supply page above, not the other way
+ * around. */
+const NAV_DEMAND_SOURCES = [
   { href: "/enrollment", label: "Enrollment Monitoring", icon: ClipboardList },
-  { href: "/supply-demand", label: "Supply-Demand", icon: ArrowLeftRight },
   { href: "/projects", label: "Project Monitoring", icon: FolderKanban },
   { href: "/takt", label: "Takt Time Monitoring", icon: Gauge },
-  { href: "/util-pool", label: "Utilization Pool", icon: Users2 },
+];
+
+const NAV_BOTTOM = [
+  { href: "/util-pool", label: "Supply Pool", icon: Users2 },
   { href: "/handover", label: "Handover Form", icon: FileStack },
 ];
 
@@ -35,9 +45,35 @@ const ROLE_TONE: Record<Role, string> = {
   hr: "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300",
 };
 
+type NavItem = { href: string; label: string; icon: typeof Upload };
+
+function NavLink({ item, isActive }: { item: NavItem; isActive: boolean }) {
+  const Icon = item.icon;
+  return (
+    <Link
+      href={item.href}
+      className={`group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200 ${
+        isActive
+          ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-sm shadow-indigo-500/30"
+          : "text-slate-600 hover:translate-x-0.5 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800/80"
+      }`}
+    >
+      <Icon
+        size={17}
+        strokeWidth={2}
+        className={isActive ? "text-white" : "text-slate-400 group-hover:text-slate-600 dark:group-hover:text-slate-300"}
+      />
+      {item.label}
+    </Link>
+  );
+}
+
 export function Sidebar({ role, email }: { role: Role; email: string }) {
   const pathname = usePathname();
-  const nav = NAV.filter((item) => canAccessModule(role, item.href));
+  const isActive = (href: string) => pathname === href || pathname?.startsWith(href + "/");
+  const navTop = NAV_TOP.filter((item) => canAccessModule(role, item.href));
+  const navDemandSources = NAV_DEMAND_SOURCES.filter((item) => canAccessModule(role, item.href));
+  const navBottom = NAV_BOTTOM.filter((item) => canAccessModule(role, item.href));
 
   return (
     <aside className="fixed inset-y-0 left-0 z-40 hidden w-64 flex-col border-r border-slate-200/80 bg-white/80 backdrop-blur-xl dark:border-slate-800/80 dark:bg-slate-950/80 md:flex">
@@ -51,28 +87,26 @@ export function Sidebar({ role, email }: { role: Role; email: string }) {
         </div>
       </div>
       <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
-        {nav.map((item) => {
-          const isActive = pathname === item.href || pathname?.startsWith(item.href + "/");
-          const Icon = item.icon;
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={`group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200 ${
-                isActive
-                  ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-sm shadow-indigo-500/30"
-                  : "text-slate-600 hover:translate-x-0.5 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800/80"
-              }`}
-            >
-              <Icon
-                size={17}
-                strokeWidth={2}
-                className={isActive ? "text-white" : "text-slate-400 group-hover:text-slate-600 dark:group-hover:text-slate-300"}
-              />
-              {item.label}
-            </Link>
-          );
-        })}
+        {navTop.map((item) => (
+          <NavLink key={item.href} item={item} isActive={isActive(item.href)} />
+        ))}
+
+        {navDemandSources.length > 0 && (
+          <div className="my-1.5 rounded-xl border border-dashed border-slate-200 p-1.5 dark:border-slate-700">
+            <div className="px-2 pb-1.5 pt-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+              Input &amp; Monitoring Demand
+            </div>
+            <div className="space-y-1">
+              {navDemandSources.map((item) => (
+                <NavLink key={item.href} item={item} isActive={isActive(item.href)} />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {navBottom.map((item) => (
+          <NavLink key={item.href} item={item} isActive={isActive(item.href)} />
+        ))}
       </nav>
       <div className="border-t border-slate-100 px-5 py-4 dark:border-slate-800">
         <div className="mb-3 flex items-center gap-2">

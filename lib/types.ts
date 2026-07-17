@@ -124,8 +124,11 @@ export type DemandStatus = "Open" | "Fulfilled";
 
 export type FsStatus = "Need FS" | "No Need FS" | "";
 
-/** PKWT Demand replacement path — see MTRACK_SPEC.md revision (Enrollment Kontrak). */
-export type ReplacementStatus = "" | "PKWT New Hire" | "MP Excess" | "MP Back Up" | "No Replace";
+/** Demand Supply "Source" — how a demand's vacancy actually gets filled.
+ * "PKWT New Hire" only appears as an option on the PKWT tab; "Vokasi New
+ * Hire" appears on both tabs (see effectiveDemandCategory in enrollment.ts)
+ * since a PKWT vacancy can be backfilled from the Vokasi pipeline. */
+export type ReplacementStatus = "" | "PKWT New Hire" | "Vokasi New Hire" | "MP Excess" | "MP Back Up" | "No Replace";
 
 /** Employment status of the replacement candidate — auto-derived from where the noreg was found. */
 export type EmploymentStatus = "" | "Kontrak" | "Permanen" | "Vokasi";
@@ -149,7 +152,7 @@ export interface Demand {
 
   fulfill_date: string; // target date replacement should start
 
-  replacement_status: ReplacementStatus; // PKWT only
+  replacement_status: ReplacementStatus;
   no_replace_reason: string; // set when replacement_status = "No Replace"
 
   replacement_noreg: string;

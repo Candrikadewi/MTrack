@@ -26,7 +26,7 @@ export default function TaktPage() {
         <div>
           <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100">Takt Time Monitoring</h1>
           <p className="text-sm text-slate-500 dark:text-slate-400">
-            Takt Up membuat Demand di Enrollment. Takt Down langsung ke Utilization Pool.
+            Takt Up membuat Demand di Enrollment. Takt Down langsung ke Supply Pool.
           </p>
         </div>
         {role === "admin" && (

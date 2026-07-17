@@ -172,7 +172,7 @@ export function seedSampleData(): void {
     .list()
     .find((r) => r.dept === openVokasiDemand?.dept && r.noreg !== openVokasiDemand?.outgoing_noreg);
   if (openVokasiDemand && freeVokasi) {
-    setDemandReplacementByNoreg(openVokasiDemand.id, freeVokasi.noreg);
+    setDemandReplacementByNoreg(openVokasiDemand.id, freeVokasi.noreg, "Vokasi New Hire");
   }
 
   // --- Project (ongoing, already past due -> demonstrates auto-finish) -----
@@ -197,7 +197,7 @@ export function seedSampleData(): void {
   });
   const betaDemand = demandStore.list().find((d) => finishedProject.demand_ids.includes(d.id));
   const betaVokasi = vokasiStore.list().find((r) => r.dept === betaDemand?.dept);
-  if (betaDemand && betaVokasi) setDemandReplacementByNoreg(betaDemand.id, betaVokasi.noreg);
+  if (betaDemand && betaVokasi) setDemandReplacementByNoreg(betaDemand.id, betaVokasi.noreg, "Vokasi New Hire");
 
   // --- Takt Time -------------------------------------------------------------
   createTaktUp({

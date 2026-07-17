@@ -1,15 +1,34 @@
 // Aggregation & filtering helpers specific to Enrollment Monitoring (§6) and
 // Supply-Demand.
+import { format, parseISO, subDays } from "date-fns";
 import { pkwtReviewStore } from "../repo";
 import { fulfillmentDeadline, supplyDemandStatus, type SupplyStatus } from "./compute";
-import type { Demand } from "../types";
+import type { Demand, DemandCategory } from "../types";
 
-/** Supply-Demand: "tanggal pemenuhan" — the target date the replacement must
- * be active/present. `fulfill_date` is the shop-arrival date for Project/Takt
- * Up (and once set, for any origin); falls back to `tgl_ended_outgoing` (the
- * PKWT review date / Vokasi ended date) for PKWT Terminate / Vokasi Ended. */
+/** Supply-Demand: "Arrival to Shop" — the target date the replacement must
+ * be active/present. `fulfill_date` is the shop-arrival date once explicitly
+ * set (for any origin, and always for Project/Takt Up). Before that:
+ * - Vokasi Ended (regular enrollment, not a manual/additional demand)
+ *   defaults to 2 weeks before the outgoing person's vokasi-ended date, so
+ *   there's runway to onboard the replacement before the seat is vacated.
+ * - PKWT Terminate falls back to the review date itself. */
 export function demandTargetDate(d: Demand): string {
-  return d.fulfill_date || d.tgl_ended_outgoing || "";
+  if (d.fulfill_date) return d.fulfill_date;
+  if (d.origin_type === "VokasiEnded" && d.tgl_ended_outgoing) {
+    return format(subDays(parseISO(d.tgl_ended_outgoing), 14), "yyyy-MM-dd");
+  }
+  return d.tgl_ended_outgoing || "";
+}
+
+/** Supply-Demand: the category a demand should actually be tracked/tabbed
+ * under. Normally this matches its origin category, but picking "Vokasi New
+ * Hire" as the Source on a PKWT-origin demand means the vacancy is being
+ * backfilled from the Vokasi pipeline instead — the demand belongs on the
+ * Vokasi tab from that point on, even though it originated from a PKWT
+ * termination. One-directional only: there's no "PKWT New Hire" source on
+ * the Vokasi tab, so a Vokasi-origin demand never moves the other way. */
+export function effectiveDemandCategory(d: Demand): DemandCategory {
+  return d.replacement_status === "Vokasi New Hire" ? "Vokasi" : d.category;
 }
 
 /** Supply-Demand page's granular status column — see supplyDemandStatus. */

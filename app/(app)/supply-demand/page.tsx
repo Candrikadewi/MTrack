@@ -18,6 +18,7 @@ import {
   demandTargetDate,
   deptsOfRows,
   divisionsOfRows,
+  effectiveDemandCategory,
   filterByDivDept,
 } from "@/lib/engine/enrollment";
 import {
@@ -30,7 +31,12 @@ import {
 import { useRole } from "@/lib/RoleContext";
 import type { Demand, DemandCategory, ReplacementStatus } from "@/lib/types";
 
-const REPLACEMENT_STATUS_OPTIONS: ReplacementStatus[] = ["PKWT New Hire", "MP Excess", "MP Back Up", "No Replace"];
+// "Vokasi New Hire" is intentionally on both lists (a PKWT vacancy can be
+// backfilled from the Vokasi pipeline — see effectiveDemandCategory); there
+// is no "PKWT New Hire" on the Vokasi tab, so sourcing only ever moves rows
+// from the PKWT tab to the Vokasi tab, never the other way.
+const PKWT_SOURCE_OPTIONS: ReplacementStatus[] = ["PKWT New Hire", "Vokasi New Hire", "MP Excess", "MP Back Up", "No Replace"];
+const VOKASI_SOURCE_OPTIONS: ReplacementStatus[] = ["Vokasi New Hire", "MP Excess", "MP Back Up", "No Replace"];
 
 function currentMonthKey(): string {
   return format(new Date(), "yyyy-MM");
@@ -41,11 +47,10 @@ function monthOptions(): string[] {
   return Array.from({ length: 13 }, (_, i) => format(addMonths(base, 6 - i), "yyyy-MM"));
 }
 
-/** Label for the confirm-fulfillment date, matching whichever path this
+/** Label for the confirm-fulfillment date, matching whichever Source this
  * candidate came through. */
 function confirmLabel(d: Demand): string {
-  if (d.category === "Vokasi") return "Tgl Konfirmasi";
-  if (d.replacement_status === "PKWT New Hire") return "Tgl Sign Kontrak";
+  if (d.replacement_status === "PKWT New Hire" || d.replacement_status === "Vokasi New Hire") return "Tgl Sign Kontrak";
   if (d.replacement_status === "MP Excess" || d.replacement_status === "MP Back Up") return "Tgl Assigned";
   return "Tgl Konfirmasi";
 }
@@ -56,7 +61,7 @@ export default function SupplyDemandPage() {
   const [month, setMonth] = useState(currentMonthKey());
   const demands = useStoreList(demandStore);
 
-  const tabDemands = useMemo(() => demands.filter((d) => d.category === tab), [demands, tab]);
+  const tabDemands = useMemo(() => demands.filter((d) => effectiveDemandCategory(d) === tab), [demands, tab]);
   const monthDemands = useMemo(
     () => tabDemands.filter((d) => demandVisibleDate(demandTargetDate(d)).slice(0, 7) === month),
     [tabDemands, month]
@@ -80,7 +85,7 @@ export default function SupplyDemandPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100">Supply-Demand</h1>
+          <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100">Demand Supply</h1>
           <p className="text-sm text-slate-500 dark:text-slate-400">
             Semua demand (PKWT Terminate/Vokasi Ended/GST/Unfit/Resign/Pension dari Enrollment, Project, Takt Up)
             dan candidate mapping, satu tempat untuk mengisi supply.
@@ -122,7 +127,7 @@ export default function SupplyDemandPage() {
 
       <Card
         title={`Demand Pool: ${format(new Date(`${month}-01T00:00:00`), "MMMM yyyy")}`}
-        subtitle="Demand muncul H-4 minggu (hari kerja) dari tanggal pemenuhan. Bulan yang dipilih di atas adalah bulan demand ini actionable, bukan bulan orangnya hadir."
+        subtitle="Demand muncul H-4 minggu (hari kerja) dari Arrival to Shop. Bulan yang dipilih di atas adalah bulan demand ini actionable, bukan bulan orangnya hadir."
         action={
           <div className="flex gap-2">
             <MultiSelect
@@ -166,17 +171,16 @@ export default function SupplyDemandPage() {
                 <Th>Outgoing</Th>
                 <Th>Divisi</Th>
                 <Th>Department</Th>
-                <Th>Tanggal Pemenuhan</Th>
-                <Th>Demand Visible</Th>
-                <Th>Batas Fulfillment</Th>
-                {tab === "PKWT" && <Th>Status Replacement</Th>}
+                <Th>Arrival to Shop</Th>
+                <Th>Due Date Sign Contract / Assigned</Th>
+                <Th>Source</Th>
                 <Th>Noreg Pengganti</Th>
                 <Th>Nama Pengganti</Th>
                 <Th>Dept Pengganti</Th>
-                <Th>Status FS</Th>
-                <Th>{tab === "PKWT" ? "Sign Kontrak / Assigned" : "Konfirmasi"}</Th>
+                <Th>FS Status</Th>
+                <Th>Planning Sign Contract / Assigned</Th>
                 <Th>Shop Confirmation</Th>
-                <Th>Status</Th>
+                <Th>Demand Status</Th>
               </tr>
             </thead>
             <tbody>
@@ -247,15 +251,24 @@ function SupplyDemandRow({
 }) {
   const isLabelRow = d.origin_type === "Project" || d.origin_type === "TaktUp";
   const target = demandTargetDate(d);
-  const visible = demandVisibleDate(target);
   const deadline = fulfillmentDeadline(target, d.fs_status);
   const isNoReplace = d.replacement_status === "No Replace";
   const hasCandidate = Boolean(d.replacement_noreg);
   const status = supplyDemandStatus(target, deadline, d.shop_confirmed_date);
+  // A demand shows under `tab` via effectiveDemandCategory, which can differ
+  // from its origin category once Source = "Vokasi New Hire" moves a
+  // PKWT-origin demand onto the Vokasi tab — trace that back for the reader.
+  const crossSourced = d.category !== tab;
+  const sourceOptions = tab === "PKWT" ? PKWT_SOURCE_OPTIONS : VOKASI_SOURCE_OPTIONS;
 
   return (
     <tr>
-      <Td>{demandStatusLabel(d)}</Td>
+      <Td>
+        {demandStatusLabel(d)}
+        {crossSourced && (
+          <span className="ml-1.5 text-[10px] font-normal text-slate-400">(dari Kontrak)</span>
+        )}
+      </Td>
       {isLabelRow ? (
         <Td className="italic text-slate-500">{d.outgoing_label}</Td>
       ) : (
@@ -272,33 +285,30 @@ function SupplyDemandRow({
           fmtDate(target)
         )}
       </Td>
-      <Td className="text-slate-500">{fmtDate(visible)}</Td>
       <DeadlineCell deadline={deadline} fulfilled={status.startsWith("Fulfilled")} />
 
-      {tab === "PKWT" && (
-        <Td>
-          {canEditReplacement ? (
-            <Select
-              value={d.replacement_status}
-              onChange={(e) => {
-                const replStatus = e.target.value as ReplacementStatus;
-                if (replStatus === "No Replace") setDemandNoReplace(d.id, d.no_replace_reason);
-                else setDemandReplacementByNoreg(d.id, d.replacement_noreg, replStatus);
-              }}
-              className="min-w-[140px]"
-            >
-              <option value="">- pilih -</option>
-              {REPLACEMENT_STATUS_OPTIONS.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </Select>
-          ) : (
-            d.replacement_status || "-"
-          )}
-        </Td>
-      )}
+      <Td>
+        {canEditReplacement ? (
+          <Select
+            value={d.replacement_status}
+            onChange={(e) => {
+              const replStatus = e.target.value as ReplacementStatus;
+              if (replStatus === "No Replace") setDemandNoReplace(d.id, d.no_replace_reason);
+              else setDemandReplacementByNoreg(d.id, d.replacement_noreg, replStatus);
+            }}
+            className="min-w-[140px]"
+          >
+            <option value="">- pilih -</option>
+            {sourceOptions.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </Select>
+        ) : (
+          d.replacement_status || "-"
+        )}
+      </Td>
 
       {isNoReplace ? (
         <>
@@ -319,9 +329,9 @@ function SupplyDemandRow({
           <Td className="text-slate-400">-</Td>
           <Td className="text-slate-400">-</Td>
         </>
-      ) : tab === "PKWT" && !d.replacement_status ? (
+      ) : !d.replacement_status ? (
         <Td colSpan={6} className="text-slate-400">
-          Pilih Status Replacement terlebih dahulu
+          Pilih Source terlebih dahulu
         </Td>
       ) : (
         <>

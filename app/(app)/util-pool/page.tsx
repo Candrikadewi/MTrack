@@ -27,14 +27,14 @@ export default function UtilPoolPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100">Utilization Pool</h1>
+        <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100">Supply Pool</h1>
         <p className="text-sm text-slate-500 dark:text-slate-400">
           Personil sementara tidak bertugas, dari Project Finish atau Takt Down.
         </p>
       </div>
 
       {entries.length === 0 ? (
-        <EmptyState text="Utilization Pool kosong." />
+        <EmptyState text="Supply Pool kosong." />
       ) : (
         <Card>
           <TableWrap>

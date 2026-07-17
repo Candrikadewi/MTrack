@@ -5,10 +5,11 @@ import { canAccessModule, type Role } from "@/lib/roles";
 const NAV = [
   { href: "/upload", label: "Upload Center" },
   { href: "/dashboard", label: "Dashboard" },
+  { href: "/supply-demand", label: "Demand Supply" },
   { href: "/enrollment", label: "Enrollment Monitoring" },
   { href: "/projects", label: "Project Monitoring" },
   { href: "/takt", label: "Takt Time Monitoring" },
-  { href: "/util-pool", label: "Utilization Pool" },
+  { href: "/util-pool", label: "Supply Pool" },
   { href: "/handover", label: "Handover Form" },
 ];
 

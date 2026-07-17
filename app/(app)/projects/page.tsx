@@ -40,7 +40,7 @@ export default function ProjectsPage() {
         <div>
           <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100">Project Monitoring</h1>
           <p className="text-sm text-slate-500 dark:text-slate-400">
-            Mendefinisikan kebutuhan MP. Candidate mapping dilakukan di menu Supply-Demand.
+            Mendefinisikan kebutuhan MP. Candidate mapping dilakukan di menu Demand Supply.
           </p>
         </div>
         {role === "admin" && (

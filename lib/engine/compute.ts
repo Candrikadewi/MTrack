@@ -9,7 +9,7 @@ import {
   parseISO,
   subBusinessDays,
 } from "date-fns";
-import type { DemandCategory, FsStatus, StatusKontrak, VokasiStatusSaatIni } from "../types";
+import type { FsStatus, ReplacementStatus, StatusKontrak, VokasiStatusSaatIni } from "../types";
 
 export function today(): Date {
   return new Date(new Date().toDateString());
@@ -62,19 +62,19 @@ export function computeVokasiStatus(tglEnded: string, hasFulfilledReplacement: b
 
 /**
  * §12: fs_status — Need FS jika:
- *  - demand kategori Vokasi (semua penggantian Vokasi selalu new intake, selalu Need FS), ATAU
- *  - dept pengganti berbeda dari dept outgoing (cross-shop, berlaku utk New Hire maupun MP Back Up/Excess), ATAU
+ *  - Source "Vokasi New Hire" (penggantian dari intake Vokasi baru selalu new intake, selalu Need FS), ATAU
+ *  - dept pengganti berbeda dari dept outgoing (cross-shop, berlaku utk PKWT New Hire maupun MP Back Up/Excess), ATAU
  *  - dept sama tapi pengganti sebelumnya Vokasi yang sudah ended > 3 bulan lalu.
  * Sebelum dept pengganti diketahui (belum ada source), caller belum boleh
  * panggil ini — fs_status tetap "" di level Demand sampai source terisi.
  */
 export function computeFsStatus(
-  category: DemandCategory,
+  replacementStatus: ReplacementStatus,
   outgoingDept: string,
   replacementDept: string,
   replacementVokasiTglEnded: string | undefined
 ): FsStatus {
-  if (category === "Vokasi") return "Need FS";
+  if (replacementStatus === "Vokasi New Hire") return "Need FS";
   if (!replacementDept) return "No Need FS";
   if (replacementDept !== outgoingDept) return "Need FS";
   if (replacementVokasiTglEnded) {
