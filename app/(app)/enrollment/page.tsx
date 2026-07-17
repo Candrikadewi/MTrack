@@ -32,7 +32,7 @@ export default function EnrollmentPage() {
           <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100">Enrollment Monitoring</h1>
           <p className="text-sm text-slate-500 dark:text-slate-400">
             Tempat identifikasi demand: review PKWT (Continue/Terminate), Vokasi yang perlu replace saat ended, dan
-            demand tambahan (GST/Unfit/Resign/Pension). Candidate mapping & fulfillment ada di menu Demand Supply.
+            demand tambahan (GST/Unfit/Resign/Pension). Candidate mapping & fulfillment ada di menu Demand Pool.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -193,7 +193,7 @@ function VokasiEndedSection({ period, vokasi }: { period: string; vokasi: Vokasi
   return (
     <Card
       title="Vokasi Ended"
-      subtitle={`${filtered.length} vokasi ended pada periode ini, perlu replace. Isi kandidat di menu Demand Supply.`}
+      subtitle={`${filtered.length} vokasi ended pada periode ini, perlu replace. Isi kandidat di menu Demand Pool.`}
       action={
         <div className="flex gap-2">
           <MultiSelect

@@ -20,12 +20,11 @@ import { clearSessionState } from "@/lib/useSessionState";
 const NAV_TOP = [
   { href: "/upload", label: "Upload Center", icon: Upload },
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/supply-demand", label: "Demand Supply", icon: ArrowLeftRight },
 ];
 
 /** These three menus are where demand actually gets entered/generated (PKWT
  * terminate reviews, project MP needs, takt-driven needs) — grouped visually
- * so it's clear they feed the Demand Supply page above, not the other way
+ * so it's clear they feed the Demand Pool page below, not the other way
  * around. */
 const NAV_DEMAND_SOURCES = [
   { href: "/enrollment", label: "Enrollment Monitoring", icon: ClipboardList },
@@ -34,6 +33,7 @@ const NAV_DEMAND_SOURCES = [
 ];
 
 const NAV_BOTTOM = [
+  { href: "/supply-demand", label: "Demand Pool", icon: ArrowLeftRight },
   { href: "/util-pool", label: "Supply Pool", icon: Users2 },
   { href: "/handover", label: "Handover Form", icon: FileStack },
 ];

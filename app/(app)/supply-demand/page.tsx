@@ -85,7 +85,7 @@ export default function SupplyDemandPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100">Demand Supply</h1>
+          <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100">Demand Pool</h1>
           <p className="text-sm text-slate-500 dark:text-slate-400">
             Semua demand (PKWT Terminate/Vokasi Ended/GST/Unfit/Resign/Pension dari Enrollment, Project, Takt Up)
             dan candidate mapping, satu tempat untuk mengisi supply.
