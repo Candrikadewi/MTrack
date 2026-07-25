@@ -1,8 +1,8 @@
 // Aggregation helpers for the Dashboard — pure functions over the raw
 // stores, read-only per MTRACK_SPEC.md §5 / §11.
-import { addMonths, endOfMonth, format, subMonths } from "date-fns";
-import { fulfillmentDeadline, reviewFillDeadline, sisaHari } from "./compute";
-import { demandTargetDate } from "./enrollment";
+import { addMonths, endOfMonth, format, parseISO, subMonths } from "date-fns";
+import { demandVisibleDate, fulfillmentDeadline, reviewFillDeadline, reviewReminderDate, sisaHari } from "./compute";
+import { demandTargetDate, effectiveDemandCategory } from "./enrollment";
 import { POSISI_STRUKTURAL_GROUPS } from "../types";
 import type { Demand, DemandCategory, DemandOriginType, EmployeeRecord, PkwtReview, VokasiRecord } from "../types";
 
@@ -284,101 +284,111 @@ export function demandSupplyRows(demands: Demand[], category: DemandCategory): D
 }
 
 // ---------------------------------------------------------------------------
-// Action Needed (Dashboard) — cross-stage worklist surfacing what's overdue
-// or due soon across the PKWT enrollment -> demand -> fulfillment chain, so
-// no single stage silently slips. See MTRACK_SPEC.md §12 lead-time chain.
+// Action Needed (Dashboard) — one row per (stage, category), each listing
+// every month-batch that's currently visible and still has a gap (done <
+// total), so a backlog spanning several months never gets hidden behind a
+// single "most urgent" pick. See MTRACK_SPEC.md §12 lead-time chain.
 // ---------------------------------------------------------------------------
-
-const ACTION_WINDOW_DAYS = 7;
 
 export type ActionKind = "review" | "candidate" | "shop_confirm";
 
-export interface ActionItem {
-  id: string;
-  noreg: string;
-  nama: string;
-  dept: string;
-  kind: ActionKind;
-  label: string;
-  dueDate: string;
+/** One month's worth of progress for a given stage — e.g. "89 PKWT reviews
+ * due in September, 5 filled so far, next deadline is overdue by 2 days". */
+export interface ActionBatch {
+  month: string; // "yyyy-MM"
+  monthLabel: string; // "September"
+  done: number;
+  total: number;
+  dueDate: string; // most urgent remaining item's due date in this batch
   daysRemaining: number;
   href: string;
 }
 
-function withinActionWindow(dueDate: string): boolean {
-  return Boolean(dueDate) && sisaHari(dueDate) <= ACTION_WINDOW_DAYS;
+function monthLabelOf(month: string): string {
+  return format(parseISO(`${month}-01`), "MMMM");
 }
 
-/** Stage 1: PKWT reviews not yet filled (Continue/Terminate), due or overdue
- * for their fill deadline (tgl_review - 30 hari kerja). */
-export function reviewsNeedingAction(reviews: PkwtReview[]): ActionItem[] {
-  return reviews
-    .filter((r) => r.review_result === "")
-    .map((r): ActionItem => {
-      const dueDate = reviewFillDeadline(r.tgl_review);
-      return {
-        id: r.id,
-        noreg: r.noreg,
-        nama: r.nama,
-        dept: r.dept,
-        kind: "review",
-        label: "Isi review PKWT",
-        dueDate,
-        daysRemaining: sisaHari(dueDate),
-        href: "/enrollment",
-      };
-    })
-    .filter((item) => withinActionWindow(item.dueDate))
-    .sort((a, b) => a.daysRemaining - b.daysRemaining);
+function mostUrgent<T>(items: T[], dueDateOf: (item: T) => string): string {
+  return items.reduce((soonestDue, item) => {
+    const due = dueDateOf(item);
+    return sisaHari(due) < sisaHari(soonestDue) ? due : soonestDue;
+  }, dueDateOf(items[0]));
 }
 
-/** Stage 2: demands not yet signed/assigned (no Source chosen, no candidate
- * mapped, or mapped but not yet confirmed) — excludes No Replace, which
- * deliberately never gets a candidate. Due at the fulfillment deadline
- * (Due Date Sign Contract / Assigned). */
-export function demandsNeedingCandidate(demands: Demand[]): ActionItem[] {
-  return demands
-    .filter((d) => d.replacement_status !== "No Replace" && !d.fulfillment_confirmed_date)
-    .map((d): ActionItem => {
-      const target = demandTargetDate(d);
-      const dueDate = fulfillmentDeadline(target, d.fs_status);
-      return {
-        id: d.id,
-        noreg: d.outgoing_noreg || d.outgoing_label,
-        nama: d.outgoing_nama || d.outgoing_label,
-        dept: d.dept,
-        kind: "candidate",
-        label: "Cari & sign kandidat pengganti",
-        dueDate,
-        daysRemaining: sisaHari(dueDate),
-        href: "/supply-demand",
-      };
-    })
-    .filter((item) => withinActionWindow(item.dueDate))
-    .sort((a, b) => a.daysRemaining - b.daysRemaining);
+/** Stage 1: PKWT reviews not yet filled (Continue/Terminate), grouped by
+ * tgl_review's month — only months where at least one unfilled review's
+ * reminder window has already opened (tgl_review - 40 hari kerja). */
+export function reviewBatchesNeedingAction(reviews: PkwtReview[]): ActionBatch[] {
+  const byMonth = new Map<string, PkwtReview[]>();
+  for (const r of reviews) {
+    if (!r.tgl_review) continue;
+    const month = r.tgl_review.slice(0, 7);
+    (byMonth.get(month) ?? byMonth.set(month, []).get(month)!).push(r);
+  }
+  const batches: ActionBatch[] = [];
+  for (const [month, group] of byMonth) {
+    const total = group.length;
+    const done = group.filter((r) => r.review_result !== "").length;
+    if (done >= total) continue;
+    const visibleRemaining = group.filter((r) => r.review_result === "" && sisaHari(reviewReminderDate(r.tgl_review)) <= 0);
+    if (visibleRemaining.length === 0) continue;
+    const dueDate = mostUrgent(visibleRemaining, (r) => reviewFillDeadline(r.tgl_review));
+    batches.push({ month, monthLabel: monthLabelOf(month), done, total, dueDate, daysRemaining: sisaHari(dueDate), href: "/enrollment" });
+  }
+  return batches.sort((a, b) => a.month.localeCompare(b.month));
 }
 
-/** Stage 3: candidate already signed/assigned but the shop hasn't confirmed
- * receipt yet. Due at Arrival to Shop itself. */
-export function demandsNeedingShopConfirm(demands: Demand[]): ActionItem[] {
-  return demands
-    .filter((d) => d.fulfillment_confirmed_date && !d.shop_confirmed_date)
-    .map((d): ActionItem => {
-      const dueDate = demandTargetDate(d);
-      return {
-        id: d.id,
-        noreg: d.replacement_noreg,
-        nama: d.replacement_nama || d.replacement_noreg,
-        dept: d.dept,
-        kind: "shop_confirm",
-        label: "Konfirmasi kedatangan di shop",
-        dueDate,
-        daysRemaining: sisaHari(dueDate),
-        href: "/supply-demand",
-      };
-    })
-    .filter((item) => withinActionWindow(item.dueDate))
-    .sort((a, b) => a.daysRemaining - b.daysRemaining);
+/** Stage 2: demands (of the given category) not yet signed/assigned — no
+ * Source chosen, no candidate mapped, or mapped but not yet confirmed.
+ * Excludes No Replace, which deliberately never gets a candidate. Grouped
+ * by Demand Pool month (demandVisibleDate of Arrival to Shop); only months
+ * already visible in the Demand Pool are included. */
+export function candidateBatchesNeedingAction(demands: Demand[], category: DemandCategory): ActionBatch[] {
+  const byMonth = new Map<string, Demand[]>();
+  for (const d of demands) {
+    if (effectiveDemandCategory(d) !== category || d.replacement_status === "No Replace") continue;
+    const visible = demandVisibleDate(demandTargetDate(d));
+    if (!visible) continue;
+    const month = visible.slice(0, 7);
+    (byMonth.get(month) ?? byMonth.set(month, []).get(month)!).push(d);
+  }
+  const batches: ActionBatch[] = [];
+  for (const [month, group] of byMonth) {
+    const total = group.length;
+    const done = group.filter((d) => d.fulfillment_confirmed_date).length;
+    if (done >= total) continue;
+    const visibleRemaining = group.filter(
+      (d) => !d.fulfillment_confirmed_date && sisaHari(demandVisibleDate(demandTargetDate(d))) <= 0
+    );
+    if (visibleRemaining.length === 0) continue;
+    const dueDate = mostUrgent(visibleRemaining, (d) => fulfillmentDeadline(demandTargetDate(d), d.fs_status));
+    batches.push({ month, monthLabel: monthLabelOf(month), done, total, dueDate, daysRemaining: sisaHari(dueDate), href: "/supply-demand" });
+  }
+  return batches.sort((a, b) => a.month.localeCompare(b.month));
+}
+
+/** Stage 3: demands (of the given category) already signed/assigned but the
+ * shop hasn't confirmed receipt yet. Grouped by Arrival to Shop's month —
+ * always "visible" once signed, so no extra visibility gate needed. */
+export function shopConfirmBatchesNeedingAction(demands: Demand[], category: DemandCategory): ActionBatch[] {
+  const byMonth = new Map<string, Demand[]>();
+  for (const d of demands) {
+    if (effectiveDemandCategory(d) !== category || !d.fulfillment_confirmed_date) continue;
+    const target = demandTargetDate(d);
+    if (!target) continue;
+    const month = target.slice(0, 7);
+    (byMonth.get(month) ?? byMonth.set(month, []).get(month)!).push(d);
+  }
+  const batches: ActionBatch[] = [];
+  for (const [month, group] of byMonth) {
+    const total = group.length;
+    const done = group.filter((d) => d.shop_confirmed_date).length;
+    if (done >= total) continue;
+    const remaining = group.filter((d) => !d.shop_confirmed_date);
+    const dueDate = mostUrgent(remaining, (d) => demandTargetDate(d));
+    batches.push({ month, monthLabel: monthLabelOf(month), done, total, dueDate, daysRemaining: sisaHari(dueDate), href: "/supply-demand" });
+  }
+  return batches.sort((a, b) => a.month.localeCompare(b.month));
 }
 
 export { subMonths };

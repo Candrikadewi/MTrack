@@ -16,9 +16,8 @@ import { EmptyState, TableWrap, Td, Th } from "@/components/ui/Table";
 import { useStoreList } from "@/lib/useStore";
 import { demandStore, pkwtReviewStore, projectStore, taktStore, utilPoolStore, vokasiStore, zparStore } from "@/lib/repo";
 import {
+  candidateBatchesNeedingAction,
   currentMonthKey,
-  demandsNeedingCandidate,
-  demandsNeedingShopConfirm,
   demandSupplyRows,
   deptsOfAny,
   directorates,
@@ -29,9 +28,9 @@ import {
   manpowerMovementByFiscalYear,
   monthBuckets,
   positionBreakdown,
-  reviewsNeedingAction,
-  type ActionItem,
-  type ActionKind,
+  reviewBatchesNeedingAction,
+  shopConfirmBatchesNeedingAction,
+  type ActionBatch,
   type DemandSupplyRow,
   type MovementStatus,
 } from "@/lib/engine/dashboard";
@@ -248,77 +247,115 @@ export default function DashboardPage() {
 }
 
 // ---------------------------------------------------------------------------
-// 0. Action Needed — cross-stage worklist (review fill -> candidate sign ->
-// shop confirm), each item due or overdue within the next 7 days.
+// 0. Action Needed — one section per (stage, category): Isi Review PKWT,
+// Mapping Candidate PKWT/Vokasi, Shop Confirmation PKWT/Vokasi. Each section
+// lists every month-batch that's currently visible and still has a gap, so
+// a backlog spanning several months is never hidden behind a single pick.
 // ---------------------------------------------------------------------------
 
-const ACTION_KIND_ICON: Record<ActionKind, typeof ClipboardList> = {
-  review: ClipboardList,
-  candidate: Users2,
-  shop_confirm: HardHat,
-};
-
-const ACTION_LIST_CAP = 8;
+interface ActionSectionSpec {
+  key: string;
+  icon: typeof ClipboardList;
+  title: string;
+  verb: string; // "isi review PKWT" -> "Segera {verb} {month}!"
+  anchor: "due_date" | "arrival";
+  batches: ActionBatch[];
+}
 
 function ActionNeededBlock({ reviews, demands }: { reviews: PkwtReview[]; demands: Demand[] }) {
-  const items = useMemo(
-    () =>
-      [...reviewsNeedingAction(reviews), ...demandsNeedingCandidate(demands), ...demandsNeedingShopConfirm(demands)].sort(
-        (a, b) => a.daysRemaining - b.daysRemaining
-      ),
-    [reviews, demands]
-  );
-  const shown = items.slice(0, ACTION_LIST_CAP);
-  const hiddenCount = items.length - shown.length;
+  const reviewBatches = useMemo(() => reviewBatchesNeedingAction(reviews), [reviews]);
+  const candidatePkwt = useMemo(() => candidateBatchesNeedingAction(demands, "PKWT"), [demands]);
+  const candidateVokasi = useMemo(() => candidateBatchesNeedingAction(demands, "Vokasi"), [demands]);
+  const shopPkwt = useMemo(() => shopConfirmBatchesNeedingAction(demands, "PKWT"), [demands]);
+  const shopVokasi = useMemo(() => shopConfirmBatchesNeedingAction(demands, "Vokasi"), [demands]);
+
+  const sections: ActionSectionSpec[] = [
+    { key: "review", icon: ClipboardList, title: "Isi Review PKWT", verb: "isi review PKWT", anchor: "due_date", batches: reviewBatches },
+    {
+      key: "candidate-pkwt",
+      icon: Users2,
+      title: "Mapping Candidate PKWT",
+      verb: "isi candidate PKWT Demand",
+      anchor: "due_date",
+      batches: candidatePkwt,
+    },
+    {
+      key: "candidate-vokasi",
+      icon: Users2,
+      title: "Mapping Candidate Vokasi",
+      verb: "isi candidate Vokasi Demand",
+      anchor: "due_date",
+      batches: candidateVokasi,
+    },
+    {
+      key: "shop-pkwt",
+      icon: HardHat,
+      title: "Shop Confirmation PKWT",
+      verb: "dapatkan konfirmasi shop PKWT",
+      anchor: "arrival",
+      batches: shopPkwt,
+    },
+    {
+      key: "shop-vokasi",
+      icon: HardHat,
+      title: "Shop Confirmation Vokasi",
+      verb: "dapatkan konfirmasi shop Vokasi",
+      anchor: "arrival",
+      batches: shopVokasi,
+    },
+  ];
+  const activeSections = sections.filter((s) => s.batches.length > 0);
 
   return (
-    <Card title="Action Needed" subtitle="Tahap review, candidate mapping, dan shop confirmation yang jatuh tempo dalam 7 hari.">
-      {items.length === 0 ? (
+    <Card title="Action Needed" subtitle="Progres tiap tahap review, candidate mapping, dan shop confirmation per bulan — real-time.">
+      {activeSections.length === 0 ? (
         <div className="flex items-center gap-2 py-2 text-sm text-emerald-600 dark:text-emerald-400">
-          <CheckCircle2 size={16} /> Semua tahap on-track, tidak ada yang jatuh tempo dalam 7 hari ke depan.
+          <CheckCircle2 size={16} /> Semua tahap on-track, tidak ada backlog bulan berjalan.
         </div>
       ) : (
-        <>
-          <div className="divide-y divide-slate-100 dark:divide-slate-800">
-            {shown.map((item) => (
-              <ActionRow key={`${item.kind}-${item.id}`} item={item} />
-            ))}
-          </div>
-          {hiddenCount > 0 && (
-            <p className="pt-2 text-xs text-slate-400">
-              {`+${hiddenCount} lainnya`} — cek Enrollment Monitoring &amp; Demand Pool untuk daftar lengkap.
-            </p>
-          )}
-        </>
+        <div className="space-y-4">
+          {activeSections.map((section) => (
+            <div key={section.key}>
+              <div className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+                <section.icon size={13} /> {section.title}
+              </div>
+              <div className="space-y-1.5">
+                {section.batches.map((batch) => (
+                  <ActionBatchRow key={batch.month} verb={section.verb} anchor={section.anchor} batch={batch} />
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
       )}
     </Card>
   );
 }
 
-function ActionRow({ item }: { item: ActionItem }) {
-  const Icon = ACTION_KIND_ICON[item.kind];
-  const overdue = item.daysRemaining < 0;
+function ActionBatchRow({ verb, anchor, batch }: { verb: string; anchor: "due_date" | "arrival"; batch: ActionBatch }) {
+  const overdue = batch.daysRemaining < 0;
+  const days = Math.abs(batch.daysRemaining);
+  const statusLabel =
+    anchor === "arrival"
+      ? overdue
+        ? `H+${days} Arrival to Shop`
+        : `H-${days} Arrival to Shop`
+      : overdue
+        ? `Overdue ${days}D`
+        : `H-${days} due date`;
+
   return (
     <Link
-      href={item.href}
-      className="flex items-center gap-3 py-2.5 text-sm transition-colors hover:bg-slate-50 dark:hover:bg-slate-900/60"
+      href={batch.href}
+      className="flex items-center justify-between gap-3 rounded-lg border border-slate-100 px-3 py-2 text-sm transition-colors hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-900/60"
     >
-      <div
-        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
-          overdue ? "bg-red-50 text-red-600 dark:bg-red-950 dark:text-red-400" : "bg-amber-50 text-amber-600 dark:bg-amber-950 dark:text-amber-400"
-        }`}
-      >
-        <Icon size={15} />
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="truncate font-medium text-slate-800 dark:text-slate-100">
-          {item.nama} <span className="font-normal text-slate-400">({item.noreg})</span>
-        </div>
-        <div className="truncate text-xs text-slate-500 dark:text-slate-400">
-          {item.label} · {item.dept}
-        </div>
-      </div>
-      <Badge tone={overdue ? "red" : "amber"}>{overdue ? `Telat ${Math.abs(item.daysRemaining)}h` : `${item.daysRemaining}h lagi`}</Badge>
+      <span className="text-slate-700 dark:text-slate-200">
+        Segera {verb} {batch.monthLabel}!{" "}
+        <span className="text-slate-400">
+          ({batch.done}/{batch.total} MP)
+        </span>
+      </span>
+      <Badge tone={overdue ? "red" : "amber"}>{statusLabel}</Badge>
     </Link>
   );
 }
