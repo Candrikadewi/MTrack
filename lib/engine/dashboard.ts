@@ -66,6 +66,57 @@ export function fiscalYearMonths(refDate: Date = new Date()): string[] {
   return Array.from({ length: 12 }, (_, i) => format(new Date(startYear, 3 + i, 1), "yyyy-MM"));
 }
 
+/** Walks back from `month` (exclusive) looking for the nearest earlier
+ * calendar month that has a ZPAR snapshot, up to 24 months — the "what
+ * changed this month" comparison always wants the last month WITH data, not
+ * necessarily the literal previous calendar month if a period was skipped. */
+export function previousPeriodWithData(month: string, snapshotsByPeriod: Map<string, EmployeeRecord[]>): string | null {
+  let cursor = subMonths(new Date(`${month}-01T00:00:00`), 1);
+  for (let i = 0; i < 24; i++) {
+    const key = format(cursor, "yyyy-MM");
+    if (snapshotsByPeriod.has(key)) return key;
+    cursor = subMonths(cursor, 1);
+  }
+  return null;
+}
+
+const MOVE_COMPARE_FIELDS = ["division", "dept", "status_kontrak", "posisi_struktural"] as const;
+
+export interface EmployeeMoveEntry {
+  noreg: string;
+  nama: string;
+  before: EmployeeRecord;
+  after: EmployeeRecord;
+  changedFields: (typeof MOVE_COMPARE_FIELDS)[number][];
+}
+
+export interface EmployeeDiff {
+  newHires: EmployeeRecord[];
+  left: EmployeeRecord[];
+  moved: EmployeeMoveEntry[];
+}
+
+/** Month-to-month roster diff by noreg — New (in `after` only), Left (in
+ * `before` only), Moved (same noreg, division/dept/status_kontrak/
+ * posisi_struktural changed). Surfaces exactly the rotation/mutation/
+ * addition/reduction that makes ZPAR change every month. */
+export function diffEmployees(before: EmployeeRecord[], after: EmployeeRecord[]): EmployeeDiff {
+  const beforeByNoreg = new Map(before.filter((e) => e.noreg).map((e) => [e.noreg, e]));
+  const afterByNoreg = new Map(after.filter((e) => e.noreg).map((e) => [e.noreg, e]));
+
+  const newHires = after.filter((e) => e.noreg && !beforeByNoreg.has(e.noreg));
+  const left = before.filter((e) => e.noreg && !afterByNoreg.has(e.noreg));
+
+  const moved: EmployeeMoveEntry[] = [];
+  for (const [noreg, a] of afterByNoreg) {
+    const b = beforeByNoreg.get(noreg);
+    if (!b) continue;
+    const changedFields = MOVE_COMPARE_FIELDS.filter((f) => a[f] !== b[f]);
+    if (changedFields.length > 0) moved.push({ noreg, nama: a.nama, before: b, after: a, changedFields });
+  }
+  return { newHires, left, moved };
+}
+
 function isVokasiActiveAsOf(v: VokasiRecord, asOfIsoDate: string): boolean {
   if (!v.tgl_masuk || v.tgl_masuk > asOfIsoDate) return false;
   return !v.tgl_ended || v.tgl_ended > asOfIsoDate;

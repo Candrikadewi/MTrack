@@ -3,7 +3,19 @@ import { useMemo } from "react";
 import Link from "next/link";
 import { addMonths, endOfMonth, format } from "date-fns";
 import { useSessionState } from "@/lib/useSessionState";
-import { CalendarRange, CheckCircle2, ClipboardList, Users2, UserCheck, FileText, GraduationCap, HardHat } from "lucide-react";
+import {
+  CalendarRange,
+  CheckCircle2,
+  ClipboardList,
+  Users2,
+  UserCheck,
+  UserPlus,
+  UserMinus,
+  Shuffle,
+  FileText,
+  GraduationCap,
+  HardHat,
+} from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { StatTile, ProgressBar } from "@/components/ui/StatTile";
 import { Select } from "@/components/ui/Form";
@@ -20,6 +32,7 @@ import {
   currentMonthKey,
   demandSupplyRows,
   deptsOfAny,
+  diffEmployees,
   directorates,
   divisionsOfAny,
   filterEmployees,
@@ -28,10 +41,12 @@ import {
   manpowerMovementByFiscalYear,
   monthBuckets,
   positionBreakdown,
+  previousPeriodWithData,
   reviewBatchesNeedingAction,
   shopConfirmBatchesNeedingAction,
   type ActionBatch,
   type DemandSupplyRow,
+  type EmployeeDiff,
   type MovementStatus,
 } from "@/lib/engine/dashboard";
 import { filterByDivDept } from "@/lib/engine/enrollment";
@@ -483,8 +498,39 @@ function ManpowerMovementBlock({
     [snapshotsByPeriod, vokasi, selDirectorates, selDivisions, selDepts, selLaborTypes, selStatuses, refDate]
   );
 
+  const [diffMonth, setDiffMonth] = useSessionState<string>("dash.movement.diffMonth", "");
+  const availableMonths = useMemo(() => Array.from(snapshotsByPeriod.keys()).sort().reverse(), [snapshotsByPeriod]);
+  const prevMonth = diffMonth ? previousPeriodWithData(diffMonth, snapshotsByPeriod) : null;
+  const diff = useMemo(() => {
+    if (!diffMonth || !prevMonth) return null;
+    return diffEmployees(snapshotsByPeriod.get(prevMonth)!, snapshotsByPeriod.get(diffMonth)!);
+  }, [diffMonth, prevMonth, snapshotsByPeriod]);
+
   return (
-    <Card title="Manpower Movement">
+    <Card
+      title="Manpower Movement"
+      action={
+        availableMonths.length > 0 && (
+          <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 dark:border-slate-800 dark:bg-slate-900">
+            <Shuffle size={14} className="text-slate-400" />
+            <span className="text-xs font-medium text-slate-500">Lihat Perubahan</span>
+            <Select
+              bare
+              value={diffMonth}
+              onChange={(e) => setDiffMonth(e.target.value)}
+              className="!w-auto border-none !p-0 !py-0 text-sm font-semibold shadow-none focus:ring-0"
+            >
+              <option value="">- pilih bulan -</option>
+              {availableMonths.map((m) => (
+                <option key={m} value={m}>
+                  {format(new Date(`${m}-01T00:00:00`), "MMM yyyy")}
+                </option>
+              ))}
+            </Select>
+          </div>
+        )
+      }
+    >
       <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         <MultiSelect
           label="Directorate"
@@ -525,7 +571,103 @@ function ManpowerMovementBlock({
         />
       </div>
       <CompositionChart data={movementRows} heightClass="h-56" />
+      {diffMonth && (
+        <div className="mt-5 border-t border-slate-100 pt-4 dark:border-slate-800">
+          {!diff ? (
+            <EmptyState text="Tidak ada data periode sebelumnya untuk dibandingkan." />
+          ) : (
+            <EmployeeDiffPanel diff={diff} fromMonth={prevMonth!} toMonth={diffMonth} />
+          )}
+        </div>
+      )}
     </Card>
+  );
+}
+
+function EmployeeDiffPanel({ diff, fromMonth, toMonth }: { diff: EmployeeDiff; fromMonth: string; toMonth: string }) {
+  const fmtMonth = (m: string) => format(new Date(`${m}-01T00:00:00`), "MMM yyyy");
+  return (
+    <div className="space-y-4">
+      <p className="text-xs text-slate-400">
+        Perubahan {fmtMonth(fromMonth)} → {fmtMonth(toMonth)}, berdasarkan noreg.
+      </p>
+      <div className="grid gap-4 lg:grid-cols-3">
+        <DiffColumn
+          icon={UserPlus}
+          tone="emerald"
+          title={`Baru (${diff.newHires.length})`}
+          empty="Tidak ada penambahan."
+          rows={diff.newHires.map((e) => ({ key: e.noreg, primary: `${e.nama} (${e.noreg})`, secondary: `${e.division} · ${e.dept}` }))}
+        />
+        <DiffColumn
+          icon={UserMinus}
+          tone="red"
+          title={`Keluar (${diff.left.length})`}
+          empty="Tidak ada pengurangan."
+          rows={diff.left.map((e) => ({ key: e.noreg, primary: `${e.nama} (${e.noreg})`, secondary: `${e.division} · ${e.dept}` }))}
+        />
+        <DiffColumn
+          icon={Shuffle}
+          tone="amber"
+          title={`Mutasi/Rotasi (${diff.moved.length})`}
+          empty="Tidak ada mutasi/rotasi."
+          rows={diff.moved.map((m) => ({
+            key: m.noreg,
+            primary: `${m.nama} (${m.noreg})`,
+            secondary: m.changedFields
+              .map((f) => {
+                const labels: Record<string, string> = {
+                  division: "Divisi",
+                  dept: "Dept",
+                  status_kontrak: "Status",
+                  posisi_struktural: "Posisi",
+                };
+                return `${labels[f]}: ${m.before[f] || "-"} → ${m.after[f] || "-"}`;
+              })
+              .join(" · "),
+          }))}
+        />
+      </div>
+    </div>
+  );
+}
+
+function DiffColumn({
+  icon: Icon,
+  tone,
+  title,
+  empty,
+  rows,
+}: {
+  icon: typeof UserPlus;
+  tone: "emerald" | "red" | "amber";
+  title: string;
+  empty: string;
+  rows: { key: string; primary: string; secondary: string }[];
+}) {
+  const toneClass = {
+    emerald: "text-emerald-600 dark:text-emerald-400",
+    red: "text-red-600 dark:text-red-400",
+    amber: "text-amber-600 dark:text-amber-400",
+  }[tone];
+  return (
+    <div>
+      <div className={`mb-2 flex items-center gap-1.5 text-xs font-semibold ${toneClass}`}>
+        <Icon size={13} /> {title}
+      </div>
+      {rows.length === 0 ? (
+        <p className="text-xs text-slate-400">{empty}</p>
+      ) : (
+        <div className="max-h-56 space-y-1.5 overflow-y-auto pr-1">
+          {rows.map((r) => (
+            <div key={r.key} className="rounded-lg border border-slate-100 px-2.5 py-1.5 text-xs dark:border-slate-800">
+              <div className="font-medium text-slate-700 dark:text-slate-200">{r.primary}</div>
+              <div className="text-slate-400">{r.secondary}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
