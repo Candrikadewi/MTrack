@@ -163,3 +163,8 @@ export function contractRemainingLabel(contractEnd: string | null): string {
   const days = sisaHari(contractEnd);
   return `${days} hari`;
 }
+
+/** Supply Pool — how long an entry has been sitting in the pool since entered_pool_date. */
+export function poolLeadTimeDays(enteredPoolDate: string): number {
+  return -sisaHari(enteredPoolDate);
+}

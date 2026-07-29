@@ -14,6 +14,7 @@ import {
   FileText,
   GraduationCap,
   HardHat,
+  TrendingUp,
 } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { StatTile, ProgressBar } from "@/components/ui/StatTile";
@@ -563,8 +564,6 @@ const MUTATION_FIELD_LABELS: Record<string, string> = {
   division: "Divisi",
   dept: "Dept",
   section: "Section",
-  status_kontrak: "Status",
-  posisi_struktural: "Posisi",
 };
 
 const EXIT_REASON_TONE: Record<string, BadgeTone> = {
@@ -572,12 +571,6 @@ const EXIT_REASON_TONE: Record<string, BadgeTone> = {
   Pensiun: "blue",
   Resign: "red",
   "Tidak Diketahui": "slate",
-};
-
-const LABOR_TYPE_TAG_TONE: Record<string, BadgeTone> = {
-  "MP Excess": "amber",
-  GST: "blue",
-  "Unfit/Sakit": "red",
 };
 
 function EmployeeDiffPanel({ diff, fromMonth, toMonth }: { diff: EmployeeDiff; fromMonth: string; toMonth: string }) {
@@ -625,21 +618,17 @@ function EmployeeDiffPanel({ diff, fromMonth, toMonth }: { diff: EmployeeDiff; f
             secondary: m.changedFields
               .map((f) => `${MUTATION_FIELD_LABELS[f]}: ${m.before[f] || "-"} → ${m.after[f] || "-"}`)
               .join(" · "),
-            tag: m.isOrgMove ? "Rotasi/Mutasi" : undefined,
-            tagTone: "slate" as BadgeTone,
           }))}
         />
         <DiffColumn
-          icon={FileText}
+          icon={TrendingUp}
           tone="violet"
-          title={`Perubahan Labor Type (${diff.laborTypeChanges.length})`}
-          empty="Tidak ada perubahan labor type."
-          rows={diff.laborTypeChanges.map((l) => ({
-            key: l.noreg,
-            primary: `${l.nama} (${l.noreg})`,
-            secondary: `${l.before || "-"} → ${l.after || "-"}`,
-            tag: l.tag,
-            tagTone: l.tag ? LABOR_TYPE_TAG_TONE[l.tag] : undefined,
+          title={`Posisi (${diff.positionChanges.length})`}
+          empty="Tidak ada perubahan posisi."
+          rows={diff.positionChanges.map((p) => ({
+            key: p.noreg,
+            primary: `${p.nama} (${p.noreg})`,
+            secondary: `${p.before || "-"} → ${p.after || "-"}`,
           }))}
         />
       </div>

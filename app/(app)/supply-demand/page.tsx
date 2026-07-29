@@ -10,7 +10,7 @@ import { Select } from "@/components/ui/Form";
 import { MultiSelect } from "@/components/ui/MultiSelect";
 import { NoregInput, DateInput } from "@/components/enrollment/NoregInput";
 import { useStoreList } from "@/lib/useStore";
-import { demandStore } from "@/lib/repo";
+import { demandStore, utilPoolStore } from "@/lib/repo";
 import { fmtDate, sisaHari, demandVisibleDate, fulfillmentDeadline, supplyDemandStatus } from "@/lib/engine/compute";
 import {
   demandGranularStatus,
@@ -22,6 +22,7 @@ import {
   filterByDivDept,
 } from "@/lib/engine/enrollment";
 import {
+  assignPoolEntryToDemand,
   confirmDemandFulfillment,
   confirmShopReceipt,
   setDemandFulfillDate,
@@ -29,7 +30,12 @@ import {
   setDemandReplacementByNoreg,
 } from "@/lib/engine/actions";
 import { useRole } from "@/lib/RoleContext";
-import type { Demand, DemandCategory, ReplacementStatus } from "@/lib/types";
+import type { Demand, DemandCategory, ReplacementStatus, UtilPoolEntry } from "@/lib/types";
+
+/** Sources where the replacement is an already-employed person being
+ * redeployed (from the Supply Pool) rather than a fresh hire — picked via
+ * dropdown instead of typed noreg. */
+const POOL_SOURCES: ReplacementStatus[] = ["MP Excess", "MP Back Up"];
 
 // "Vokasi New Hire" is intentionally on both lists (a PKWT vacancy can be
 // backfilled from the Vokasi pipeline — see effectiveDemandCategory); there
@@ -60,6 +66,7 @@ export default function SupplyDemandPage() {
   const [tab, setTab] = useState<DemandCategory>("PKWT");
   const [month, setMonth] = useState(currentMonthKey());
   const demands = useStoreList(demandStore);
+  const poolEntries = useStoreList(utilPoolStore);
 
   const tabDemands = useMemo(() => demands.filter((d) => effectiveDemandCategory(d) === tab), [demands, tab]);
   const monthDemands = useMemo(
@@ -191,6 +198,7 @@ export default function SupplyDemandPage() {
                   tab={tab}
                   canEditReplacement={canEditReplacement}
                   canEditFulfillDate={canEditFulfillDate}
+                  poolEntries={poolEntries}
                 />
               ))}
             </tbody>
@@ -243,17 +251,20 @@ function SupplyDemandRow({
   tab,
   canEditReplacement,
   canEditFulfillDate,
+  poolEntries,
 }: {
   demand: Demand;
   tab: DemandCategory;
   canEditReplacement: boolean;
   canEditFulfillDate: boolean;
+  poolEntries: UtilPoolEntry[];
 }) {
   const isLabelRow = d.origin_type === "Project" || d.origin_type === "TaktUp";
   const target = demandTargetDate(d);
   const deadline = fulfillmentDeadline(target, d.fs_status);
   const isNoReplace = d.replacement_status === "No Replace";
   const hasCandidate = Boolean(d.replacement_noreg);
+  const isPoolSource = POOL_SOURCES.includes(d.replacement_status);
   const status = supplyDemandStatus(target, deadline, d.shop_confirmed_date);
   // A demand shows under `tab` via effectiveDemandCategory, which can differ
   // from its origin category once Source = "Vokasi New Hire" moves a
@@ -337,10 +348,14 @@ function SupplyDemandRow({
         <>
           <Td>
             {canEditReplacement ? (
-              <NoregInput
-                value={d.replacement_noreg}
-                onCommit={(v) => setDemandReplacementByNoreg(d.id, v, d.replacement_status)}
-              />
+              isPoolSource ? (
+                <PoolReplacementSelect demand={d} poolEntries={poolEntries} />
+              ) : (
+                <NoregInput
+                  value={d.replacement_noreg}
+                  onCommit={(v) => setDemandReplacementByNoreg(d.id, v, d.replacement_status)}
+                />
+              )
             ) : (
               d.replacement_noreg || "-"
             )}
@@ -379,5 +394,38 @@ function SupplyDemandRow({
         <Badge tone={statusTone(status)}>{status}</Badge>
       </Td>
     </tr>
+  );
+}
+
+/** MP Excess/MP Back Up candidates come from the Supply Pool, not a typed
+ * noreg — selecting one both maps and confirms the assignment in one step
+ * (see assignPoolEntryToDemand). Same-department entries sort first;
+ * cross-department entries are flagged in red so the FS-status implication
+ * is visible before picking. */
+function PoolReplacementSelect({ demand, poolEntries }: { demand: Demand; poolEntries: UtilPoolEntry[] }) {
+  const eligible = poolEntries
+    .filter((e) => e.status === "Open" || e.noreg === demand.replacement_noreg)
+    .sort((a, b) => (a.prev_dept === demand.dept ? 0 : 1) - (b.prev_dept === demand.dept ? 0 : 1));
+
+  return (
+    <Select
+      value={demand.replacement_noreg}
+      onChange={(e) => {
+        const entry = eligible.find((p) => p.noreg === e.target.value);
+        if (entry) assignPoolEntryToDemand(entry.id, demand.id);
+      }}
+      className="min-w-[160px]"
+    >
+      <option value="">- pilih dari Supply Pool -</option>
+      {eligible.map((e) => (
+        <option
+          key={e.id}
+          value={e.noreg}
+          style={e.prev_dept !== demand.dept ? { color: "#e11d48" } : undefined}
+        >
+          {e.nama} ({e.noreg}) — {e.prev_dept}
+        </option>
+      ))}
+    </Select>
   );
 }
