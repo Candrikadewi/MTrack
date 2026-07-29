@@ -5,7 +5,6 @@ import { addMonths, endOfMonth, format } from "date-fns";
 import { useSessionState } from "@/lib/useSessionState";
 import {
   CalendarRange,
-  CheckCircle2,
   ClipboardList,
   Users2,
   UserCheck,
@@ -23,7 +22,7 @@ import { MultiSelect } from "@/components/ui/MultiSelect";
 import { MonthBarChart } from "@/components/ui/MonthBarChart";
 import { CompositionChart } from "@/components/ui/CompositionChart";
 import { LaborTypeChart } from "@/components/ui/LaborTypeChart";
-import { Badge } from "@/components/ui/Badge";
+import { Badge, type Tone as BadgeTone } from "@/components/ui/Badge";
 import { EmptyState, TableWrap, Td, Th } from "@/components/ui/Table";
 import { useStoreList } from "@/lib/useStore";
 import { demandStore, pkwtReviewStore, projectStore, taktStore, utilPoolStore, vokasiStore, zparStore } from "@/lib/repo";
@@ -238,6 +237,8 @@ export default function DashboardPage() {
         snapshotsByPeriod={snapshotsByPeriod}
         vokasi={vokasi}
         refMonth={refMonth}
+        reviews={reviews}
+        demands={demands}
       />
 
       {/* 3. Komposisi by Labor Type */}
@@ -262,17 +263,17 @@ export default function DashboardPage() {
 }
 
 // ---------------------------------------------------------------------------
-// 0. Action Needed — one section per (stage, category): Isi Review PKWT,
-// Mapping Candidate PKWT/Vokasi, Shop Confirmation PKWT/Vokasi. Each section
-// lists every month-batch that's currently visible and still has a gap, so
-// a backlog spanning several months is never hidden behind a single pick.
+// 0. Action Needed — one row per (stage, category): Isi Review PKWT,
+// Mapping Candidate PKWT/Vokasi, Shop Confirmation PKWT/Vokasi. Each row
+// collapses every month-batch with a gap into a single total + worst-case
+// status, so the panel stays a fixed 5 rows no matter how big a backlog
+// gets — full month-by-month detail still lives on the linked source page.
 // ---------------------------------------------------------------------------
 
 interface ActionSectionSpec {
   key: string;
   icon: typeof ClipboardList;
   title: string;
-  verb: string; // "isi review PKWT" -> "Segera {verb} {month}!"
   anchor: "due_date" | "arrival";
   batches: ActionBatch[];
 }
@@ -285,71 +286,40 @@ function ActionNeededBlock({ reviews, demands }: { reviews: PkwtReview[]; demand
   const shopVokasi = useMemo(() => shopConfirmBatchesNeedingAction(demands, "Vokasi"), [demands]);
 
   const sections: ActionSectionSpec[] = [
-    { key: "review", icon: ClipboardList, title: "Isi Review PKWT", verb: "isi review PKWT", anchor: "due_date", batches: reviewBatches },
-    {
-      key: "candidate-pkwt",
-      icon: Users2,
-      title: "Mapping Candidate PKWT",
-      verb: "isi candidate PKWT Demand",
-      anchor: "due_date",
-      batches: candidatePkwt,
-    },
-    {
-      key: "candidate-vokasi",
-      icon: Users2,
-      title: "Mapping Candidate Vokasi",
-      verb: "isi candidate Vokasi Demand",
-      anchor: "due_date",
-      batches: candidateVokasi,
-    },
-    {
-      key: "shop-pkwt",
-      icon: HardHat,
-      title: "Shop Confirmation PKWT",
-      verb: "dapatkan konfirmasi shop PKWT",
-      anchor: "arrival",
-      batches: shopPkwt,
-    },
-    {
-      key: "shop-vokasi",
-      icon: HardHat,
-      title: "Shop Confirmation Vokasi",
-      verb: "dapatkan konfirmasi shop Vokasi",
-      anchor: "arrival",
-      batches: shopVokasi,
-    },
+    { key: "review", icon: ClipboardList, title: "Isi Review PKWT", anchor: "due_date", batches: reviewBatches },
+    { key: "candidate-pkwt", icon: Users2, title: "Mapping Candidate PKWT", anchor: "due_date", batches: candidatePkwt },
+    { key: "candidate-vokasi", icon: Users2, title: "Mapping Candidate Vokasi", anchor: "due_date", batches: candidateVokasi },
+    { key: "shop-pkwt", icon: HardHat, title: "Shop Confirmation PKWT", anchor: "arrival", batches: shopPkwt },
+    { key: "shop-vokasi", icon: HardHat, title: "Shop Confirmation Vokasi", anchor: "arrival", batches: shopVokasi },
   ];
-  const activeSections = sections.filter((s) => s.batches.length > 0);
 
   return (
-    <Card title="Action Needed" subtitle="Progres tiap tahap review, candidate mapping, dan shop confirmation per bulan — real-time.">
-      {activeSections.length === 0 ? (
-        <div className="flex items-center gap-2 py-2 text-sm text-emerald-600 dark:text-emerald-400">
-          <CheckCircle2 size={16} /> Semua tahap on-track, tidak ada backlog bulan berjalan.
-        </div>
-      ) : (
-        <div className="space-y-4">
-          {activeSections.map((section) => (
-            <div key={section.key}>
-              <div className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-                <section.icon size={13} /> {section.title}
-              </div>
-              <div className="space-y-1.5">
-                {section.batches.map((batch) => (
-                  <ActionBatchRow key={batch.month} verb={section.verb} anchor={section.anchor} batch={batch} />
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+    <Card title="Action Needed" subtitle="Progres tiap tahap review, candidate mapping, dan shop confirmation — real-time.">
+      <div className="divide-y divide-slate-100 dark:divide-slate-800">
+        {sections.map((section) => (
+          <ActionSummaryRow key={section.key} section={section} />
+        ))}
+      </div>
     </Card>
   );
 }
 
-function ActionBatchRow({ verb, anchor, batch }: { verb: string; anchor: "due_date" | "arrival"; batch: ActionBatch }) {
-  const overdue = batch.daysRemaining < 0;
-  const days = Math.abs(batch.daysRemaining);
+function ActionSummaryRow({ section }: { section: ActionSectionSpec }) {
+  const { icon: Icon, title, anchor, batches } = section;
+  if (batches.length === 0) {
+    return (
+      <div className="flex items-center gap-3 py-2.5 text-sm">
+        <Icon size={15} className="shrink-0 text-slate-300 dark:text-slate-600" />
+        <span className="flex-1 text-slate-500 dark:text-slate-400">{title}</span>
+        <Badge tone="green">Aman</Badge>
+      </div>
+    );
+  }
+
+  const totalGap = batches.reduce((sum, b) => sum + (b.total - b.done), 0);
+  const worst = batches.reduce((a, b) => (b.daysRemaining < a.daysRemaining ? b : a));
+  const overdue = worst.daysRemaining < 0;
+  const days = Math.abs(worst.daysRemaining);
   const statusLabel =
     anchor === "arrival"
       ? overdue
@@ -361,13 +331,14 @@ function ActionBatchRow({ verb, anchor, batch }: { verb: string; anchor: "due_da
 
   return (
     <Link
-      href={batch.href}
-      className="flex items-center justify-between gap-3 rounded-lg border border-slate-100 px-3 py-2 text-sm transition-colors hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-900/60"
+      href={worst.href}
+      className="flex items-center gap-3 py-2.5 text-sm transition-colors hover:bg-slate-50 dark:hover:bg-slate-900/60"
     >
-      <span className="text-slate-700 dark:text-slate-200">
-        Segera {verb} {batch.monthLabel}!{" "}
+      <Icon size={15} className="shrink-0 text-slate-400" />
+      <span className="flex-1 text-slate-700 dark:text-slate-200">
+        {title}{" "}
         <span className="text-slate-400">
-          ({batch.done}/{batch.total} MP)
+          — {totalGap} MP tertunda · {batches.length} bulan
         </span>
       </span>
       <Badge tone={overdue ? "red" : "amber"}>{statusLabel}</Badge>
@@ -470,11 +441,15 @@ function ManpowerMovementBlock({
   snapshotsByPeriod,
   vokasi,
   refMonth,
+  reviews,
+  demands,
 }: {
   employees: EmployeeRecord[];
   snapshotsByPeriod: Map<string, EmployeeRecord[]>;
   vokasi: VokasiRecord[];
   refMonth: string;
+  reviews: PkwtReview[];
+  demands: Demand[];
 }) {
   const [selDirectorates, setSelDirectorates] = useSessionState<string[]>("dash.movement.directorates", []);
   const [selDivisions, setSelDivisions] = useSessionState<string[]>("dash.movement.divisions", []);
@@ -503,8 +478,8 @@ function ManpowerMovementBlock({
   const prevMonth = diffMonth ? previousPeriodWithData(diffMonth, snapshotsByPeriod) : null;
   const diff = useMemo(() => {
     if (!diffMonth || !prevMonth) return null;
-    return diffEmployees(snapshotsByPeriod.get(prevMonth)!, snapshotsByPeriod.get(diffMonth)!);
-  }, [diffMonth, prevMonth, snapshotsByPeriod]);
+    return diffEmployees(snapshotsByPeriod.get(prevMonth)!, snapshotsByPeriod.get(diffMonth)!, reviews, demands);
+  }, [diffMonth, prevMonth, snapshotsByPeriod, reviews, demands]);
 
   return (
     <Card
@@ -584,6 +559,27 @@ function ManpowerMovementBlock({
   );
 }
 
+const MUTATION_FIELD_LABELS: Record<string, string> = {
+  division: "Divisi",
+  dept: "Dept",
+  section: "Section",
+  status_kontrak: "Status",
+  posisi_struktural: "Posisi",
+};
+
+const EXIT_REASON_TONE: Record<string, BadgeTone> = {
+  "Kontrak Ended/Terminate": "amber",
+  Pensiun: "blue",
+  Resign: "red",
+  "Tidak Diketahui": "slate",
+};
+
+const LABOR_TYPE_TAG_TONE: Record<string, BadgeTone> = {
+  "MP Excess": "amber",
+  GST: "blue",
+  "Unfit/Sakit": "red",
+};
+
 function EmployeeDiffPanel({ diff, fromMonth, toMonth }: { diff: EmployeeDiff; fromMonth: string; toMonth: string }) {
   const fmtMonth = (m: string) => format(new Date(`${m}-01T00:00:00`), "MMM yyyy");
   return (
@@ -591,40 +587,59 @@ function EmployeeDiffPanel({ diff, fromMonth, toMonth }: { diff: EmployeeDiff; f
       <p className="text-xs text-slate-400">
         Perubahan {fmtMonth(fromMonth)} → {fmtMonth(toMonth)}, berdasarkan noreg.
       </p>
-      <div className="grid gap-4 lg:grid-cols-3">
+      <div className="grid gap-4 lg:grid-cols-4">
         <DiffColumn
           icon={UserPlus}
           tone="emerald"
           title={`Baru (${diff.newHires.length})`}
           empty="Tidak ada penambahan."
-          rows={diff.newHires.map((e) => ({ key: e.noreg, primary: `${e.nama} (${e.noreg})`, secondary: `${e.division} · ${e.dept}` }))}
+          rows={diff.newHires.map((e) => ({
+            key: e.employee.noreg,
+            primary: `${e.employee.nama} (${e.employee.noreg})`,
+            secondary: `${e.employee.division} · ${e.employee.dept}`,
+            tag: e.overlapping ? "PKWT Overlapping" : undefined,
+            tagTone: "violet" as BadgeTone,
+          }))}
         />
         <DiffColumn
           icon={UserMinus}
           tone="red"
-          title={`Keluar (${diff.left.length})`}
+          title={`Keluar (${diff.exits.length})`}
           empty="Tidak ada pengurangan."
-          rows={diff.left.map((e) => ({ key: e.noreg, primary: `${e.nama} (${e.noreg})`, secondary: `${e.division} · ${e.dept}` }))}
+          rows={diff.exits.map((e) => ({
+            key: e.employee.noreg,
+            primary: `${e.employee.nama} (${e.employee.noreg})`,
+            secondary: `${e.employee.division} · ${e.employee.dept}`,
+            tag: e.reason,
+            tagTone: EXIT_REASON_TONE[e.reason],
+          }))}
         />
         <DiffColumn
           icon={Shuffle}
           tone="amber"
-          title={`Mutasi/Rotasi (${diff.moved.length})`}
-          empty="Tidak ada mutasi/rotasi."
-          rows={diff.moved.map((m) => ({
+          title={`Mutasi (${diff.mutations.length})`}
+          empty="Tidak ada mutasi."
+          rows={diff.mutations.map((m) => ({
             key: m.noreg,
             primary: `${m.nama} (${m.noreg})`,
             secondary: m.changedFields
-              .map((f) => {
-                const labels: Record<string, string> = {
-                  division: "Divisi",
-                  dept: "Dept",
-                  status_kontrak: "Status",
-                  posisi_struktural: "Posisi",
-                };
-                return `${labels[f]}: ${m.before[f] || "-"} → ${m.after[f] || "-"}`;
-              })
+              .map((f) => `${MUTATION_FIELD_LABELS[f]}: ${m.before[f] || "-"} → ${m.after[f] || "-"}`)
               .join(" · "),
+            tag: m.isOrgMove ? "Rotasi/Mutasi" : undefined,
+            tagTone: "slate" as BadgeTone,
+          }))}
+        />
+        <DiffColumn
+          icon={FileText}
+          tone="violet"
+          title={`Perubahan Labor Type (${diff.laborTypeChanges.length})`}
+          empty="Tidak ada perubahan labor type."
+          rows={diff.laborTypeChanges.map((l) => ({
+            key: l.noreg,
+            primary: `${l.nama} (${l.noreg})`,
+            secondary: `${l.before || "-"} → ${l.after || "-"}`,
+            tag: l.tag,
+            tagTone: l.tag ? LABOR_TYPE_TAG_TONE[l.tag] : undefined,
           }))}
         />
       </div>
@@ -640,15 +655,16 @@ function DiffColumn({
   rows,
 }: {
   icon: typeof UserPlus;
-  tone: "emerald" | "red" | "amber";
+  tone: "emerald" | "red" | "amber" | "violet";
   title: string;
   empty: string;
-  rows: { key: string; primary: string; secondary: string }[];
+  rows: { key: string; primary: string; secondary: string; tag?: string; tagTone?: BadgeTone }[];
 }) {
   const toneClass = {
     emerald: "text-emerald-600 dark:text-emerald-400",
     red: "text-red-600 dark:text-red-400",
     amber: "text-amber-600 dark:text-amber-400",
+    violet: "text-violet-600 dark:text-violet-400",
   }[tone];
   return (
     <div>
@@ -661,7 +677,10 @@ function DiffColumn({
         <div className="max-h-56 space-y-1.5 overflow-y-auto pr-1">
           {rows.map((r) => (
             <div key={r.key} className="rounded-lg border border-slate-100 px-2.5 py-1.5 text-xs dark:border-slate-800">
-              <div className="font-medium text-slate-700 dark:text-slate-200">{r.primary}</div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-medium text-slate-700 dark:text-slate-200">{r.primary}</span>
+                {r.tag && <Badge tone={r.tagTone}>{r.tag}</Badge>}
+              </div>
               <div className="text-slate-400">{r.secondary}</div>
             </div>
           ))}

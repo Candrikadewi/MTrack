@@ -80,41 +80,106 @@ export function previousPeriodWithData(month: string, snapshotsByPeriod: Map<str
   return null;
 }
 
-const MOVE_COMPARE_FIELDS = ["division", "dept", "status_kontrak", "posisi_struktural"] as const;
+const MUTATION_FIELDS = ["division", "dept", "section", "status_kontrak", "posisi_struktural"] as const;
+const ORG_FIELDS = new Set<(typeof MUTATION_FIELDS)[number]>(["division", "dept", "section"]);
 
-export interface EmployeeMoveEntry {
+export type ExitReason = "Kontrak Ended/Terminate" | "Pensiun" | "Resign" | "Tidak Diketahui";
+
+/** New hire whose labor_type is B2 is a PKWT-overlap hire (temp double-cover
+ * before the outgoing person actually leaves), not a straightforward
+ * addition — see LABOR_TYPE_TAG below for the B2/B3/B4 semantics. */
+export interface NewHireEntry {
+  employee: EmployeeRecord;
+  overlapping: boolean;
+}
+
+export interface ExitEntry {
+  employee: EmployeeRecord;
+  reason: ExitReason;
+}
+
+export interface MutationEntry {
   noreg: string;
   nama: string;
   before: EmployeeRecord;
   after: EmployeeRecord;
-  changedFields: (typeof MOVE_COMPARE_FIELDS)[number][];
+  changedFields: (typeof MUTATION_FIELDS)[number][];
+  isOrgMove: boolean; // true if division/dept/section is among changedFields (Rotasi/Mutasi proper)
+}
+
+/** B2/B3/B4 destination codes carry specific shop-floor meaning beyond "labor
+ * type changed" — see MTRACK business rules: B2 = MP Excess (surplus,
+ * awaiting reassignment), B3 = GST (temporary assignment elsewhere), B4 =
+ * Unfit/Sakit. Only meaningful for someone who WAS already on roster; a
+ * brand new B2 hire is tagged "PKWT Overlapping" on the New Hire entry
+ * instead (see NewHireEntry). */
+const LABOR_TYPE_TAG: Record<string, string> = { B2: "MP Excess", B3: "GST", B4: "Unfit/Sakit" };
+
+export interface LaborTypeChangeEntry {
+  noreg: string;
+  nama: string;
+  before: string;
+  after: string;
+  tag?: string;
 }
 
 export interface EmployeeDiff {
-  newHires: EmployeeRecord[];
-  left: EmployeeRecord[];
-  moved: EmployeeMoveEntry[];
+  newHires: NewHireEntry[];
+  exits: ExitEntry[];
+  mutations: MutationEntry[];
+  laborTypeChanges: LaborTypeChangeEntry[];
 }
 
-/** Month-to-month roster diff by noreg — New (in `after` only), Left (in
- * `before` only), Moved (same noreg, division/dept/status_kontrak/
- * posisi_struktural changed). Surfaces exactly the rotation/mutation/
- * addition/reduction that makes ZPAR change every month. */
-export function diffEmployees(before: EmployeeRecord[], after: EmployeeRecord[]): EmployeeDiff {
+/** Best-effort "why did this person leave the roster" classification,
+ * cross-referencing the data HR/Enrollment already tracks. Only as reliable
+ * as Enrollment Monitoring is kept current — an exit with no matching
+ * review/demand falls back to "Tidak Diketahui" rather than guessing. */
+function classifyExitReason(noreg: string, reviews: PkwtReview[], demands: Demand[]): ExitReason {
+  if (reviews.some((r) => r.noreg === noreg && r.review_result === "Terminate")) return "Kontrak Ended/Terminate";
+  if (demands.some((d) => d.outgoing_noreg === noreg && d.origin_type === "Pension")) return "Pensiun";
+  if (demands.some((d) => d.outgoing_noreg === noreg && d.origin_type === "Resign")) return "Resign";
+  return "Tidak Diketahui";
+}
+
+/** Month-to-month roster diff by noreg:
+ * - New: in `after` only — tagged "PKWT Overlapping" if labor_type is B2.
+ * - Exit: in `before` only — tagged with a best-effort reason (see
+ *   classifyExitReason).
+ * - Mutation: same noreg, any of division/dept/section/status_kontrak/
+ *   posisi_struktural changed — one row per person with every changed field
+ *   listed together, `isOrgMove` flags whether it's a "Rotasi/Mutasi" proper
+ *   (org placement) vs. purely a contract/position change.
+ * - Labor Type Change: same noreg, labor_type changed — tagged MP Excess/
+ *   GST/Unfit-Sakit when the destination is B2/B3/B4.
+ * A person can appear in both `mutations` and `laborTypeChanges` — they're
+ * different kinds of change (placement vs. classification), tracked
+ * separately on purpose. */
+export function diffEmployees(before: EmployeeRecord[], after: EmployeeRecord[], reviews: PkwtReview[], demands: Demand[]): EmployeeDiff {
   const beforeByNoreg = new Map(before.filter((e) => e.noreg).map((e) => [e.noreg, e]));
   const afterByNoreg = new Map(after.filter((e) => e.noreg).map((e) => [e.noreg, e]));
 
-  const newHires = after.filter((e) => e.noreg && !beforeByNoreg.has(e.noreg));
-  const left = before.filter((e) => e.noreg && !afterByNoreg.has(e.noreg));
+  const newHires: NewHireEntry[] = after
+    .filter((e) => e.noreg && !beforeByNoreg.has(e.noreg))
+    .map((employee) => ({ employee, overlapping: employee.labor_type === "B2" }));
 
-  const moved: EmployeeMoveEntry[] = [];
+  const exits: ExitEntry[] = before
+    .filter((e) => e.noreg && !afterByNoreg.has(e.noreg))
+    .map((employee) => ({ employee, reason: classifyExitReason(employee.noreg, reviews, demands) }));
+
+  const mutations: MutationEntry[] = [];
+  const laborTypeChanges: LaborTypeChangeEntry[] = [];
   for (const [noreg, a] of afterByNoreg) {
     const b = beforeByNoreg.get(noreg);
     if (!b) continue;
-    const changedFields = MOVE_COMPARE_FIELDS.filter((f) => a[f] !== b[f]);
-    if (changedFields.length > 0) moved.push({ noreg, nama: a.nama, before: b, after: a, changedFields });
+    const changedFields = MUTATION_FIELDS.filter((f) => a[f] !== b[f]);
+    if (changedFields.length > 0) {
+      mutations.push({ noreg, nama: a.nama, before: b, after: a, changedFields, isOrgMove: changedFields.some((f) => ORG_FIELDS.has(f)) });
+    }
+    if (a.labor_type !== b.labor_type) {
+      laborTypeChanges.push({ noreg, nama: a.nama, before: b.labor_type, after: a.labor_type, tag: LABOR_TYPE_TAG[a.labor_type] });
+    }
   }
-  return { newHires, left, moved };
+  return { newHires, exits, mutations, laborTypeChanges };
 }
 
 function isVokasiActiveAsOf(v: VokasiRecord, asOfIsoDate: string): boolean {
