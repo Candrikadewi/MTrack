@@ -380,6 +380,8 @@ function SupplyDemandRow({
           <Td>
             {!hasCandidate ? (
               <span className="text-slate-400">-</span>
+            ) : !d.fulfillment_confirmed_date ? (
+              <span className="text-slate-400">{confirmLabel(d)} dulu</span>
             ) : (
               <ShopConfirmCell
                 value={d.shop_confirmed_date}
@@ -401,11 +403,26 @@ function SupplyDemandRow({
  * noreg — selecting one both maps and confirms the assignment in one step
  * (see assignPoolEntryToDemand). Same-department entries sort first;
  * cross-department entries are flagged in red so the FS-status implication
- * is visible before picking. */
+ * is visible before picking. Once a candidate is set, this cell collapses
+ * back to plain noreg text (Nama/Dept already have their own columns) —
+ * click it to reopen the picker. */
 function PoolReplacementSelect({ demand, poolEntries }: { demand: Demand; poolEntries: UtilPoolEntry[] }) {
+  const [editing, setEditing] = useState(false);
   const eligible = poolEntries
     .filter((e) => e.status === "Open" || e.noreg === demand.replacement_noreg)
     .sort((a, b) => (a.prev_dept === demand.dept ? 0 : 1) - (b.prev_dept === demand.dept ? 0 : 1));
+
+  if (demand.replacement_noreg && !editing) {
+    return (
+      <button
+        type="button"
+        onClick={() => setEditing(true)}
+        className="text-sm text-slate-700 underline decoration-dotted underline-offset-2 hover:text-blue-600 dark:text-slate-200"
+      >
+        {demand.replacement_noreg}
+      </button>
+    );
+  }
 
   return (
     <Select
@@ -413,8 +430,11 @@ function PoolReplacementSelect({ demand, poolEntries }: { demand: Demand; poolEn
       onChange={(e) => {
         const entry = eligible.find((p) => p.noreg === e.target.value);
         if (entry) assignPoolEntryToDemand(entry.id, demand.id);
+        setEditing(false);
       }}
+      onBlur={() => setEditing(false)}
       className="min-w-[160px]"
+      autoFocus={editing}
     >
       <option value="">- pilih dari Supply Pool -</option>
       {eligible.map((e) => (
