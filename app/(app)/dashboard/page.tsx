@@ -111,9 +111,12 @@ export default function DashboardPage() {
     return map;
   }, [snapshots]);
 
-  const [selDirectorates, setSelDirectorates] = useSessionState<string[]>("dash.b1.directorates", []);
-  const [selDivisions, setSelDivisions] = useSessionState<string[]>("dash.b1.divisions", []);
-  const [selDepts, setSelDepts] = useSessionState<string[]>("dash.b1.depts", []);
+  // Single org filter for the whole page — every section below reads off
+  // this instead of carrying its own separate Directorate/Division/Dept
+  // MultiSelects.
+  const [selDirectorates, setSelDirectorates] = useSessionState<string[]>("dash.org.directorates", []);
+  const [selDivisions, setSelDivisions] = useSessionState<string[]>("dash.org.divisions", []);
+  const [selDepts, setSelDepts] = useSessionState<string[]>("dash.org.depts", []);
 
   if (sortedSnapshots.length === 0) {
     return (
@@ -123,9 +126,6 @@ export default function DashboardPage() {
       </div>
     );
   }
-
-  const divisionOptions = divisionsOfAny(employees, selDirectorates);
-  const deptOptions = deptsOfAny(employees, selDivisions);
 
   const filteredEmployees = filterEmployees(employees, {
     directorates: selDirectorates,
@@ -176,6 +176,19 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      {/* Org filter — applies to every section below. */}
+      <Card>
+        <OrgCascadeFilter
+          employees={employees}
+          selDirectorates={selDirectorates}
+          setSelDirectorates={setSelDirectorates}
+          selDivisions={selDivisions}
+          setSelDivisions={setSelDivisions}
+          selDepts={selDepts}
+          setSelDepts={setSelDepts}
+        />
+      </Card>
+
       {/* 0. Action Needed */}
       <ActionNeededBlock reviews={reviews} demands={demands} />
 
@@ -184,28 +197,6 @@ export default function DashboardPage() {
         title="Total Manpower & Status"
         subtitle={selectedSnapshot ? `Data ZPAR periode ${selectedSnapshot.period}` : undefined}
       >
-        <div className="mb-4 grid gap-3 sm:grid-cols-3">
-          <MultiSelect
-            label="Directorate"
-            options={directorates(employees)}
-            selected={selDirectorates}
-            onChange={(v) => {
-              setSelDirectorates(v);
-              setSelDivisions([]);
-              setSelDepts([]);
-            }}
-          />
-          <MultiSelect
-            label="Division"
-            options={divisionOptions}
-            selected={selDivisions}
-            onChange={(v) => {
-              setSelDivisions(v);
-              setSelDepts([]);
-            }}
-          />
-          <MultiSelect label="Department" options={deptOptions} selected={selDepts} onChange={setSelDepts} />
-        </div>
         <TotalManpowerCard total={filteredEmployees.length + vokasiActive.length} employees={filteredEmployees} />
         <div className="mt-3 grid gap-3 sm:grid-cols-3">
           <StatTile
@@ -234,21 +225,40 @@ export default function DashboardPage() {
 
       {/* 2. Manpower Movement */}
       <ManpowerMovementBlock
-        employees={employees}
         snapshotsByPeriod={snapshotsByPeriod}
         vokasi={vokasi}
         refMonth={refMonth}
         reviews={reviews}
         demands={demands}
+        selDirectorates={selDirectorates}
+        selDivisions={selDivisions}
+        selDepts={selDepts}
       />
 
       {/* 3. Komposisi by Labor Type */}
-      <LaborTypeBlock employees={employees} vokasi={vokasi} demands={demands} />
+      <LaborTypeBlock
+        employees={employees}
+        vokasi={vokasi}
+        demands={demands}
+        selDirectorates={selDirectorates}
+        selDivisions={selDivisions}
+        selDepts={selDepts}
+      />
 
       {/* 4 & 5. PKWT Review / Vokasi Ended per bulan */}
       <div className="space-y-6">
-        <PkwtReviewChartBlock employees={employees} reviews={reviews} refMonth={refMonth} />
-        <VokasiEndedChartBlock employees={employees} vokasi={vokasi} refMonth={refMonth} />
+        <PkwtReviewChartBlock
+          reviews={reviews}
+          refMonth={refMonth}
+          selDivisions={selDivisions}
+          selDepts={selDepts}
+        />
+        <VokasiEndedChartBlock
+          vokasi={vokasi}
+          refMonth={refMonth}
+          selDivisions={selDivisions}
+          selDepts={selDepts}
+        />
       </div>
 
       {/* 6. Demand-Supply Overview */}
@@ -438,23 +448,24 @@ function TotalManpowerCard({ total, employees }: { total: number; employees: Emp
 const MOVEMENT_STATUSES: MovementStatus[] = ["Permanen", "Kontrak", "Vokasi"];
 
 function ManpowerMovementBlock({
-  employees,
   snapshotsByPeriod,
   vokasi,
   refMonth,
   reviews,
   demands,
+  selDirectorates,
+  selDivisions,
+  selDepts,
 }: {
-  employees: EmployeeRecord[];
   snapshotsByPeriod: Map<string, EmployeeRecord[]>;
   vokasi: VokasiRecord[];
   refMonth: string;
   reviews: PkwtReview[];
   demands: Demand[];
+  selDirectorates: string[];
+  selDivisions: string[];
+  selDepts: string[];
 }) {
-  const [selDirectorates, setSelDirectorates] = useSessionState<string[]>("dash.movement.directorates", []);
-  const [selDivisions, setSelDivisions] = useSessionState<string[]>("dash.movement.divisions", []);
-  const [selDepts, setSelDepts] = useSessionState<string[]>("dash.movement.depts", []);
   const [selLaborTypes, setSelLaborTypes] = useSessionState<string[]>("dash.movement.laborTypes", []);
   const [selStatuses, setSelStatuses] = useSessionState<MovementStatus[]>("dash.movement.statuses", []);
 
@@ -507,32 +518,7 @@ function ManpowerMovementBlock({
         )
       }
     >
-      <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-        <MultiSelect
-          label="Directorate"
-          options={directorates(employees)}
-          selected={selDirectorates}
-          onChange={(v) => {
-            setSelDirectorates(v);
-            setSelDivisions([]);
-            setSelDepts([]);
-          }}
-        />
-        <MultiSelect
-          label="Division"
-          options={divisionsOfAny(employees, selDirectorates)}
-          selected={selDivisions}
-          onChange={(v) => {
-            setSelDivisions(v);
-            setSelDepts([]);
-          }}
-        />
-        <MultiSelect
-          label="Department"
-          options={deptsOfAny(employees, selDivisions)}
-          selected={selDepts}
-          onChange={setSelDepts}
-        />
+      <div className="mb-4 grid gap-3 sm:grid-cols-2">
         <MultiSelect
           label="Labor Type"
           options={[...LABOR_TYPES]}
@@ -683,14 +669,17 @@ function LaborTypeBlock({
   employees,
   vokasi,
   demands,
+  selDirectorates,
+  selDivisions,
+  selDepts,
 }: {
   employees: EmployeeRecord[];
   vokasi: VokasiRecord[];
   demands: Demand[];
+  selDirectorates: string[];
+  selDivisions: string[];
+  selDepts: string[];
 }) {
-  const [selDirectorates, setSelDirectorates] = useSessionState<string[]>("dash.laborType.directorates", []);
-  const [selDivisions, setSelDivisions] = useSessionState<string[]>("dash.laborType.divisions", []);
-  const [selDepts, setSelDepts] = useSessionState<string[]>("dash.laborType.depts", []);
   const filtered = filterEmployees(employees, {
     directorates: selDirectorates,
     divisions: selDivisions,
@@ -711,15 +700,6 @@ function LaborTypeBlock({
 
   return (
     <Card title="Komposisi by Labor Type">
-      <OrgCascadeFilter
-        employees={employees}
-        selDirectorates={selDirectorates}
-        setSelDirectorates={setSelDirectorates}
-        selDivisions={selDivisions}
-        setSelDivisions={setSelDivisions}
-        selDepts={selDepts}
-        setSelDepts={setSelDepts}
-      />
       {rows.length === 0 ? <EmptyState text="Tidak ada data." /> : <LaborTypeChart data={rows} />}
     </Card>
   );
@@ -745,17 +725,16 @@ function CompactDetailList({ items, unit }: { items: { key: string; count: numbe
 }
 
 function PkwtReviewChartBlock({
-  employees,
   reviews,
   refMonth,
+  selDivisions,
+  selDepts,
 }: {
-  employees: EmployeeRecord[];
   reviews: PkwtReview[];
   refMonth: string;
+  selDivisions: string[];
+  selDepts: string[];
 }) {
-  const [selDirectorates, setSelDirectorates] = useSessionState<string[]>("dash.pkwtReview.directorates", []);
-  const [selDivisions, setSelDivisions] = useSessionState<string[]>("dash.pkwtReview.divisions", []);
-  const [selDepts, setSelDepts] = useSessionState<string[]>("dash.pkwtReview.depts", []);
   const filteredReviews = filterByDivDept(reviews, selDivisions, selDepts);
   const { buckets, byMonth } = monthBuckets(filteredReviews, (r) => r.tgl_review?.slice(0, 7), 3, 5, refMonth);
   const [selected, setSelected] = useSessionState("dash.pkwtReview.month", refMonth);
@@ -765,15 +744,6 @@ function PkwtReviewChartBlock({
 
   return (
     <Card title="PKWT Review per Bulan">
-      <OrgCascadeFilter
-        employees={employees}
-        selDirectorates={selDirectorates}
-        setSelDirectorates={setSelDirectorates}
-        selDivisions={selDivisions}
-        setSelDivisions={setSelDivisions}
-        selDepts={selDepts}
-        setSelDepts={setSelDepts}
-      />
       <div className="space-y-4">
         <MonthBarChart data={buckets} selectedMonth={selected} onSelect={setSelected} showValueLabels />
         <div>
@@ -798,17 +768,16 @@ function PkwtReviewChartBlock({
 }
 
 function VokasiEndedChartBlock({
-  employees,
   vokasi,
   refMonth,
+  selDivisions,
+  selDepts,
 }: {
-  employees: EmployeeRecord[];
   vokasi: VokasiRecord[];
   refMonth: string;
+  selDivisions: string[];
+  selDepts: string[];
 }) {
-  const [selDirectorates, setSelDirectorates] = useSessionState<string[]>("dash.vokasiEnded.directorates", []);
-  const [selDivisions, setSelDivisions] = useSessionState<string[]>("dash.vokasiEnded.divisions", []);
-  const [selDepts, setSelDepts] = useSessionState<string[]>("dash.vokasiEnded.depts", []);
   const filteredVokasi = filterByDivDept(vokasi, selDivisions, selDepts);
   const { buckets, byMonth } = monthBuckets(filteredVokasi, (v) => v.tgl_ended?.slice(0, 7), 3, 5, refMonth);
   const [selected, setSelected] = useSessionState("dash.vokasiEnded.month", refMonth);
@@ -816,15 +785,6 @@ function VokasiEndedChartBlock({
 
   return (
     <Card title="Vokasi Ended per Bulan">
-      <OrgCascadeFilter
-        employees={employees}
-        selDirectorates={selDirectorates}
-        setSelDirectorates={setSelDirectorates}
-        selDivisions={selDivisions}
-        setSelDivisions={setSelDivisions}
-        selDepts={selDepts}
-        setSelDepts={setSelDepts}
-      />
       <div className="space-y-4">
         <MonthBarChart data={buckets} selectedMonth={selected} onSelect={setSelected} showValueLabels />
         <div>

@@ -682,6 +682,19 @@ export function assignPoolEntryToDemand(poolEntryId: string, demandId: string): 
   const entry = utilPoolStore.get(poolEntryId);
   const demand = demandStore.get(demandId);
   if (!entry || !demand) return;
+
+  // Swapping to a different candidate — release whichever pool entry was
+  // previously assigned to this demand back to Open, so it doesn't stay
+  // stuck "Assigned" once it's no longer actually backing anything.
+  if (demand.replacement_noreg && demand.replacement_noreg !== entry.noreg) {
+    const previousEntry = utilPoolStore
+      .list()
+      .find((e) => e.noreg === demand.replacement_noreg && e.status === "Assigned");
+    if (previousEntry) {
+      utilPoolStore.update(previousEntry.id, { status: "Open", action_note: "" });
+    }
+  }
+
   const confirmedDate = today().toISOString().slice(0, 10);
   // Util Pool assign is always an MP Back Up/Excess-style redeployment
   // (someone already employed, not a fresh hire) — default the Source to
