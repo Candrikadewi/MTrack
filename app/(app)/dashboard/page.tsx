@@ -52,6 +52,8 @@ import {
 import { filterByDivDept } from "@/lib/engine/enrollment";
 import { computeVokasiStatus } from "@/lib/engine/compute";
 import { LABOR_TYPES } from "@/lib/types";
+import { useRole } from "@/lib/RoleContext";
+import type { Role } from "@/lib/roles";
 import type {
   Demand,
   EmployeeRecord,
@@ -65,6 +67,7 @@ import type {
 } from "@/lib/types";
 
 export default function DashboardPage() {
+  const role = useRole();
   const snapshots = useStoreList(zparStore);
   const vokasi = useStoreList(vokasiStore);
   const demands = useStoreList(demandStore);
@@ -190,7 +193,7 @@ export default function DashboardPage() {
       </Card>
 
       {/* 0. Action Needed */}
-      <ActionNeededBlock reviews={reviews} demands={demands} />
+      <ActionNeededBlock reviews={reviews} demands={demands} role={role} />
 
       {/* 1. Total Manpower & Status */}
       <Card
@@ -289,20 +292,35 @@ interface ActionSectionSpec {
   batches: ActionBatch[];
 }
 
-function ActionNeededBlock({ reviews, demands }: { reviews: PkwtReview[]; demands: Demand[] }) {
+/** Which Action Needed rows are each role's own job — admin sees the whole
+ * pipeline as a monitoring overview; HR only fills PKWT reviews; Shop maps
+ * replacements in Demand Pool and confirms them on the floor; Guest gets no
+ * action rows at all (view-only). */
+const ROLE_ACTION_KEYS: Record<Role, string[] | null> = {
+  admin: null, // null = show every section
+  hr: ["review"],
+  shop: ["candidate-pkwt", "candidate-vokasi", "shop-pkwt", "shop-vokasi"],
+  guest: [],
+};
+
+function ActionNeededBlock({ reviews, demands, role }: { reviews: PkwtReview[]; demands: Demand[]; role: Role }) {
   const reviewBatches = useMemo(() => reviewBatchesNeedingAction(reviews), [reviews]);
   const candidatePkwt = useMemo(() => candidateBatchesNeedingAction(demands, "PKWT"), [demands]);
   const candidateVokasi = useMemo(() => candidateBatchesNeedingAction(demands, "Vokasi"), [demands]);
   const shopPkwt = useMemo(() => shopConfirmBatchesNeedingAction(demands, "PKWT"), [demands]);
   const shopVokasi = useMemo(() => shopConfirmBatchesNeedingAction(demands, "Vokasi"), [demands]);
 
-  const sections: ActionSectionSpec[] = [
+  const allSections: ActionSectionSpec[] = [
     { key: "review", icon: ClipboardList, title: "Isi Review PKWT", anchor: "due_date", batches: reviewBatches },
     { key: "candidate-pkwt", icon: Users2, title: "Mapping Candidate PKWT", anchor: "due_date", batches: candidatePkwt },
     { key: "candidate-vokasi", icon: Users2, title: "Mapping Candidate Vokasi", anchor: "due_date", batches: candidateVokasi },
     { key: "shop-pkwt", icon: HardHat, title: "Shop Confirmation PKWT", anchor: "arrival", batches: shopPkwt },
     { key: "shop-vokasi", icon: HardHat, title: "Shop Confirmation Vokasi", anchor: "arrival", batches: shopVokasi },
   ];
+  const allowedKeys = ROLE_ACTION_KEYS[role];
+  const sections = allowedKeys === null ? allSections : allSections.filter((s) => allowedKeys.includes(s.key));
+
+  if (sections.length === 0) return null;
 
   return (
     <Card title="Action Needed" subtitle="Progres tiap tahap review, candidate mapping, dan shop confirmation — real-time.">

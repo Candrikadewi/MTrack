@@ -38,11 +38,12 @@ const NAV_BOTTOM = [
   { href: "/handover", label: "Handover Form", icon: FileStack },
 ];
 
-const ROLE_LABEL: Record<Role, string> = { admin: "Admin", shop: "Shop", hr: "HR" };
+const ROLE_LABEL: Record<Role, string> = { admin: "Admin", shop: "Shop", hr: "HR", guest: "Guest" };
 const ROLE_TONE: Record<Role, string> = {
   admin: "bg-violet-100 text-violet-700 dark:bg-violet-500/20 dark:text-violet-300",
   shop: "bg-sky-100 text-sky-700 dark:bg-sky-500/20 dark:text-sky-300",
   hr: "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300",
+  guest: "bg-slate-100 text-slate-600 dark:bg-slate-500/20 dark:text-slate-300",
 };
 
 type NavItem = { href: string; label: string; icon: typeof Upload };
