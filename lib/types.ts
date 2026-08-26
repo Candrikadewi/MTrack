@@ -217,6 +217,7 @@ export interface TaktDownPerson {
   noreg: string;
   nama: string;
   type: MpStatusKategori;
+  div: string;
   dept: string;
 }
 
@@ -249,6 +250,7 @@ export interface UtilPoolEntry {
   type: MpStatusKategori;
   source: UtilPoolSource;
   source_label: string;
+  prev_div: string;
   prev_dept: string;
   entered_pool_date: string;
   contract_end: string | null; // null if Permanen

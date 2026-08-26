@@ -165,7 +165,7 @@ export function TaktDownModal({ open, onClose }: { open: boolean; onClose: () =>
       date,
       takt_before: taktBefore,
       takt_after: taktAfter,
-      released_persons: selected.map((s) => ({ noreg: s.noreg, nama: s.nama, type: s.type, dept: s.dept })),
+      released_persons: selected.map((s) => ({ noreg: s.noreg, nama: s.nama, type: s.type, div: s.div, dept: s.dept })),
     });
     reset();
     onClose();

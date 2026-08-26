@@ -569,6 +569,7 @@ export function autoProjectFinishCheck(): void {
         type,
         source: "ProjectFinish",
         source_label: project.name,
+        prev_div: d.div,
         prev_dept: d.dept,
         contract_end: contractEnd,
       });
@@ -612,7 +613,7 @@ export function createTaktDown(input: {
   date: string;
   takt_before: number;
   takt_after: number;
-  released_persons: { noreg: string; nama: string; type: MpStatusKategori; dept: string }[];
+  released_persons: { noreg: string; nama: string; type: MpStatusKategori; div: string; dept: string }[];
 }): TaktCase {
   const takt: TaktCase = {
     id: genId("takt"),
@@ -635,6 +636,7 @@ export function createTaktDown(input: {
       type: p.type,
       source: "TaktDown",
       source_label: `Takt Down ${input.plant}`,
+      prev_div: p.div,
       prev_dept: p.dept,
       contract_end: contractEnd,
     });
@@ -653,6 +655,7 @@ export function pushToUtilPool(input: {
   type: MpStatusKategori;
   source: UtilPoolEntry["source"];
   source_label: string;
+  prev_div: string;
   prev_dept: string;
   contract_end: string | null;
 }): UtilPoolEntry {
@@ -663,6 +666,7 @@ export function pushToUtilPool(input: {
     type: input.type,
     source: input.source,
     source_label: input.source_label,
+    prev_div: input.prev_div,
     prev_dept: input.prev_dept,
     entered_pool_date: today().toISOString().slice(0, 10),
     contract_end: input.contract_end,
