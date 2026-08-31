@@ -140,16 +140,28 @@ function classifyExitReason(noreg: string, reviews: PkwtReview[], demands: Deman
  * - Position Change: same noreg, posisi_struktural (ZPAR "Posisi
  *   (Struktural)" column) changed — tracked separately from org placement.
  * Labor type transitions (B2/B3/B4 etc.) are analyzed in the Komposisi by
- * Labor Type section instead, not here. */
-export function diffEmployees(before: EmployeeRecord[], after: EmployeeRecord[], reviews: PkwtReview[], demands: Demand[]): EmployeeDiff {
-  const beforeByNoreg = new Map(before.filter((e) => e.noreg).map((e) => [e.noreg, e]));
-  const afterByNoreg = new Map(after.filter((e) => e.noreg).map((e) => [e.noreg, e]));
+ * Labor Type section instead, not here.
+ * `org`, when given, scopes both rosters to the dashboard's Directorate/
+ * Divisi/Dept filter before diffing — so someone who mutated out of the
+ * filtered scope reads as an exit, and someone who mutated in reads as a
+ * new hire, matching what "movement within this division" should mean. */
+export function diffEmployees(
+  before: EmployeeRecord[],
+  after: EmployeeRecord[],
+  reviews: PkwtReview[],
+  demands: Demand[],
+  org?: OrgFilter
+): EmployeeDiff {
+  const scopedBefore = org ? filterEmployees(before, org) : before;
+  const scopedAfter = org ? filterEmployees(after, org) : after;
+  const beforeByNoreg = new Map(scopedBefore.filter((e) => e.noreg).map((e) => [e.noreg, e]));
+  const afterByNoreg = new Map(scopedAfter.filter((e) => e.noreg).map((e) => [e.noreg, e]));
 
-  const newHires: NewHireEntry[] = after
+  const newHires: NewHireEntry[] = scopedAfter
     .filter((e) => e.noreg && !beforeByNoreg.has(e.noreg))
     .map((employee) => ({ employee, overlapping: employee.labor_type === "B2" }));
 
-  const exits: ExitEntry[] = before
+  const exits: ExitEntry[] = scopedBefore
     .filter((e) => e.noreg && !afterByNoreg.has(e.noreg))
     .map((employee) => ({ employee, reason: classifyExitReason(employee.noreg, reviews, demands) }));
 

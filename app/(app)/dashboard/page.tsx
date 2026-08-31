@@ -508,8 +508,12 @@ function ManpowerMovementBlock({
   const prevMonth = diffMonth ? previousPeriodWithData(diffMonth, snapshotsByPeriod) : null;
   const diff = useMemo(() => {
     if (!diffMonth || !prevMonth) return null;
-    return diffEmployees(snapshotsByPeriod.get(prevMonth)!, snapshotsByPeriod.get(diffMonth)!, reviews, demands);
-  }, [diffMonth, prevMonth, snapshotsByPeriod, reviews, demands]);
+    return diffEmployees(snapshotsByPeriod.get(prevMonth)!, snapshotsByPeriod.get(diffMonth)!, reviews, demands, {
+      directorates: selDirectorates,
+      divisions: selDivisions,
+      depts: selDepts,
+    });
+  }, [diffMonth, prevMonth, snapshotsByPeriod, reviews, demands, selDirectorates, selDivisions, selDepts]);
 
   return (
     <Card
