@@ -240,7 +240,7 @@ export interface TaktCase {
 // 3.8 — Utilization Pool Entry
 // ---------------------------------------------------------------------------
 
-export type UtilPoolSource = "ProjectFinish" | "TaktDown";
+export type UtilPoolSource = "ProjectFinish" | "TaktDown" | "Kaizen";
 export type UtilPoolStatus = "Open" | "Assigned" | "Released";
 
 export interface UtilPoolEntry {

@@ -658,6 +658,7 @@ export function pushToUtilPool(input: {
   prev_div: string;
   prev_dept: string;
   contract_end: string | null;
+  entered_pool_date?: string;
 }): UtilPoolEntry {
   const entry: UtilPoolEntry = {
     id: genId("pool"),
@@ -668,13 +669,40 @@ export function pushToUtilPool(input: {
     source_label: input.source_label,
     prev_div: input.prev_div,
     prev_dept: input.prev_dept,
-    entered_pool_date: today().toISOString().slice(0, 10),
+    entered_pool_date: input.entered_pool_date ?? today().toISOString().slice(0, 10),
     contract_end: input.contract_end,
     status: "Open",
     action_note: "",
   };
   utilPoolStore.insert(entry);
   return entry;
+}
+
+/** Kaizen-driven headcount release: each year, a shop/department is
+ * challenged to improve its process and free up MP — this records who came
+ * out of that effort and pushes them straight into Supply Pool (like
+ * Takt Down), grouped per Divisi so each shop's yearly result gets its own
+ * Source Summary card. Contract due date is auto-estimated the same way as
+ * every other Supply Pool source (see estimateContractEnd). */
+export function createKaizenSupply(input: {
+  releaseDate: string;
+  persons: { noreg: string; nama: string; type: MpStatusKategori; div: string; dept: string }[];
+}): UtilPoolEntry[] {
+  const year = input.releaseDate.slice(0, 4);
+  return input.persons.map((p) => {
+    const contractEnd = estimateContractEnd(p.noreg, p.type);
+    return pushToUtilPool({
+      noreg: p.noreg,
+      nama: p.nama,
+      type: p.type,
+      source: "Kaizen",
+      source_label: `Kaizen ${year} - ${p.div}`,
+      prev_div: p.div,
+      prev_dept: p.dept,
+      contract_end: contractEnd,
+      entered_pool_date: input.releaseDate,
+    });
+  });
 }
 
 /** Assigning a pool entry (MP Back Up/Excess) to a demand IS the "officially

@@ -1,5 +1,5 @@
 "use client";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Badge, statusTone } from "@/components/ui/Badge";
@@ -8,6 +8,7 @@ import { FullWidthTabs } from "@/components/ui/Tabs";
 import { MultiSelect } from "@/components/ui/MultiSelect";
 import { Select } from "@/components/ui/Form";
 import { EmptyState, TableWrap, Td, Th } from "@/components/ui/Table";
+import { KaizenModal } from "@/components/util-pool/KaizenModal";
 import { useStoreList } from "@/lib/useStore";
 import { utilPoolStore } from "@/lib/repo";
 import { contractRemainingLabel, contractUrgency, fmtDate, poolLeadTimeDays } from "@/lib/engine/compute";
@@ -53,6 +54,7 @@ function summarizeBySource(entries: UtilPoolEntry[]): SourceSummary[] {
 
 export function UtilPoolPageClient() {
   const role = useRole();
+  const [kaizenOpen, setKaizenOpen] = useState(false);
   const entries = useStoreList(utilPoolStore).sort((a, b) => b.entered_pool_date.localeCompare(a.entered_pool_date));
 
   const sourceSummaries = useMemo(() => summarizeBySource(entries), [entries]);
@@ -100,12 +102,19 @@ export function UtilPoolPageClient() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100">Supply Pool</h1>
-        <p className="text-sm text-slate-500 dark:text-slate-400">
-          Personil sementara tidak bertugas, dari Project Finish atau Takt Down. Entry yang masih Open bisa dipilih
-          sebagai pengganti (MP Excess/MP Back Up) langsung dari Demand Pool.
-        </p>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100">Supply Pool</h1>
+          <p className="text-sm text-slate-500 dark:text-slate-400">
+            Personil sementara tidak bertugas, dari Project Finish, Takt Down, atau Kaizen. Entry yang masih Open bisa
+            dipilih sebagai pengganti (MP Excess/MP Back Up) langsung dari Demand Pool.
+          </p>
+        </div>
+        {role === "admin" && (
+          <Button variant="primary" onClick={() => setKaizenOpen(true)}>
+            + Tambah Kaizen
+          </Button>
+        )}
       </div>
 
       {entries.length === 0 ? (
@@ -249,6 +258,8 @@ export function UtilPoolPageClient() {
           )}
         </>
       )}
+
+      {role === "admin" && kaizenOpen && <KaizenModal open onClose={() => setKaizenOpen(false)} />}
     </div>
   );
 }
