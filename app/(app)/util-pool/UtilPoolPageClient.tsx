@@ -15,13 +15,19 @@ import { contractRemainingLabel, contractUrgency, fmtDate, poolLeadTimeDays } fr
 import { naturalRelease } from "@/lib/engine/actions";
 import { useRole } from "@/lib/RoleContext";
 import { useSessionState } from "@/lib/useSessionState";
-import type { UtilPoolEntry } from "@/lib/types";
+import type { UtilPoolEntry, UtilPoolSource } from "@/lib/types";
 
 const urgencyClass: Record<string, string> = {
   red: "text-red-600 font-semibold",
   orange: "text-amber-600 font-semibold",
   green: "text-emerald-600",
   none: "text-slate-500",
+};
+
+const SOURCE_TYPE_LABELS: Record<UtilPoolSource, string> = {
+  ProjectFinish: "Project Finish",
+  TaktDown: "Takt Down",
+  Kaizen: "Kaizen",
 };
 
 interface SourceSummary {
@@ -62,42 +68,61 @@ export function UtilPoolPageClient() {
   const totalUtilizedPct = entries.length > 0 ? (totalUtilized / entries.length) * 100 : 0;
 
   const [tab, setTab] = useSessionState<"open" | "history">("utilpool.tab", "open");
-  const openEntries = useMemo(() => entries.filter((e) => e.status === "Open"), [entries]);
-  const historyEntries = useMemo(() => entries.filter((e) => e.status !== "Open"), [entries]);
+  const openAllEntries = useMemo(() => entries.filter((e) => e.status === "Open"), [entries]);
+  const historyAllEntries = useMemo(() => entries.filter((e) => e.status !== "Open"), [entries]);
+
+  const [selOpenSources, setSelOpenSources] = useSessionState<string[]>("utilpool.open.sources", []);
+  const openEntries = useMemo(
+    () =>
+      openAllEntries.filter(
+        (e) => selOpenSources.length === 0 || selOpenSources.includes(SOURCE_TYPE_LABELS[e.source])
+      ),
+    [openAllEntries, selOpenSources]
+  );
 
   const [selDivs, setSelDivs] = useSessionState<string[]>("utilpool.history.divs", []);
   const [selDepts, setSelDepts] = useSessionState<string[]>("utilpool.history.depts", []);
   const [selMonth, setSelMonth] = useSessionState<string>("utilpool.history.month", "");
+  const [selHistorySources, setSelHistorySources] = useSessionState<string[]>("utilpool.history.sources", []);
 
   const divOptions = useMemo(
-    () => Array.from(new Set(historyEntries.map((e) => e.prev_div).filter(Boolean))).sort(),
-    [historyEntries]
+    () => Array.from(new Set(historyAllEntries.map((e) => e.prev_div).filter(Boolean))).sort(),
+    [historyAllEntries]
   );
   const deptOptions = useMemo(
     () =>
       Array.from(
         new Set(
-          historyEntries
+          historyAllEntries
             .filter((e) => selDivs.length === 0 || selDivs.includes(e.prev_div))
             .map((e) => e.prev_dept)
             .filter(Boolean)
         )
       ).sort(),
-    [historyEntries, selDivs]
+    [historyAllEntries, selDivs]
   );
   const monthOptions = useMemo(
-    () => Array.from(new Set(historyEntries.map((e) => e.entered_pool_date.slice(0, 7)))).sort().reverse(),
-    [historyEntries]
+    () => Array.from(new Set(historyAllEntries.map((e) => e.entered_pool_date.slice(0, 7)))).sort().reverse(),
+    [historyAllEntries]
+  );
+  const historySourceOptions = useMemo(
+    () => Array.from(new Set(historyAllEntries.map((e) => SOURCE_TYPE_LABELS[e.source]))).sort(),
+    [historyAllEntries]
+  );
+  const openSourceOptions = useMemo(
+    () => Array.from(new Set(openAllEntries.map((e) => SOURCE_TYPE_LABELS[e.source]))).sort(),
+    [openAllEntries]
   );
   const filteredHistory = useMemo(
     () =>
-      historyEntries.filter(
+      historyAllEntries.filter(
         (e) =>
           (selDivs.length === 0 || selDivs.includes(e.prev_div)) &&
           (selDepts.length === 0 || selDepts.includes(e.prev_dept)) &&
-          (selMonth === "" || e.entered_pool_date.slice(0, 7) === selMonth)
+          (selMonth === "" || e.entered_pool_date.slice(0, 7) === selMonth) &&
+          (selHistorySources.length === 0 || selHistorySources.includes(SOURCE_TYPE_LABELS[e.source]))
       ),
-    [historyEntries, selDivs, selDepts, selMonth]
+    [historyAllEntries, selDivs, selDepts, selMonth, selHistorySources]
   );
 
   return (
@@ -138,8 +163,8 @@ export function UtilPoolPageClient() {
 
           <FullWidthTabs
             tabs={[
-              { key: "open", label: `Open Supply (${openEntries.length})` },
-              { key: "history", label: `History (${historyEntries.length})` },
+              { key: "open", label: `Open Supply (${openAllEntries.length})` },
+              { key: "history", label: `History (${historyAllEntries.length})` },
             ]}
             active={tab}
             onChange={(k) => setTab(k as "open" | "history")}
@@ -147,8 +172,11 @@ export function UtilPoolPageClient() {
 
           {tab === "open" ? (
             <Card>
+              <div className="mb-4 max-w-xs">
+                <MultiSelect label="Sumber" options={openSourceOptions} selected={selOpenSources} onChange={setSelOpenSources} />
+              </div>
               {openEntries.length === 0 ? (
-                <EmptyState text="Tidak ada supply yang masih Open." />
+                <EmptyState text="Tidak ada supply yang masih Open sesuai filter." />
               ) : (
                 <TableWrap>
                   <thead>
@@ -195,7 +223,7 @@ export function UtilPoolPageClient() {
             </Card>
           ) : (
             <Card>
-              <div className="mb-4 grid gap-3 sm:grid-cols-3">
+              <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 <MultiSelect
                   label="Divisi"
                   options={divOptions}
@@ -206,6 +234,7 @@ export function UtilPoolPageClient() {
                   }}
                 />
                 <MultiSelect label="Department" options={deptOptions} selected={selDepts} onChange={setSelDepts} />
+                <MultiSelect label="Sumber" options={historySourceOptions} selected={selHistorySources} onChange={setSelHistorySources} />
                 <div>
                   <span className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">Bulan</span>
                   <Select value={selMonth} onChange={(e) => setSelMonth(e.target.value)}>
