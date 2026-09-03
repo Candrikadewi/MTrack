@@ -82,7 +82,10 @@ export function SupplyDemandPageClient() {
     .slice()
     .sort((a, b) => demandTargetDate(a).localeCompare(demandTargetDate(b)));
 
-  const canEditReplacement = role === "admin" || role === "shop";
+  // Shop's replacement-edit RPC (set_demand_replacement) only authorizes
+  // category = 'PKWT' — gate the client the same way so Shop never sees a
+  // live editor on the Vokasi tab that the backend will just reject.
+  const canEditReplacement = role === "admin" || (role === "shop" && tab === "PKWT");
   const canEditFulfillDate = role === "admin";
 
   const totalCount = monthDemands.length;
@@ -181,9 +184,7 @@ export function SupplyDemandPageClient() {
                 <Th>Arrival to Shop</Th>
                 <Th>Due Date Sign Contract / Assigned</Th>
                 <Th>Source</Th>
-                <Th>Noreg Pengganti</Th>
-                <Th>Nama Pengganti</Th>
-                <Th>Dept Pengganti</Th>
+                <Th>Kandidat</Th>
                 <Th>FS Status</Th>
                 <Th>Planning Sign Contract / Assigned</Th>
                 <Th>Shop Confirmation</Th>
@@ -337,16 +338,14 @@ function SupplyDemandRow({
           <Td className="text-slate-400">-</Td>
           <Td className="text-slate-400">-</Td>
           <Td className="text-slate-400">-</Td>
-          <Td className="text-slate-400">-</Td>
-          <Td className="text-slate-400">-</Td>
         </>
       ) : !d.replacement_status ? (
-        <Td colSpan={6} className="text-slate-400">
+        <Td colSpan={4} className="text-slate-400">
           Pilih Source terlebih dahulu
         </Td>
       ) : (
         <>
-          <Td>
+          <Td className="whitespace-normal">
             {canEditReplacement ? (
               isPoolSource ? (
                 <PoolReplacementSelect demand={d} poolEntries={poolEntries} />
@@ -359,9 +358,13 @@ function SupplyDemandRow({
             ) : (
               d.replacement_noreg || "-"
             )}
+            {(d.replacement_nama || d.replacement_dept) && (
+              <div className="mt-0.5 text-xs text-slate-400">
+                {d.replacement_nama || "-"}
+                {d.replacement_dept ? ` · ${d.replacement_dept}` : ""}
+              </div>
+            )}
           </Td>
-          <Td>{d.replacement_nama || "-"}</Td>
-          <Td>{d.replacement_dept || "-"}</Td>
           <Td>{d.fs_status ? <Badge tone={statusTone(d.fs_status)}>{d.fs_status}</Badge> : "-"}</Td>
           <Td>
             {!hasCandidate ? (
