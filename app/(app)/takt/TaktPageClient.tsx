@@ -5,19 +5,25 @@ import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Badge, statusTone } from "@/components/ui/Badge";
 import { EmptyState, TableWrap, Td, Th } from "@/components/ui/Table";
+import { AssignedList } from "@/components/ui/AssignedList";
 import { TaktUpModal } from "@/components/takt/TaktUpModal";
 import { TaktDownModal } from "@/components/takt/TaktDownModal";
 import { useStoreList } from "@/lib/useStore";
 import { demandStore, taktStore, utilPoolStore } from "@/lib/repo";
 import { fmtDate } from "@/lib/engine/compute";
 import { useRole } from "@/lib/RoleContext";
-import type { Demand, MpStatusKategori, TaktCase, UtilPoolEntry } from "@/lib/types";
+import type { Demand, MpRole, MpStatusKategori, TaktCase, UtilPoolEntry } from "@/lib/types";
 
 const MP_STATUS_TONE: Record<MpStatusKategori, "green" | "amber" | "violet"> = {
   Permanen: "green",
   Vokasi: "violet",
   PKWT: "amber",
   AKTI: "amber",
+};
+
+const MP_ROLE_TONE: Record<MpRole, "blue" | "slate"> = {
+  Proses: "blue",
+  Backup: "slate",
 };
 
 export function TaktPageClient() {
@@ -156,8 +162,10 @@ function TaktUpDetail({ takt: c, demands }: { takt: TaktCase; demands: Demand[] 
           <Th>Divisi</Th>
           <Th>Department</Th>
           <Th>Status MP</Th>
+          <Th>MP Role</Th>
           <Th>Qty</Th>
           <Th>Tanggal Pemenuhan</Th>
+          <Th>Assigned</Th>
           <Th>Fulfilled</Th>
         </tr>
       </thead>
@@ -174,8 +182,14 @@ function TaktUpDetail({ takt: c, demands }: { takt: TaktCase; demands: Demand[] 
               <Td>
                 <Badge tone={MP_STATUS_TONE[r.status_mp]}>{r.status_mp}</Badge>
               </Td>
+              <Td>
+                <Badge tone={MP_ROLE_TONE[r.mp_role]}>{r.mp_role}</Badge>
+              </Td>
               <Td>{r.qty}</Td>
               <Td>{fmtDate(r.fulfill_date)}</Td>
+              <Td className="whitespace-normal">
+                <AssignedList demands={rowDemands} />
+              </Td>
               <Td>
                 {fulfilledCount}/{r.qty}
               </Td>
@@ -210,7 +224,8 @@ function TaktDownDetail({ takt: c, utilPool }: { takt: TaktCase; utilPool: UtilP
         <tr>
           <Th>Divisi</Th>
           <Th>Department</Th>
-          <Th>Jumlah Released</Th>
+          <Th>Personil Released</Th>
+          <Th>Jumlah</Th>
           <Th>Utilized</Th>
         </tr>
       </thead>
@@ -221,6 +236,23 @@ function TaktDownDetail({ takt: c, utilPool }: { takt: TaktCase; utilPool: UtilP
             <tr key={`${g.division}|${g.dept}`}>
               <Td>{g.division}</Td>
               <Td>{g.dept}</Td>
+              <Td className="whitespace-normal">
+                <div className="flex flex-wrap gap-1.5">
+                  {g.persons.map((p) => {
+                    const pool = poolByNoreg.get(p.noreg);
+                    const utilizedPerson = pool?.status !== "Open";
+                    return (
+                      <span
+                        key={p.noreg}
+                        className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                      >
+                        {p.nama} ({p.noreg})
+                        <Badge tone={utilizedPerson ? "green" : "amber"}>{pool?.status ?? "Open"}</Badge>
+                      </span>
+                    );
+                  })}
+                </div>
+              </Td>
               <Td>{g.persons.length}</Td>
               <Td>
                 <Badge tone={statusTone(utilized === g.persons.length ? "Fulfilled" : "Open")}>

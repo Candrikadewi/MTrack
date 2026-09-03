@@ -5,19 +5,25 @@ import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Badge, statusTone } from "@/components/ui/Badge";
 import { EmptyState, TableWrap, Td, Th } from "@/components/ui/Table";
+import { AssignedList } from "@/components/ui/AssignedList";
 import { NewProjectModal } from "@/components/projects/NewProjectModal";
 import { useStoreList } from "@/lib/useStore";
 import { demandStore, projectStore } from "@/lib/repo";
 import { autoProjectFinishCheck, projectSuppliedCount } from "@/lib/engine/actions";
 import { fmtDate } from "@/lib/engine/compute";
 import { useRole } from "@/lib/RoleContext";
-import type { Demand, MpStatusKategori, Project } from "@/lib/types";
+import type { Demand, MpRole, MpStatusKategori, Project } from "@/lib/types";
 
 const MP_STATUS_TONE: Record<MpStatusKategori, "green" | "amber" | "violet"> = {
   Permanen: "green",
   Vokasi: "violet",
   PKWT: "amber",
   AKTI: "amber",
+};
+
+const MP_ROLE_TONE: Record<MpRole, "blue" | "slate"> = {
+  Proses: "blue",
+  Backup: "slate",
 };
 
 export function ProjectsPageClient() {
@@ -153,8 +159,10 @@ function ProjectCard({
                 <Th>Divisi</Th>
                 <Th>Department</Th>
                 <Th>Status MP</Th>
+                <Th>MP Role</Th>
                 <Th>Qty</Th>
                 <Th>Tanggal Pemenuhan</Th>
+                <Th>Assigned</Th>
                 <Th>Fulfilled</Th>
               </tr>
             </thead>
@@ -171,8 +179,14 @@ function ProjectCard({
                     <Td>
                       <Badge tone={MP_STATUS_TONE[r.status_mp]}>{r.status_mp}</Badge>
                     </Td>
+                    <Td>
+                      <Badge tone={MP_ROLE_TONE[r.mp_role]}>{r.mp_role}</Badge>
+                    </Td>
                     <Td>{r.qty}</Td>
                     <Td>{fmtDate(r.fulfill_date)}</Td>
+                    <Td className="whitespace-normal">
+                      <AssignedList demands={rowDemands} />
+                    </Td>
                     <Td>
                       {fulfilledCount}/{r.qty}
                     </Td>

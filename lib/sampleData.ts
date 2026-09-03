@@ -182,8 +182,8 @@ export function seedSampleData(): void {
     start_date: iso(subMonths(now(), 3)),
     end_date: iso(addDays(now(), 20)),
     rows: [
-      { division: anyDivision.division, dept: anyDivision.depts[0], status_mp: "Vokasi", qty: 2, fulfill_date: iso(addDays(now(), 25)) },
-      { division: anyDivision.division, dept: anyDivision.depts[1], status_mp: "PKWT", qty: 1, fulfill_date: iso(addDays(now(), 30)) },
+      { division: anyDivision.division, dept: anyDivision.depts[0], status_mp: "Vokasi", mp_role: "Proses", qty: 2, fulfill_date: iso(addDays(now(), 25)) },
+      { division: anyDivision.division, dept: anyDivision.depts[1], status_mp: "PKWT", mp_role: "Backup", qty: 1, fulfill_date: iso(addDays(now(), 30)) },
     ],
   });
 
@@ -192,7 +192,7 @@ export function seedSampleData(): void {
     start_date: iso(subMonths(now(), 6)),
     end_date: iso(subMonths(now(), 1)),
     rows: [
-      { division: anyDivision.division, dept: anyDivision.depts[0], status_mp: "Vokasi", qty: 1, fulfill_date: iso(subMonths(now(), 2)) },
+      { division: anyDivision.division, dept: anyDivision.depts[0], status_mp: "Vokasi", mp_role: "Proses", qty: 1, fulfill_date: iso(subMonths(now(), 2)) },
     ],
   });
   const betaDemand = demandStore.list().find((d) => finishedProject.demand_ids.includes(d.id));
@@ -205,7 +205,7 @@ export function seedSampleData(): void {
     date: iso(subMonths(now(), 1)),
     takt_before: 62,
     takt_after: 58,
-    need_rows: [{ division: anyDivision.division, dept: anyDivision.depts[0], status_mp: "Vokasi", qty: 2, fulfill_date: iso(addDays(now(), 10)) }],
+    need_rows: [{ division: anyDivision.division, dept: anyDivision.depts[0], status_mp: "Vokasi", mp_role: "Proses", qty: 2, fulfill_date: iso(addDays(now(), 10)) }],
   });
 
   createTaktDown({

@@ -187,11 +187,14 @@ export interface Demand {
 
 export type ProjectStatus = "Ongoing" | "Finish";
 
+export type MpRole = "Proses" | "Backup";
+
 export interface ProjectMpNeedRow {
   id: string;
   division: string;
   dept: string;
   status_mp: MpStatusKategori;
+  mp_role: MpRole;
   qty: number;
   fulfill_date: string;
 }

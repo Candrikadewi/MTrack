@@ -11,19 +11,28 @@ import { zparStore } from "@/lib/repo";
 import { useStoreList } from "@/lib/useStore";
 import { divisionsOfAny, deptsOfAny } from "@/lib/engine/dashboard";
 import { fmtDate } from "@/lib/engine/compute";
-import type { MpStatusKategori, Project } from "@/lib/types";
+import type { MpRole, MpStatusKategori, Project } from "@/lib/types";
 
 interface EditableRow {
   id: string; // "" for a not-yet-saved new row
   division: string;
   dept: string;
   status_mp: MpStatusKategori;
+  mp_role: MpRole;
   qty: number;
   fulfill_date: string;
   originalQty?: number; // set only for rows that already existed on the project
 }
 
-const emptyRow = (): EditableRow => ({ id: "", division: "", dept: "", status_mp: "Vokasi", qty: 1, fulfill_date: "" });
+const emptyRow = (): EditableRow => ({
+  id: "",
+  division: "",
+  dept: "",
+  status_mp: "Vokasi",
+  mp_role: "Proses",
+  qty: 1,
+  fulfill_date: "",
+});
 
 /**
  * Note: this component is expected to be conditionally *mounted* by its
@@ -81,6 +90,7 @@ export function NewProjectModal({ open, onClose, project }: { open: boolean; onC
             division: row.division,
             dept: row.dept,
             status_mp: row.status_mp,
+            mp_role: row.mp_role,
             qty: row.qty,
             fulfill_date: row.fulfill_date,
           });
@@ -170,6 +180,17 @@ export function NewProjectModal({ open, onClose, project }: { open: boolean; onC
                         <option value="AKTI">AKTI</option>
                       </Select>
                     </div>
+                    <div className="w-28">
+                      <span className="mb-1 block text-[11px] font-medium text-slate-500">MP Role</span>
+                      <Select
+                        value={row.mp_role}
+                        disabled={locked}
+                        onChange={(e) => updateRow(idx, { mp_role: e.target.value as MpRole })}
+                      >
+                        <option value="Proses">Proses</option>
+                        <option value="Backup">Backup</option>
+                      </Select>
+                    </div>
                     <div className="w-24">
                       <span className="mb-1 block text-[11px] font-medium text-slate-500">Qty</span>
                       <Input
@@ -240,6 +261,7 @@ export function NewProjectModal({ open, onClose, project }: { open: boolean; onC
                 <Th>Divisi</Th>
                 <Th>Department</Th>
                 <Th>Status MP</Th>
+                <Th>MP Role</Th>
                 <Th>Qty</Th>
                 <Th>Tanggal Pemenuhan</Th>
               </tr>
@@ -250,6 +272,7 @@ export function NewProjectModal({ open, onClose, project }: { open: boolean; onC
                   <Td>{r.division}</Td>
                   <Td>{r.dept}</Td>
                   <Td>{r.status_mp}</Td>
+                  <Td>{r.mp_role}</Td>
                   <Td>{r.qty}</Td>
                   <Td>{fmtDate(r.fulfill_date)}</Td>
                 </tr>

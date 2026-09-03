@@ -5,10 +5,17 @@ import { Field, Input, Select } from "@/components/ui/Form";
 import { Button } from "@/components/ui/Button";
 import { X } from "lucide-react";
 import { createTaktUp } from "@/lib/engine/actions";
-import type { MpStatusKategori, Plant, ProjectMpNeedRow } from "@/lib/types";
+import type { MpRole, MpStatusKategori, Plant, ProjectMpNeedRow } from "@/lib/types";
 
 type DraftRow = Omit<ProjectMpNeedRow, "id">;
-const emptyRow = (): DraftRow => ({ division: "", dept: "", status_mp: "Vokasi", qty: 1, fulfill_date: "" });
+const emptyRow = (): DraftRow => ({
+  division: "",
+  dept: "",
+  status_mp: "Vokasi",
+  mp_role: "Proses",
+  qty: 1,
+  fulfill_date: "",
+});
 
 export function TaktUpModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [plant, setPlant] = useState<Plant>("Plant 1");
@@ -101,6 +108,16 @@ export function TaktUpModal({ open, onClose }: { open: boolean; onClose: () => v
                     <option value="PKWT">PKWT</option>
                     <option value="Permanen">Permanen</option>
                     <option value="AKTI">AKTI</option>
+                  </Select>
+                </div>
+                <div className="w-28">
+                  <span className="mb-1 block text-[11px] font-medium text-slate-500">MP Role</span>
+                  <Select
+                    value={row.mp_role}
+                    onChange={(e) => updateRow(idx, { mp_role: e.target.value as MpRole })}
+                  >
+                    <option value="Proses">Proses</option>
+                    <option value="Backup">Backup</option>
                   </Select>
                 </div>
                 <div className="w-24">
