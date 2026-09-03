@@ -1,10 +1,9 @@
 "use client";
 import { useMemo } from "react";
 import Link from "next/link";
-import { addMonths, endOfMonth, format } from "date-fns";
+import { format } from "date-fns";
 import { useSessionState } from "@/lib/useSessionState";
 import {
-  CalendarRange,
   ClipboardList,
   Users2,
   UserCheck,
@@ -50,8 +49,8 @@ import {
   type EmployeeDiff,
   type MovementStatus,
 } from "@/lib/engine/dashboard";
-import { filterByDivDept } from "@/lib/engine/enrollment";
-import { computeVokasiStatus } from "@/lib/engine/compute";
+import { demandTargetDate, filterByDivDept } from "@/lib/engine/enrollment";
+import { computeVokasiStatus, demandVisibleDate } from "@/lib/engine/compute";
 import { LABOR_TYPES } from "@/lib/types";
 import { useRole } from "@/lib/RoleContext";
 import type { Role } from "@/lib/roles";
@@ -77,27 +76,13 @@ export default function DashboardPage() {
   const taktCases = useStoreList(taktStore);
   const utilPool = useStoreList(utilPoolStore);
 
-  const sortedSnapshots = useMemo(
-    () => [...snapshots].sort((a, b) => b.period.localeCompare(a.period)),
-    [snapshots]
-  );
   const activeSnapshot = snapshots.find((s) => s.is_active);
 
-  // "Bulan berjalan" — the dashboard's single top-level viewing-month filter.
-  // Drives which ZPAR snapshot backs the headcount sections (matched by period,
-  // falling back to whichever snapshot is active) AND the month-bucket
-  // highlighting/windowing used across every section below. Selecting the
-  // *active* ZPAR snapshot itself is an Upload Center concern, not this filter.
-  const [refMonth, setRefMonth] = useSessionState<string>("dash.refMonth", currentMonthKey());
-  const refMonthOptions = useMemo(() => {
-    const base = new Date(`${currentMonthKey()}-01T00:00:00`);
-    return Array.from({ length: 13 }, (_, i) => format(addMonths(base, 6 - i), "yyyy-MM"));
-  }, []);
-
-  const selectedSnapshot: ZparSnapshot | undefined =
-    sortedSnapshots.find((s) => s.period === refMonth) ?? activeSnapshot ?? sortedSnapshots[0];
-
-  const employees = useMemo(() => selectedSnapshot?.employees ?? [], [selectedSnapshot]);
+  // Demography sections show the roster "as of hari aktif" — always the
+  // Active ZPAR snapshot, full stop. There is no viewing-month picker here
+  // anymore: browsing a *different* historical snapshot is Upload Center's
+  // job (via "Use This Data"), not something Dashboard should also offer.
+  const employees = useMemo(() => activeSnapshot?.employees ?? [], [activeSnapshot]);
 
   const fulfilledVokasiIds = useMemo(
     () => new Set(demands.filter((d) => d.category === "Vokasi" && d.status === "Fulfilled").map((d) => d.origin_ref)),
@@ -128,7 +113,7 @@ export default function DashboardPage() {
   // (what needs tracking/action across reviews, demand-supply, project/takt).
   const [section, setSection] = useSessionState<"demography" | "monitoring">("dash.section", "demography");
 
-  if (sortedSnapshots.length === 0) {
+  if (snapshots.length === 0) {
     return (
       <div className="space-y-4">
         <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100">Dashboard</h1>
@@ -161,29 +146,11 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100">Dashboard</h1>
-          <p className="text-sm text-slate-500 dark:text-slate-400">
-            Ringkasan kondisi manpower, read-only, mengagregasi semua modul.
-          </p>
-        </div>
-        <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 dark:border-slate-800 dark:bg-slate-900">
-          <CalendarRange size={16} className="text-slate-400" />
-          <span className="text-xs font-medium text-slate-500">Bulan</span>
-          <Select
-            bare
-            value={refMonth}
-            onChange={(e) => setRefMonth(e.target.value)}
-            className="!w-auto border-none !p-0 !py-0 text-sm font-semibold shadow-none focus:ring-0"
-          >
-            {refMonthOptions.map((m) => (
-              <option key={m} value={m}>
-                {format(new Date(`${m}-01T00:00:00`), "MMM yyyy")}
-              </option>
-            ))}
-          </Select>
-        </div>
+      <div>
+        <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100">Dashboard</h1>
+        <p className="text-sm text-slate-500 dark:text-slate-400">
+          Ringkasan kondisi manpower, read-only, mengagregasi semua modul.
+        </p>
       </div>
 
       {/* Org filter — applies to every section below. */}
@@ -216,7 +183,7 @@ export default function DashboardPage() {
           {/* 1. Total Manpower & Status */}
           <Card
             title="Total Manpower & Status"
-            subtitle={selectedSnapshot ? `Data ZPAR periode ${selectedSnapshot.period}` : undefined}
+            subtitle={activeSnapshot ? `Data ZPAR periode ${activeSnapshot.period} (Active)` : undefined}
           >
             <TotalManpowerCard total={filteredEmployees.length + vokasiActive.length} employees={filteredEmployees} />
             <div className="mt-3 grid gap-3 sm:grid-cols-3">
@@ -248,7 +215,6 @@ export default function DashboardPage() {
           <ManpowerMovementBlock
             snapshotsByPeriod={snapshotsByPeriod}
             vokasi={vokasi}
-            refMonth={refMonth}
             reviews={reviews}
             demands={demands}
             selDirectorates={selDirectorates}
@@ -270,27 +236,17 @@ export default function DashboardPage() {
         <>
           {/* 4 & 5. PKWT Review / Vokasi Ended per bulan */}
           <div className="space-y-6">
-            <PkwtReviewChartBlock
-              reviews={reviews}
-              refMonth={refMonth}
-              selDivisions={selDivisions}
-              selDepts={selDepts}
-            />
-            <VokasiEndedChartBlock
-              vokasi={vokasi}
-              refMonth={refMonth}
-              selDivisions={selDivisions}
-              selDepts={selDepts}
-            />
+            <PkwtReviewChartBlock reviews={reviews} selDivisions={selDivisions} selDepts={selDepts} />
+            <VokasiEndedChartBlock vokasi={vokasi} selDivisions={selDivisions} selDepts={selDepts} />
           </div>
 
           {/* 6. Demand-Supply Overview */}
-          <DemandSupplyBlock demands={demands} />
+          <DemandSupplyBlock demands={demands} selDivisions={selDivisions} selDepts={selDepts} />
 
           {/* 7 & 8. Project / Takt Time Summary */}
           <div className="grid gap-6 lg:grid-cols-2">
             <ProjectSummaryBlock projects={projects} demands={demands} />
-            <TaktSummaryBlock taktCases={taktCases} demands={demands} utilPool={utilPool} refMonth={refMonth} />
+            <TaktSummaryBlock taktCases={taktCases} demands={demands} utilPool={utilPool} />
           </div>
         </>
       )}
@@ -490,7 +446,6 @@ const MOVEMENT_STATUSES: MovementStatus[] = ["Permanen", "Kontrak", "Vokasi"];
 function ManpowerMovementBlock({
   snapshotsByPeriod,
   vokasi,
-  refMonth,
   reviews,
   demands,
   selDirectorates,
@@ -499,7 +454,6 @@ function ManpowerMovementBlock({
 }: {
   snapshotsByPeriod: Map<string, EmployeeRecord[]>;
   vokasi: VokasiRecord[];
-  refMonth: string;
   reviews: PkwtReview[];
   demands: Demand[];
   selDirectorates: string[];
@@ -509,7 +463,10 @@ function ManpowerMovementBlock({
   const [selLaborTypes, setSelLaborTypes] = useSessionState<string[]>("dash.movement.laborTypes", []);
   const [selStatuses, setSelStatuses] = useSessionState<MovementStatus[]>("dash.movement.statuses", []);
 
-  const refDate = useMemo(() => new Date(`${refMonth}-01T00:00:00`), [refMonth]);
+  // The FY window anchors to real "today" — not a page-level viewing-month
+  // pick — since this chart's job is "where movement stands right now", with
+  // "Lihat Perubahan" below as the dedicated control for historical diffing.
+  const refDate = useMemo(() => new Date(), []);
   const movementRows = useMemo(
     () =>
       manpowerMovementByFiscalYear(
@@ -770,18 +727,17 @@ function CompactDetailList({ items, unit }: { items: { key: string; count: numbe
 
 function PkwtReviewChartBlock({
   reviews,
-  refMonth,
   selDivisions,
   selDepts,
 }: {
   reviews: PkwtReview[];
-  refMonth: string;
   selDivisions: string[];
   selDepts: string[];
 }) {
+  const today = currentMonthKey();
   const filteredReviews = filterByDivDept(reviews, selDivisions, selDepts);
-  const { buckets, byMonth } = monthBuckets(filteredReviews, (r) => r.tgl_review?.slice(0, 7), 3, 5, refMonth);
-  const [selected, setSelected] = useSessionState("dash.pkwtReview.month", refMonth);
+  const { buckets, byMonth } = monthBuckets(filteredReviews, (r) => r.tgl_review?.slice(0, 7), 3, 5, today);
+  const [selected, setSelected] = useSessionState("dash.pkwtReview.month", today);
   const detailItems = byMonth.get(selected) ?? [];
   const byStatusKontrak = groupCountBy(detailItems, (r) => r.status_kontrak);
   const byLaborType = groupCountBy(detailItems, (r) => r.labor_type || "Other");
@@ -813,18 +769,17 @@ function PkwtReviewChartBlock({
 
 function VokasiEndedChartBlock({
   vokasi,
-  refMonth,
   selDivisions,
   selDepts,
 }: {
   vokasi: VokasiRecord[];
-  refMonth: string;
   selDivisions: string[];
   selDepts: string[];
 }) {
+  const today = currentMonthKey();
   const filteredVokasi = filterByDivDept(vokasi, selDivisions, selDepts);
-  const { buckets, byMonth } = monthBuckets(filteredVokasi, (v) => v.tgl_ended?.slice(0, 7), 3, 5, refMonth);
-  const [selected, setSelected] = useSessionState("dash.vokasiEnded.month", refMonth);
+  const { buckets, byMonth } = monthBuckets(filteredVokasi, (v) => v.tgl_ended?.slice(0, 7), 3, 5, today);
+  const [selected, setSelected] = useSessionState("dash.vokasiEnded.month", today);
   const detailItems = byMonth.get(selected) ?? [];
 
   return (
@@ -892,11 +847,25 @@ function DemandSupplyTable({ label, rows }: { label: string; rows: DemandSupplyR
   );
 }
 
-function DemandSupplyBlock({ demands }: { demands: Demand[] }) {
-  const pkwtRows = demandSupplyRows(demands, "PKWT");
-  const vokasiRows = demandSupplyRows(demands, "Vokasi");
+function DemandSupplyBlock({
+  demands,
+  selDivisions,
+  selDepts,
+}: {
+  demands: Demand[];
+  selDivisions: string[];
+  selDepts: string[];
+}) {
+  // "Bulan berjalan" — scoped to the real current month using the same
+  // demandVisibleDate(demandTargetDate(d)) window Demand Pool itself uses,
+  // instead of an all-time cumulative total that only ever grows.
+  const today = currentMonthKey();
+  const monthDemands = demands.filter((d) => demandVisibleDate(demandTargetDate(d)).slice(0, 7) === today);
+  const scopedDemands = filterByDivDept(monthDemands, selDivisions, selDepts);
+  const pkwtRows = demandSupplyRows(scopedDemands, "PKWT");
+  const vokasiRows = demandSupplyRows(scopedDemands, "Vokasi");
   return (
-    <Card title="Demand-Supply Overview">
+    <Card title="Demand-Supply Overview" subtitle={`Bulan berjalan — ${today}`}>
       <div className="grid gap-6 lg:grid-cols-2">
         <DemandSupplyTable label="PKWT" rows={pkwtRows} />
         <DemandSupplyTable label="Vokasi" rows={vokasiRows} />
@@ -947,15 +916,13 @@ function TaktSummaryBlock({
   taktCases,
   demands,
   utilPool,
-  refMonth,
 }: {
   taktCases: TaktCase[];
   demands: Demand[];
   utilPool: UtilPoolEntry[];
-  refMonth: string;
 }) {
   const plants: Plant[] = ["Plant 1", "Plant 2"];
-  const todayStr = format(endOfMonth(new Date(`${refMonth}-01T00:00:00`)), "yyyy-MM-dd");
+  const todayStr = format(new Date(), "yyyy-MM-dd");
   return (
     <Card title="Takt Time Monitoring Summary">
       <div className="space-y-4">
