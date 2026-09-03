@@ -20,6 +20,7 @@ import { Card } from "@/components/ui/Card";
 import { StatTile, ProgressBar } from "@/components/ui/StatTile";
 import { Select } from "@/components/ui/Form";
 import { MultiSelect } from "@/components/ui/MultiSelect";
+import { FullWidthTabs } from "@/components/ui/Tabs";
 import { MonthBarChart } from "@/components/ui/MonthBarChart";
 import { CompositionChart } from "@/components/ui/CompositionChart";
 import { LaborTypeChart } from "@/components/ui/LaborTypeChart";
@@ -121,6 +122,12 @@ export default function DashboardPage() {
   const [selDivisions, setSelDivisions] = useSessionState<string[]>("dash.org.divisions", []);
   const [selDepts, setSelDepts] = useSessionState<string[]>("dash.org.depts", []);
 
+  // Splits the long stack of sections below Action Needed into two switchable
+  // groups so a visit doesn't mean scrolling past 8 cards to reach the one
+  // you came for — "Demography" (who's on the roster) vs. "Monitoring"
+  // (what needs tracking/action across reviews, demand-supply, project/takt).
+  const [section, setSection] = useSessionState<"demography" | "monitoring">("dash.section", "demography");
+
   if (sortedSnapshots.length === 0) {
     return (
       <div className="space-y-4">
@@ -195,83 +202,98 @@ export default function DashboardPage() {
       {/* 0. Action Needed */}
       <ActionNeededBlock reviews={reviews} demands={demands} role={role} />
 
-      {/* 1. Total Manpower & Status */}
-      <Card
-        title="Total Manpower & Status"
-        subtitle={selectedSnapshot ? `Data ZPAR periode ${selectedSnapshot.period}` : undefined}
-      >
-        <TotalManpowerCard total={filteredEmployees.length + vokasiActive.length} employees={filteredEmployees} />
-        <div className="mt-3 grid gap-3 sm:grid-cols-3">
-          <StatTile
-            label="Permanen"
-            value={permanenCount.length}
-            sub={`L: ${genderCount(permanenCount).L} · P: ${genderCount(permanenCount).P}`}
-            tone="emerald"
-            icon={UserCheck}
-          />
-          <StatTile
-            label="Kontrak"
-            value={kontrakCount.length}
-            sub={`L: ${genderCount(kontrakCount).L} · P: ${genderCount(kontrakCount).P}`}
-            tone="amber"
-            icon={FileText}
-          />
-          <StatTile
-            label="Vokasi Aktif"
-            value={vokasiActive.length}
-            sub={`L: ${genderCount(vokasiActive).L} · P: ${genderCount(vokasiActive).P}`}
-            tone="violet"
-            icon={GraduationCap}
-          />
-        </div>
-      </Card>
-
-      {/* 2. Manpower Movement */}
-      <ManpowerMovementBlock
-        snapshotsByPeriod={snapshotsByPeriod}
-        vokasi={vokasi}
-        refMonth={refMonth}
-        reviews={reviews}
-        demands={demands}
-        selDirectorates={selDirectorates}
-        selDivisions={selDivisions}
-        selDepts={selDepts}
+      <FullWidthTabs
+        tabs={[
+          { key: "demography", label: "Demography" },
+          { key: "monitoring", label: "Monitoring" },
+        ]}
+        active={section}
+        onChange={(k) => setSection(k as "demography" | "monitoring")}
       />
 
-      {/* 3. Komposisi by Labor Type */}
-      <LaborTypeBlock
-        employees={employees}
-        vokasi={vokasi}
-        demands={demands}
-        selDirectorates={selDirectorates}
-        selDivisions={selDivisions}
-        selDepts={selDepts}
-      />
+      {section === "demography" ? (
+        <>
+          {/* 1. Total Manpower & Status */}
+          <Card
+            title="Total Manpower & Status"
+            subtitle={selectedSnapshot ? `Data ZPAR periode ${selectedSnapshot.period}` : undefined}
+          >
+            <TotalManpowerCard total={filteredEmployees.length + vokasiActive.length} employees={filteredEmployees} />
+            <div className="mt-3 grid gap-3 sm:grid-cols-3">
+              <StatTile
+                label="Permanen"
+                value={permanenCount.length}
+                sub={`L: ${genderCount(permanenCount).L} · P: ${genderCount(permanenCount).P}`}
+                tone="emerald"
+                icon={UserCheck}
+              />
+              <StatTile
+                label="Kontrak"
+                value={kontrakCount.length}
+                sub={`L: ${genderCount(kontrakCount).L} · P: ${genderCount(kontrakCount).P}`}
+                tone="amber"
+                icon={FileText}
+              />
+              <StatTile
+                label="Vokasi Aktif"
+                value={vokasiActive.length}
+                sub={`L: ${genderCount(vokasiActive).L} · P: ${genderCount(vokasiActive).P}`}
+                tone="violet"
+                icon={GraduationCap}
+              />
+            </div>
+          </Card>
 
-      {/* 4 & 5. PKWT Review / Vokasi Ended per bulan */}
-      <div className="space-y-6">
-        <PkwtReviewChartBlock
-          reviews={reviews}
-          refMonth={refMonth}
-          selDivisions={selDivisions}
-          selDepts={selDepts}
-        />
-        <VokasiEndedChartBlock
-          vokasi={vokasi}
-          refMonth={refMonth}
-          selDivisions={selDivisions}
-          selDepts={selDepts}
-        />
-      </div>
+          {/* 2. Manpower Movement */}
+          <ManpowerMovementBlock
+            snapshotsByPeriod={snapshotsByPeriod}
+            vokasi={vokasi}
+            refMonth={refMonth}
+            reviews={reviews}
+            demands={demands}
+            selDirectorates={selDirectorates}
+            selDivisions={selDivisions}
+            selDepts={selDepts}
+          />
 
-      {/* 6. Demand-Supply Overview */}
-      <DemandSupplyBlock demands={demands} />
+          {/* 3. Komposisi by Labor Type */}
+          <LaborTypeBlock
+            employees={employees}
+            vokasi={vokasi}
+            demands={demands}
+            selDirectorates={selDirectorates}
+            selDivisions={selDivisions}
+            selDepts={selDepts}
+          />
+        </>
+      ) : (
+        <>
+          {/* 4 & 5. PKWT Review / Vokasi Ended per bulan */}
+          <div className="space-y-6">
+            <PkwtReviewChartBlock
+              reviews={reviews}
+              refMonth={refMonth}
+              selDivisions={selDivisions}
+              selDepts={selDepts}
+            />
+            <VokasiEndedChartBlock
+              vokasi={vokasi}
+              refMonth={refMonth}
+              selDivisions={selDivisions}
+              selDepts={selDepts}
+            />
+          </div>
 
-      {/* 7 & 8. Project / Takt Time Summary */}
-      <div className="grid gap-6 lg:grid-cols-2">
-        <ProjectSummaryBlock projects={projects} demands={demands} />
-        <TaktSummaryBlock taktCases={taktCases} demands={demands} utilPool={utilPool} refMonth={refMonth} />
-      </div>
+          {/* 6. Demand-Supply Overview */}
+          <DemandSupplyBlock demands={demands} />
+
+          {/* 7 & 8. Project / Takt Time Summary */}
+          <div className="grid gap-6 lg:grid-cols-2">
+            <ProjectSummaryBlock projects={projects} demands={demands} />
+            <TaktSummaryBlock taktCases={taktCases} demands={demands} utilPool={utilPool} refMonth={refMonth} />
+          </div>
+        </>
+      )}
     </div>
   );
 }
