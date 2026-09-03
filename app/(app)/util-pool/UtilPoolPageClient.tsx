@@ -3,7 +3,7 @@ import { useMemo, useState } from "react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Badge, statusTone } from "@/components/ui/Badge";
-import { ProgressBar } from "@/components/ui/StatTile";
+import { ProgressBar, StatTile } from "@/components/ui/StatTile";
 import { FullWidthTabs } from "@/components/ui/Tabs";
 import { MultiSelect } from "@/components/ui/MultiSelect";
 import { Select } from "@/components/ui/Form";
@@ -29,6 +29,25 @@ const SOURCE_TYPE_LABELS: Record<UtilPoolSource, string> = {
   TaktDown: "Takt Down",
   Kaizen: "Kaizen",
 };
+
+const SOURCE_TYPE_TONE: Record<UtilPoolSource, "blue" | "violet" | "emerald"> = {
+  ProjectFinish: "blue",
+  TaktDown: "violet",
+  Kaizen: "emerald",
+};
+
+const SOURCE_TYPE_ORDER: UtilPoolSource[] = ["ProjectFinish", "TaktDown", "Kaizen"];
+
+/** Rolls up every source_label sharing the same source TYPE (e.g. every
+ * "Kaizen 2026 - <Divisi>" card) into one total — a shop running Kaizen
+ * across several divisions or years otherwise has no single number for
+ * "how much did Kaizen yield this year" without adding up cards by hand. */
+function summarizeBySourceType(entries: UtilPoolEntry[]): { source: UtilPoolSource; total: number }[] {
+  return SOURCE_TYPE_ORDER.map((source) => ({
+    source,
+    total: entries.filter((e) => e.source === source).length,
+  })).filter((s) => s.total > 0);
+}
 
 interface SourceSummary {
   label: string;
@@ -64,6 +83,7 @@ export function UtilPoolPageClient() {
   const entries = useStoreList(utilPoolStore).sort((a, b) => b.entered_pool_date.localeCompare(a.entered_pool_date));
 
   const sourceSummaries = useMemo(() => summarizeBySource(entries), [entries]);
+  const sourceTypeTotals = useMemo(() => summarizeBySourceType(entries), [entries]);
   const totalUtilized = entries.filter((e) => e.status === "Assigned").length;
   const totalUtilizedPct = entries.length > 0 ? (totalUtilized / entries.length) * 100 : 0;
 
@@ -146,6 +166,19 @@ export function UtilPoolPageClient() {
         <EmptyState text="Supply Pool kosong." />
       ) : (
         <>
+          {sourceTypeTotals.length > 1 && (
+            <div className="grid gap-3 sm:grid-cols-3">
+              {sourceTypeTotals.map((s) => (
+                <StatTile
+                  key={s.source}
+                  label={`Total ${SOURCE_TYPE_LABELS[s.source]}`}
+                  value={s.total}
+                  tone={SOURCE_TYPE_TONE[s.source]}
+                />
+              ))}
+            </div>
+          )}
+
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {sourceSummaries.map((s) => (
               <SourceSummaryCard key={s.label} summary={s} />
