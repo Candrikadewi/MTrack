@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/Button";
 import { Field, Input, Select } from "@/components/ui/Form";
 import { Badge } from "@/components/ui/Badge";
 import { Modal } from "@/components/ui/Modal";
+import { MultiSelect } from "@/components/ui/MultiSelect";
 import { EmptyState, TableWrap, Td, Th } from "@/components/ui/Table";
 import { useStoreList } from "@/lib/useStore";
 import { zparStore, vokasiStore, activateSnapshot, clearAllData } from "@/lib/repo";
@@ -18,10 +19,10 @@ import {
   ensureVokasiEndedDemands,
   generatePkwtReviews,
 } from "@/lib/engine/actions";
-import { seedSampleData } from "@/lib/sampleData";
 import { fmtDate } from "@/lib/engine/compute";
 import { createClient } from "@/lib/supabase/client";
 import { pushToast } from "@/lib/toast";
+import { useSessionState } from "@/lib/useSessionState";
 import type { VokasiRecord } from "@/lib/types";
 
 function currentMonthKey(): string {
@@ -48,6 +49,10 @@ export function UploadCenterClient() {
   const [zparFile, setZparFile] = useState<File | null>(null);
   const [zparBusy, setZparBusy] = useState(false);
   const [zparMsg, setZparMsg] = useState("");
+
+  const [selPeriods, setSelPeriods] = useSessionState<string[]>("upload.zpar.periods", []);
+  const periodOptions = Array.from(takenPeriods).sort().reverse();
+  const filteredSnapshots = selPeriods.length === 0 ? snapshots : snapshots.filter((s) => selPeriods.includes(s.period));
 
   const [vokasiBatch, setVokasiBatch] = useState("");
   const [vokasiTglMasuk, setVokasiTglMasuk] = useState(new Date().toISOString().slice(0, 10));
@@ -136,11 +141,6 @@ export function UploadCenterClient() {
     if (!result.ok) pushToast(result.error ?? "Gagal menghapus batch.");
   }
 
-  function loadSample() {
-    if (!confirm("Ini akan mengganti SELURUH data di database (untuk semua user) dengan data contoh. Lanjutkan?")) return;
-    seedSampleData();
-  }
-
   function resetAll() {
     if (!confirm("Hapus SEMUA data M-TRACK dari database (untuk semua user)? Tindakan ini tidak bisa dibatalkan.")) return;
     setResetModalOpen(true);
@@ -156,9 +156,6 @@ export function UploadCenterClient() {
           </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="secondary" onClick={loadSample}>
-            Load Sample Data
-          </Button>
           <Button variant="danger" onClick={resetAll}>
             Reset All Data
           </Button>
@@ -198,9 +195,22 @@ export function UploadCenterClient() {
         {zparMsg && <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">{zparMsg}</p>}
 
         <div className="mt-5">
-          <h4 className="mb-2 text-xs font-semibold text-slate-500">History Snapshot</h4>
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <h4 className="text-xs font-semibold text-slate-500">History Snapshot</h4>
+            {snapshots.length > 0 && (
+              <MultiSelect
+                options={periodOptions}
+                selected={selPeriods}
+                onChange={setSelPeriods}
+                placeholder="Semua Periode"
+                className="w-48"
+              />
+            )}
+          </div>
           {snapshots.length === 0 ? (
             <EmptyState text="Belum ada snapshot ZPAR yang diupload." />
+          ) : filteredSnapshots.length === 0 ? (
+            <EmptyState text="Tidak ada snapshot pada periode yang dipilih." />
           ) : (
             <TableWrap>
               <thead>
@@ -214,7 +224,7 @@ export function UploadCenterClient() {
                 </tr>
               </thead>
               <tbody>
-                {snapshots.map((s) => {
+                {filteredSnapshots.map((s) => {
                   return (
                     <tr key={s.id}>
                       <Td>{s.period}</Td>
