@@ -1,6 +1,6 @@
 // Aggregation helpers for the Dashboard — pure functions over the raw
 // stores, read-only per MTRACK_SPEC.md §5 / §11.
-import { addMonths, addYears, differenceInYears, endOfMonth, endOfYear, format, parseISO, subMonths } from "date-fns";
+import { addMonths, addYears, differenceInYears, endOfMonth, endOfYear, format, parseISO, startOfMonth, subMonths } from "date-fns";
 import { demandVisibleDate, fulfillmentDeadline, reviewFillDeadline, reviewReminderDate, sisaHari } from "./compute";
 import { demandTargetDate, effectiveDemandCategory } from "./enrollment";
 import { POSISI_STRUKTURAL_GROUPS } from "../types";
@@ -240,42 +240,80 @@ export function manpowerMovementByFiscalYear(
   });
 }
 
-// ---------------------------------------------------------------------------
-// Komposisi by Labor Type
-// ---------------------------------------------------------------------------
+/** Same Permanen vs "everything else = Kontrak" partition
+ * manpowerMovementByFiscalYear uses, exposed standalone so callers other
+ * than the FY chart (e.g. the Manpower Movement "Lihat Perubahan" diff) can
+ * scope a roster snapshot to the same Labor Type/Status selection. */
+export function filterByLaborTypeStatus(
+  employees: EmployeeRecord[],
+  laborTypes: string[],
+  statuses: MovementStatus[]
+): EmployeeRecord[] {
+  const scopeStatuses = statuses.length ? statuses : (["Permanen", "Kontrak", "Vokasi"] as MovementStatus[]);
+  return employees.filter((e) => {
+    if (laborTypes.length > 0 && !laborTypes.includes(e.labor_type)) return false;
+    return scopeStatuses.includes(e.status_kontrak === "Permanen" ? "Permanen" : "Kontrak");
+  });
+}
 
-export const LABOR_TYPE_GROUPS: { base: string; codes: string[] }[] = [
-  { base: "A", codes: ["A"] },
-  { base: "B", codes: ["B1", "B2", "B3", "B4"] },
-  { base: "C", codes: ["C1", "C2"] },
-  { base: "D", codes: ["D"] },
-  { base: "E", codes: ["E1", "E2"] },
-  { base: "T", codes: ["T"] },
-  { base: "F", codes: ["F"] },
-];
+// ---------------------------------------------------------------------------
+// Labor Type Movement — one bar per FY month (Apr-Mar, same window as
+// Manpower Movement) stacked by every ZPAR labor_type code, plus a
+// month-over-month "who moved from code X to code Y" transition tally so
+// the section reads as movement, not just a snapshot composition.
+// ---------------------------------------------------------------------------
 
 export type LaborTypeRow = { key: string } & Record<string, number | string>;
 
-/** One row per base group (A,B,C,D,E,T,F); sub-codes (B1-4/C1-2/E1-2) become
- * separate stacked keys within the same bar. Vokasi (not a ZPAR labor_type code)
- * is appended as its own bar from the caller-supplied active-Vokasi count. */
-export function laborTypeComposition(employees: EmployeeRecord[], activeVokasiCount = 0): LaborTypeRow[] {
-  const counts = new Map<string, number>();
-  for (const e of employees) {
-    const code = e.labor_type.trim();
-    if (!code) continue;
-    counts.set(code, (counts.get(code) ?? 0) + 1);
-  }
-  const rows: LaborTypeRow[] = LABOR_TYPE_GROUPS.map((g) => {
-    const row: LaborTypeRow = { key: g.base };
-    for (const code of g.codes) {
-      const c = counts.get(code) ?? 0;
-      if (c > 0) row[code] = c;
+/** One row per FY month, each ZPAR labor_type code as its own stacked key
+ * (A, B1-4, C1-2, D, E1-2, T, F) — sourced from the snapshot whose `period`
+ * matches that month, same as manpowerMovementByFiscalYear. */
+export function laborTypeMovementByFiscalYear(
+  snapshotsByPeriod: Map<string, EmployeeRecord[]>,
+  org: OrgFilter = { directorates: [], divisions: [], depts: [] },
+  refDate: Date = new Date()
+): LaborTypeRow[] {
+  return fiscalYearMonths(refDate).map((month) => {
+    const scoped = filterEmployees(snapshotsByPeriod.get(month) ?? [], org);
+    const row: LaborTypeRow = { key: format(new Date(`${month}-01T00:00:00`), "MMM yy") };
+    for (const e of scoped) {
+      const code = e.labor_type.trim();
+      if (!code) continue;
+      row[code] = (Number(row[code]) || 0) + 1;
     }
     return row;
   });
-  if (activeVokasiCount > 0) rows.push({ key: "Vokasi", Vokasi: activeVokasiCount });
-  return rows;
+}
+
+export interface LaborTypeTransitionEntry {
+  from: string;
+  to: string;
+  count: number;
+}
+
+/** Month-to-month labor_type diff by noreg, collapsed into (from, to, count)
+ * pairs sorted by count desc — e.g. "A → B2: 51". Only employees present in
+ * both snapshots with a non-blank, changed labor_type count; anyone whose
+ * code never changes contributes nothing, so the result naturally stays a
+ * short list instead of a full N×N matrix. */
+export function laborTypeTransitions(before: EmployeeRecord[], after: EmployeeRecord[], org?: OrgFilter): LaborTypeTransitionEntry[] {
+  const scopedBefore = org ? filterEmployees(before, org) : before;
+  const scopedAfter = org ? filterEmployees(after, org) : after;
+  const beforeByNoreg = new Map(scopedBefore.filter((e) => e.noreg).map((e) => [e.noreg, e]));
+  const counts = new Map<string, number>();
+  for (const a of scopedAfter) {
+    if (!a.noreg) continue;
+    const b = beforeByNoreg.get(a.noreg);
+    if (!b || !b.labor_type || !a.labor_type || b.labor_type === a.labor_type) continue;
+    const key = `${b.labor_type}→${a.labor_type}`;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return Array.from(counts.entries())
+    .map(([key, count]) => {
+      const [from, to] = key.split("→");
+      return { from, to, count };
+    })
+    .sort((a, b) => b.count - a.count);
 }
 
 // ---------------------------------------------------------------------------
@@ -511,13 +549,14 @@ export { subMonths };
 // ---------------------------------------------------------------------------
 // Age Movement — forecast of the active roster's age composition at 7
 // yearly checkpoints (now, end of this year, then end of each of the next 5
-// years), assuming nobody is replaced. Retirement age is 55, and only
-// applies to Permanen MP — age > 55 drops a Permanen employee out of the
-// active buckets entirely (tracked separately as a cumulative "Pensiun"
-// count instead), so the total active figure at each checkpoint already IS
-// "what headcount becomes if nobody retiring gets backfilled". Non-Permanen
-// MP (Kontrak/AKTI) have no retirement concept here — their departure is
-// via contract non-renewal, not age, so they just keep aging through the
+// years), assuming nobody is replaced. Retirement is effective the 1st of
+// the month after the 55th birthday, and only applies to Permanen MP — once
+// that date passes, a Permanen employee drops out of the active buckets
+// entirely (tracked separately as a cumulative "Pensiun" count instead), so
+// the total active figure at each checkpoint already IS "what headcount
+// becomes if nobody retiring gets backfilled". Non-Permanen MP
+// (Kontrak/AKTI) have no retirement concept here — their departure is via
+// contract non-renewal, not age, so they just keep aging through the
 // buckets (the last bucket, "55", covers 55-and-up for them).
 // ---------------------------------------------------------------------------
 
@@ -533,12 +572,23 @@ function ageBucketOf(age: number): AgeBucket {
   return "55";
 }
 
+/** Retirement is effective the 1st of the month *after* the 55th birthday —
+ * e.g. born 9 March means turning 55 lands on 9 March, so retirement is 1
+ * April of that year, regardless of which day of the month the birthday
+ * itself falls on. */
+function retirementEffectiveDate(tglLahirIso: string): Date {
+  const turns55 = addYears(parseISO(tglLahirIso), 55);
+  return startOfMonth(addMonths(turns55, 1));
+}
+
 export interface RetireeEntry {
   noreg: string;
   nama: string;
   division: string;
   dept: string;
-  usia: number;
+  /** Short month name (Jan..Dec) retirement takes effect — the year is
+   * implied by which checkpoint this entry lives under. */
+  bulanPensiun: string;
 }
 
 export interface AgeMovementCheckpoint {
@@ -574,14 +624,21 @@ export function ageMovementForecast(employees: EmployeeRecord[], today: Date = n
     const baruPensiun: RetireeEntry[] = [];
     for (const e of employees) {
       if (!e.tgl_lahir || !e.noreg) continue;
-      const age = differenceInYears(date, parseISO(e.tgl_lahir));
-      const isRetired = e.status_kontrak === "Permanen" && age > 55;
+      const retirementDate = e.status_kontrak === "Permanen" ? retirementEffectiveDate(e.tgl_lahir) : null;
+      const isRetired = retirementDate !== null && date >= retirementDate;
       if (isRetired) {
         retiredNow.add(e.noreg);
         if (!prevRetired.has(e.noreg)) {
-          baruPensiun.push({ noreg: e.noreg, nama: e.nama, division: e.division, dept: e.dept, usia: age });
+          baruPensiun.push({
+            noreg: e.noreg,
+            nama: e.nama,
+            division: e.division,
+            dept: e.dept,
+            bulanPensiun: format(retirementDate!, "MMM"),
+          });
         }
       } else {
+        const age = differenceInYears(date, parseISO(e.tgl_lahir));
         buckets[ageBucketOf(age)]++;
       }
     }

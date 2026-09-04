@@ -1,5 +1,5 @@
 "use client";
-import { Bar, CartesianGrid, ComposedChart, Legend, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Bar, CartesianGrid, ComposedChart, Legend, LabelList, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { AGE_BUCKETS, type AgeMovementCheckpoint } from "@/lib/engine/dashboard";
 
 const BUCKET_COLOR: Record<string, { light: string; dark: string }> = {
@@ -15,7 +15,23 @@ export function AgeMovementChart({ data }: { data: AgeMovementCheckpoint[] }) {
   const isDark = typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: dark)").matches;
 
   if (data.length === 0) return null;
-  const rows = data.map((c) => ({ key: c.key, ...c.buckets, pensiunKumulatif: c.pensiunKumulatif }));
+  // Same "_labelAnchor" trick as CompositionChart/LaborTypeChart: stack an
+  // always-non-zero synthetic field on top so the bar's total can be
+  // labelled even when a real bucket segment is legitimately 0.
+  const rows = data.map((c) => ({ key: c.key, ...c.buckets, pensiunKumulatif: c.pensiunKumulatif, _labelAnchor: 0.0001 }));
+
+  function totalLabel(props: { x?: number | string; y?: number | string; width?: number | string; index?: number }) {
+    const x = Number(props.x);
+    const y = Number(props.y);
+    const width = Number(props.width);
+    const row = props.index !== undefined ? data[props.index] : undefined;
+    if (Number.isNaN(x) || Number.isNaN(y) || Number.isNaN(width) || !row) return null;
+    return (
+      <text x={x + width / 2} y={y - 6} textAnchor="middle" fontSize={12} fontWeight={700} fill={isDark ? "#f5f5f4" : "#1c1c1a"}>
+        {row.totalActive}
+      </text>
+    );
+  }
 
   return (
     <div className="h-72 w-full">
@@ -56,6 +72,9 @@ export function AgeMovementChart({ data }: { data: AgeMovementCheckpoint[] }) {
               isAnimationActive={false}
             />
           ))}
+          <Bar dataKey="_labelAnchor" name="" stackId="age" fill="transparent" isAnimationActive={false} legendType="none" minPointSize={2}>
+            <LabelList content={totalLabel} />
+          </Bar>
           <Line
             type="monotone"
             dataKey="pensiunKumulatif"

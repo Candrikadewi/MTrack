@@ -37,9 +37,12 @@ import {
   diffEmployees,
   directorates,
   divisionsOfAny,
+  filterByLaborTypeStatus,
   filterEmployees,
+  fiscalYearMonths,
   groupCountBy,
-  laborTypeComposition,
+  laborTypeMovementByFiscalYear,
+  laborTypeTransitions,
   manpowerMovementByFiscalYear,
   monthBuckets,
   positionBreakdown,
@@ -218,15 +221,7 @@ export default function DashboardPage() {
             </div>
           </Card>
 
-          {/* 2. Age Movement */}
-          <AgeMovementBlock
-            employees={employees}
-            selDirectorates={selDirectorates}
-            selDivisions={selDivisions}
-            selDepts={selDepts}
-          />
-
-          {/* 3. Manpower Movement */}
+          {/* 2. Manpower Movement */}
           <ManpowerMovementBlock
             snapshotsByPeriod={snapshotsByPeriod}
             vokasi={vokasi}
@@ -237,11 +232,17 @@ export default function DashboardPage() {
             selDepts={selDepts}
           />
 
-          {/* 4. Komposisi by Labor Type */}
-          <LaborTypeBlock
+          {/* 3. Age Movement */}
+          <AgeMovementBlock
             employees={employees}
-            vokasi={vokasi}
-            demands={demands}
+            selDirectorates={selDirectorates}
+            selDivisions={selDivisions}
+            selDepts={selDepts}
+          />
+
+          {/* 4. Labor Type Movement */}
+          <LaborTypeMovementBlock
+            snapshotsByPeriod={snapshotsByPeriod}
             selDirectorates={selDirectorates}
             selDivisions={selDivisions}
             selDepts={selDepts}
@@ -519,14 +520,19 @@ function ManpowerMovementBlock({
   const [diffMonth, setDiffMonth] = useSessionState<string>("dash.movement.diffMonth", "");
   const availableMonths = useMemo(() => Array.from(snapshotsByPeriod.keys()).sort().reverse(), [snapshotsByPeriod]);
   const prevMonth = diffMonth ? previousPeriodWithData(diffMonth, snapshotsByPeriod) : null;
+  // "Lihat Perubahan" follows both the shared org filter AND this section's
+  // own Labor Type/Status selection — narrowing the chart above should
+  // narrow the diff panel below it the same way.
   const diff = useMemo(() => {
     if (!diffMonth || !prevMonth) return null;
-    return diffEmployees(snapshotsByPeriod.get(prevMonth)!, snapshotsByPeriod.get(diffMonth)!, reviews, demands, {
+    const before = filterByLaborTypeStatus(snapshotsByPeriod.get(prevMonth)!, selLaborTypes, selStatuses);
+    const after = filterByLaborTypeStatus(snapshotsByPeriod.get(diffMonth)!, selLaborTypes, selStatuses);
+    return diffEmployees(before, after, reviews, demands, {
       directorates: selDirectorates,
       divisions: selDivisions,
       depts: selDepts,
     });
-  }, [diffMonth, prevMonth, snapshotsByPeriod, reviews, demands, selDirectorates, selDivisions, selDepts]);
+  }, [diffMonth, prevMonth, snapshotsByPeriod, reviews, demands, selDirectorates, selDivisions, selDepts, selLaborTypes, selStatuses]);
 
   return (
     <Card
@@ -700,42 +706,91 @@ function DiffColumn({
   );
 }
 
-function LaborTypeBlock({
-  employees,
-  vokasi,
-  demands,
+/** "Movement", not just a snapshot: one bar per FY month stacked by every
+ * ZPAR labor_type code, plus a month-picker below showing that month's
+ * code-to-code transitions vs the previous month with data (e.g. "A → B2:
+ * 51") — same idea as Manpower Movement's chart, but for labor_type instead
+ * of Permanen/Kontrak/Vokasi. */
+function LaborTypeMovementBlock({
+  snapshotsByPeriod,
   selDirectorates,
   selDivisions,
   selDepts,
 }: {
-  employees: EmployeeRecord[];
-  vokasi: VokasiRecord[];
-  demands: Demand[];
+  snapshotsByPeriod: Map<string, EmployeeRecord[]>;
   selDirectorates: string[];
   selDivisions: string[];
   selDepts: string[];
 }) {
-  const filtered = filterEmployees(employees, {
-    directorates: selDirectorates,
-    divisions: selDivisions,
-    depts: selDepts,
-  });
-  const fulfilledVokasiIds = new Set(
-    demands.filter((d) => d.category === "Vokasi" && d.status === "Fulfilled").map((d) => d.origin_ref)
+  const refDate = useMemo(() => new Date(), []);
+  const rows = useMemo(
+    () =>
+      laborTypeMovementByFiscalYear(
+        snapshotsByPeriod,
+        { directorates: selDirectorates, divisions: selDivisions, depts: selDepts },
+        refDate
+      ),
+    [snapshotsByPeriod, selDirectorates, selDivisions, selDepts, refDate]
   );
-  const filteredVokasi = vokasi.filter(
-    (v) =>
-      (selDivisions.length === 0 || selDivisions.includes(v.div)) &&
-      (selDepts.length === 0 || selDepts.includes(v.dept))
+
+  const monthsWithData = useMemo(
+    () => fiscalYearMonths(refDate).filter((m) => snapshotsByPeriod.has(m)),
+    [snapshotsByPeriod, refDate]
   );
-  const vokasiActive = filteredVokasi.filter(
-    (v) => computeVokasiStatus(v.tgl_ended, fulfilledVokasiIds.has(v.id)) !== "Ended"
-  );
-  const rows = laborTypeComposition(filtered, vokasiActive.length);
+  const latestMonth = monthsWithData[monthsWithData.length - 1] ?? "";
+  const [selMonth, setSelMonth] = useSessionState("dash.laborTypeMovement.month", latestMonth);
+  const effectiveMonth = monthsWithData.includes(selMonth) ? selMonth : latestMonth;
+  const prevMonth = effectiveMonth ? previousPeriodWithData(effectiveMonth, snapshotsByPeriod) : null;
+  const transitions = useMemo(() => {
+    if (!effectiveMonth || !prevMonth) return [];
+    return laborTypeTransitions(snapshotsByPeriod.get(prevMonth)!, snapshotsByPeriod.get(effectiveMonth)!, {
+      directorates: selDirectorates,
+      divisions: selDivisions,
+      depts: selDepts,
+    });
+  }, [effectiveMonth, prevMonth, snapshotsByPeriod, selDirectorates, selDivisions, selDepts]);
+  const fmtMonth = (m: string) => format(new Date(`${m}-01T00:00:00`), "MMM yy");
 
   return (
-    <Card title="Komposisi by Labor Type">
-      {rows.length === 0 ? <EmptyState text="Tidak ada data." /> : <LaborTypeChart data={rows} />}
+    <Card title="Labor Type Movement" subtitle="1 fiscal year berjalan, dari data ZPAR terbaru per bulan.">
+      {rows.length === 0 ? (
+        <EmptyState text="Tidak ada data." />
+      ) : (
+        <div className="space-y-4">
+          <LaborTypeChart data={rows} />
+          {monthsWithData.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {monthsWithData.map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setSelMonth(m)}
+                  className={`rounded-xl border px-3 py-1.5 text-xs font-medium transition-colors ${
+                    effectiveMonth === m
+                      ? "border-blue-500 bg-blue-50 text-blue-700 dark:border-blue-500 dark:bg-blue-500/10 dark:text-blue-300"
+                      : "border-slate-200 text-slate-500 hover:border-slate-300 dark:border-slate-700 dark:text-slate-400"
+                  }`}
+                >
+                  {fmtMonth(m)}
+                </button>
+              ))}
+            </div>
+          )}
+          {effectiveMonth && (
+            <div className="border-t border-slate-100 pt-4 dark:border-slate-800">
+              <div className="text-xs font-medium text-slate-500">
+                {prevMonth
+                  ? `Perubahan Labor Type — ${fmtMonth(prevMonth)} → ${fmtMonth(effectiveMonth)}`
+                  : "Tidak ada periode sebelumnya untuk dibandingkan."}
+              </div>
+              <CompactDetailList
+                items={transitions.map((t) => ({ key: `${t.from} → ${t.to}`, count: t.count }))}
+                unit="perubahan"
+              />
+            </div>
+          )}
+        </div>
+      )}
     </Card>
   );
 }
@@ -783,7 +838,7 @@ function AgeMovementBlock({
   return (
     <Card
       title="Age Movement"
-      subtitle="Forecast dari ZPAR Active — asumsi tidak ada penggantian saat pensiun (usia > 55, khusus MP Permanen)."
+      subtitle="Forecast dari ZPAR Active — asumsi tidak ada penggantian saat pensiun (efektif 1 bulan setelah usia 55, khusus MP Permanen)."
     >
       {checkpoints.length === 0 ? (
         <EmptyState text="Tidak ada data." />
@@ -830,7 +885,7 @@ function AgeMovementBlock({
               <div className="mt-3">
                 <div className="text-xs font-medium text-slate-500">
                   {selected.key === checkpoints[0].key
-                    ? "Sudah pensiun (usia > 55, dikeluarkan dari figure aktif)"
+                    ? "Sudah pensiun (dikeluarkan dari figure aktif)"
                     : `Baru pensiun sejak ${checkpoints[checkpoints.indexOf(selected) - 1]?.key}`}
                 </div>
                 {selected.baruPensiun.length === 0 ? (
@@ -845,8 +900,11 @@ function AgeMovementBlock({
                         <span className="font-medium text-slate-700 dark:text-slate-200">
                           {r.nama} ({r.noreg})
                         </span>
-                        <span className="text-slate-400">
-                          {r.division} · {r.dept} · {r.usia} th
+                        <span className="flex items-center gap-2 text-slate-400">
+                          {r.division} · {r.dept}
+                          <span className="inline-flex items-center rounded-full bg-rose-100 px-2 py-0.5 text-[11px] font-bold text-rose-700 dark:bg-rose-500/15 dark:text-rose-300">
+                            {r.bulanPensiun}
+                          </span>
                         </span>
                       </div>
                     ))}
