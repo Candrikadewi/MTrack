@@ -188,7 +188,11 @@ export default function DashboardPage() {
             title="Total Manpower & Status"
             subtitle={activeSnapshot ? `Data ZPAR periode ${activeSnapshot.period} (Active)` : undefined}
           >
-            <TotalManpowerCard total={filteredEmployees.length + vokasiActive.length} employees={filteredEmployees} />
+            <TotalManpowerCard
+              total={filteredEmployees.length + vokasiActive.length}
+              gender={genderCount([...filteredEmployees, ...vokasiActive])}
+              employees={filteredEmployees}
+            />
             <div className="mt-3 grid gap-3 sm:grid-cols-3">
               <StatTile
                 label="Permanen"
@@ -214,7 +218,15 @@ export default function DashboardPage() {
             </div>
           </Card>
 
-          {/* 2. Manpower Movement */}
+          {/* 2. Age Movement */}
+          <AgeMovementBlock
+            employees={employees}
+            selDirectorates={selDirectorates}
+            selDivisions={selDivisions}
+            selDepts={selDepts}
+          />
+
+          {/* 3. Manpower Movement */}
           <ManpowerMovementBlock
             snapshotsByPeriod={snapshotsByPeriod}
             vokasi={vokasi}
@@ -225,19 +237,11 @@ export default function DashboardPage() {
             selDepts={selDepts}
           />
 
-          {/* 3. Komposisi by Labor Type */}
+          {/* 4. Komposisi by Labor Type */}
           <LaborTypeBlock
             employees={employees}
             vokasi={vokasi}
             demands={demands}
-            selDirectorates={selDirectorates}
-            selDivisions={selDivisions}
-            selDepts={selDepts}
-          />
-
-          {/* 4. Age Movement */}
-          <AgeMovementBlock
-            employees={employees}
             selDirectorates={selDirectorates}
             selDivisions={selDivisions}
             selDepts={selDepts}
@@ -421,7 +425,15 @@ function OrgCascadeFilter({
   );
 }
 
-function TotalManpowerCard({ total, employees }: { total: number; employees: EmployeeRecord[] }) {
+function TotalManpowerCard({
+  total,
+  gender,
+  employees,
+}: {
+  total: number;
+  gender: { L: number; P: number };
+  employees: EmployeeRecord[];
+}) {
   const rows = positionBreakdown(employees);
   return (
     <div className="rounded-2xl border border-blue-100 bg-gradient-to-br from-blue-50 to-indigo-50 p-4 dark:border-blue-500/20 dark:from-blue-500/10 dark:to-indigo-500/10">
@@ -434,6 +446,9 @@ function TotalManpowerCard({ total, employees }: { total: number; employees: Emp
             <div className="text-xs font-medium text-slate-500 dark:text-slate-400">Total Manpower</div>
             <div className="mt-0.5 bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-3xl font-bold tabular-nums text-transparent">
               {total}
+            </div>
+            <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+              L: {gender.L} · P: {gender.P}
             </div>
           </div>
         </div>
@@ -741,11 +756,26 @@ function AgeMovementBlock({
   selDivisions: string[];
   selDepts: string[];
 }) {
-  const filtered = filterEmployees(employees, {
+  const orgFiltered = filterEmployees(employees, {
     directorates: selDirectorates,
     divisions: selDivisions,
     depts: selDepts,
   });
+
+  const [selLaborTypes, setSelLaborTypes] = useSessionState<string[]>("dash.ageMovement.laborTypes", []);
+  const [selStatus, setSelStatus] = useSessionState<string[]>("dash.ageMovement.status", []);
+  const [selPosisi, setSelPosisi] = useSessionState<string[]>("dash.ageMovement.posisi", []);
+
+  const statusOptions = Array.from(new Set(orgFiltered.map((e) => e.status_kontrak))).sort();
+  const posisiOptions = Array.from(new Set(orgFiltered.map((e) => e.posisi_struktural).filter(Boolean))).sort();
+
+  const filtered = orgFiltered.filter(
+    (e) =>
+      (selLaborTypes.length === 0 || selLaborTypes.includes(e.labor_type)) &&
+      (selStatus.length === 0 || selStatus.includes(e.status_kontrak)) &&
+      (selPosisi.length === 0 || selPosisi.includes(e.posisi_struktural))
+  );
+
   const checkpoints = useMemo(() => ageMovementForecast(filtered), [filtered]);
   const [selectedKey, setSelectedKey] = useSessionState("dash.ageMovement.checkpoint", checkpoints[0]?.key ?? "");
   const selected = checkpoints.find((c) => c.key === selectedKey) ?? checkpoints[0];
@@ -753,12 +783,17 @@ function AgeMovementBlock({
   return (
     <Card
       title="Age Movement"
-      subtitle="Forecast dari ZPAR Active — asumsi tidak ada penggantian saat pensiun (usia > 55)."
+      subtitle="Forecast dari ZPAR Active — asumsi tidak ada penggantian saat pensiun (usia > 55, khusus MP Permanen)."
     >
       {checkpoints.length === 0 ? (
         <EmptyState text="Tidak ada data." />
       ) : (
         <div className="space-y-4">
+          <div className="grid gap-3 sm:grid-cols-3">
+            <MultiSelect label="Labor Type" options={[...LABOR_TYPES]} selected={selLaborTypes} onChange={setSelLaborTypes} />
+            <MultiSelect label="Status" options={statusOptions} selected={selStatus} onChange={setSelStatus} />
+            <MultiSelect label="Posisi (Struktural)" options={posisiOptions} selected={selPosisi} onChange={setSelPosisi} />
+          </div>
           <AgeMovementChart data={checkpoints} />
           <div className="flex flex-wrap gap-2">
             {checkpoints.map((c) => (

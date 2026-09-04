@@ -509,12 +509,16 @@ export function shopConfirmBatchesNeedingAction(demands: Demand[], category: Dem
 export { subMonths };
 
 // ---------------------------------------------------------------------------
-// Age Movement — forecast of the active roster's age composition at three
-// checkpoints (now, end of this year, 5 years out), assuming nobody is
-// replaced. Retirement age is 55: age > 55 drops out of the active buckets
-// entirely (tracked separately as a cumulative "Pensiun" count instead), so
-// the total active figure at each checkpoint already IS "what headcount
-// becomes if nobody retiring gets backfilled".
+// Age Movement — forecast of the active roster's age composition at 7
+// yearly checkpoints (now, end of this year, then end of each of the next 5
+// years), assuming nobody is replaced. Retirement age is 55, and only
+// applies to Permanen MP — age > 55 drops a Permanen employee out of the
+// active buckets entirely (tracked separately as a cumulative "Pensiun"
+// count instead), so the total active figure at each checkpoint already IS
+// "what headcount becomes if nobody retiring gets backfilled". Non-Permanen
+// MP (Kontrak/AKTI) have no retirement concept here — their departure is
+// via contract non-renewal, not age, so they just keep aging through the
+// buckets (the last bucket, "55", covers 55-and-up for them).
 // ---------------------------------------------------------------------------
 
 export type AgeBucket = "<20" | "21-30" | "31-40" | "41-50" | "51-54" | "55";
@@ -538,23 +542,28 @@ export interface RetireeEntry {
 }
 
 export interface AgeMovementCheckpoint {
-  key: string; // "Saat Ini" | "Akhir 2026" | "Akhir 2031"
+  key: string; // "Saat Ini" | "Akhir 2026" | "Akhir 2027" | ...
   asOfDate: string; // yyyy-MM-dd
   buckets: Record<AgeBucket, number>;
   totalActive: number;
   pensiunKumulatif: number;
-  /** Newly crossed into >55 since the previous checkpoint (empty for the
-   * first checkpoint, which has no "previous" to diff against). */
+  /** Newly crossed into >55 (Permanen only) since the previous checkpoint —
+   * i.e. who retires *that year*. Empty for the first checkpoint, which has
+   * no "previous" to diff against. */
   baruPensiun: RetireeEntry[];
 }
 
 /** `today` is injectable for tests/determinism; defaults to the real
  * current date since this is meant to always read as "as of right now". */
 export function ageMovementForecast(employees: EmployeeRecord[], today: Date = new Date()): AgeMovementCheckpoint[] {
+  const thisYear = today.getFullYear();
   const checkpoints = [
     { key: "Saat Ini", date: today },
-    { key: `Akhir ${today.getFullYear()}`, date: endOfYear(today) },
-    { key: `Akhir ${today.getFullYear() + 5}`, date: endOfYear(addYears(today, 5)) },
+    { key: `Akhir ${thisYear}`, date: endOfYear(today) },
+    ...Array.from({ length: 5 }, (_, i) => ({
+      key: `Akhir ${thisYear + i + 1}`,
+      date: endOfYear(addYears(today, i + 1)),
+    })),
   ];
 
   let prevRetired = new Set<string>();
@@ -566,7 +575,8 @@ export function ageMovementForecast(employees: EmployeeRecord[], today: Date = n
     for (const e of employees) {
       if (!e.tgl_lahir || !e.noreg) continue;
       const age = differenceInYears(date, parseISO(e.tgl_lahir));
-      if (age > 55) {
+      const isRetired = e.status_kontrak === "Permanen" && age > 55;
+      if (isRetired) {
         retiredNow.add(e.noreg);
         if (!prevRetired.has(e.noreg)) {
           baruPensiun.push({ noreg: e.noreg, nama: e.nama, division: e.division, dept: e.dept, usia: age });
