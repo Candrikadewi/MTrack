@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { StatTile, ProgressBar } from "@/components/ui/StatTile";
-import { Select } from "@/components/ui/Form";
+import { Field, Select } from "@/components/ui/Form";
 import { MultiSelect } from "@/components/ui/MultiSelect";
 import { FullWidthTabs } from "@/components/ui/Tabs";
 import { MonthBarChart } from "@/components/ui/MonthBarChart";
@@ -42,7 +42,7 @@ import {
   fiscalYearMonths,
   groupCountBy,
   laborTypeMovementByFiscalYear,
-  laborTypeTransitions,
+  laborTypeMovementDetail,
   manpowerMovementByFiscalYear,
   monthBuckets,
   positionBreakdown,
@@ -707,10 +707,11 @@ function DiffColumn({
 }
 
 /** "Movement", not just a snapshot: one bar per FY month stacked by every
- * ZPAR labor_type code, plus a month-picker below showing that month's
- * code-to-code transitions vs the previous month with data (e.g. "A → B2:
- * 51") — same idea as Manpower Movement's chart, but for labor_type instead
- * of Permanen/Kontrak/Vokasi. */
+ * ZPAR labor_type code, plus a month-picker below splitting that month's
+ * change into "New In" (brand-new hires landing on a code) and "Retagging"
+ * (an existing employee's code itself changed, e.g. A → B2) — same idea as
+ * Manpower Movement's chart, but for labor_type instead of
+ * Permanen/Kontrak/Vokasi. */
 function LaborTypeMovementBlock({
   snapshotsByPeriod,
   selDirectorates,
@@ -741,14 +742,24 @@ function LaborTypeMovementBlock({
   const [selMonth, setSelMonth] = useSessionState("dash.laborTypeMovement.month", latestMonth);
   const effectiveMonth = monthsWithData.includes(selMonth) ? selMonth : latestMonth;
   const prevMonth = effectiveMonth ? previousPeriodWithData(effectiveMonth, snapshotsByPeriod) : null;
-  const transitions = useMemo(() => {
-    if (!effectiveMonth || !prevMonth) return [];
-    return laborTypeTransitions(snapshotsByPeriod.get(prevMonth)!, snapshotsByPeriod.get(effectiveMonth)!, {
+  const detail = useMemo(() => {
+    if (!effectiveMonth || !prevMonth) return { newIn: [], retagging: [] };
+    return laborTypeMovementDetail(snapshotsByPeriod.get(prevMonth)!, snapshotsByPeriod.get(effectiveMonth)!, {
       directorates: selDirectorates,
       divisions: selDivisions,
       depts: selDepts,
     });
   }, [effectiveMonth, prevMonth, snapshotsByPeriod, selDirectorates, selDivisions, selDepts]);
+  const totalNewIn = detail.newIn.reduce((sum, n) => sum + n.count, 0);
+  const totalRetagging = detail.retagging.reduce((sum, r) => sum + r.count, 0);
+
+  const [selFrom, setSelFrom] = useSessionState("dash.laborTypeMovement.from", "");
+  const [selTo, setSelTo] = useSessionState("dash.laborTypeMovement.to", "");
+  const fromOptions = Array.from(new Set(detail.retagging.map((r) => r.from))).sort();
+  const toOptions = Array.from(
+    new Set(detail.retagging.filter((r) => !selFrom || r.from === selFrom).map((r) => r.to))
+  ).sort();
+  const matchedRetag = detail.retagging.find((r) => r.from === selFrom && r.to === selTo);
   const fmtMonth = (m: string) => format(new Date(`${m}-01T00:00:00`), "MMM yy");
 
   return (
@@ -783,10 +794,88 @@ function LaborTypeMovementBlock({
                   ? `Perubahan Labor Type — ${fmtMonth(prevMonth)} → ${fmtMonth(effectiveMonth)}`
                   : "Tidak ada periode sebelumnya untuk dibandingkan."}
               </div>
-              <CompactDetailList
-                items={transitions.map((t) => ({ key: `${t.from} → ${t.to}`, count: t.count }))}
-                unit="perubahan"
-              />
+              {prevMonth && (
+                <div className="mt-3 grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <div className="text-xs font-semibold text-slate-500">
+                      New In <span className="font-normal text-slate-400">({totalNewIn} orang — MP baru masuk)</span>
+                    </div>
+                    <CompactDetailList
+                      items={detail.newIn.map((n) => ({ key: n.laborType, count: n.count }))}
+                      unit="new in"
+                    />
+                  </div>
+                  <div>
+                    <div className="text-xs font-semibold text-slate-500">
+                      Retagging{" "}
+                      <span className="font-normal text-slate-400">
+                        ({totalRetagging} orang, {detail.retagging.length} case)
+                      </span>
+                    </div>
+                    {detail.retagging.length === 0 ? (
+                      <p className="mt-1 text-sm text-slate-400">Tidak ada retagging.</p>
+                    ) : (
+                      <>
+                        <CompactDetailList
+                          items={detail.retagging.map((r) => ({ key: `${r.from} → ${r.to}`, count: r.count }))}
+                          unit="case"
+                        />
+                        <div className="mt-3 grid grid-cols-2 gap-2">
+                          <Field label="Dari">
+                            <Select
+                              value={selFrom}
+                              onChange={(e) => {
+                                setSelFrom(e.target.value);
+                                setSelTo("");
+                              }}
+                            >
+                              <option value="">- pilih -</option>
+                              {fromOptions.map((f) => (
+                                <option key={f} value={f}>
+                                  {f}
+                                </option>
+                              ))}
+                            </Select>
+                          </Field>
+                          <Field label="Ke">
+                            <Select value={selTo} onChange={(e) => setSelTo(e.target.value)} disabled={!selFrom}>
+                              <option value="">- pilih -</option>
+                              {toOptions.map((t) => (
+                                <option key={t} value={t}>
+                                  {t}
+                                </option>
+                              ))}
+                            </Select>
+                          </Field>
+                        </div>
+                        {selFrom && selTo && (
+                          <div className="mt-2">
+                            {!matchedRetag || matchedRetag.people.length === 0 ? (
+                              <p className="text-sm text-slate-400">Tidak ada.</p>
+                            ) : (
+                              <div className="max-h-48 space-y-1.5 overflow-y-auto pr-1">
+                                {matchedRetag.people.map((p) => (
+                                  <div
+                                    key={p.noreg}
+                                    className="flex items-center justify-between gap-2 rounded-lg border border-slate-100 px-2.5 py-1.5 text-xs dark:border-slate-800"
+                                  >
+                                    <span className="font-medium text-slate-700 dark:text-slate-200">
+                                      {p.nama} ({p.noreg})
+                                    </span>
+                                    <span className="text-slate-400">
+                                      {p.division} · {p.dept}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>

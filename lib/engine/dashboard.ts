@@ -259,8 +259,9 @@ export function filterByLaborTypeStatus(
 // ---------------------------------------------------------------------------
 // Labor Type Movement — one bar per FY month (Apr-Mar, same window as
 // Manpower Movement) stacked by every ZPAR labor_type code, plus a
-// month-over-month "who moved from code X to code Y" transition tally so
-// the section reads as movement, not just a snapshot composition.
+// month-over-month detail split into "New In" (brand-new hires landing on a
+// code) and "Retagging" (an existing employee's code itself changed, e.g.
+// A → B2) so the section reads as movement, not just a snapshot composition.
 // ---------------------------------------------------------------------------
 
 export type LaborTypeRow = { key: string } & Record<string, number | string>;
@@ -285,35 +286,73 @@ export function laborTypeMovementByFiscalYear(
   });
 }
 
+export interface LaborTypeMovementPerson {
+  noreg: string;
+  nama: string;
+  division: string;
+  dept: string;
+}
+
+/** Genuinely new to the roster (noreg absent from `before` entirely) who
+ * landed with this labor_type code — i.e. new hires, not a re-tag of an
+ * existing employee. */
+export interface LaborTypeNewInEntry {
+  laborType: string;
+  count: number;
+  people: LaborTypeMovementPerson[];
+}
+
+/** An existing employee (noreg present in both months) whose labor_type
+ * code itself changed — e.g. "A → B2". */
 export interface LaborTypeTransitionEntry {
   from: string;
   to: string;
   count: number;
+  people: LaborTypeMovementPerson[];
 }
 
-/** Month-to-month labor_type diff by noreg, collapsed into (from, to, count)
- * pairs sorted by count desc — e.g. "A → B2: 51". Only employees present in
- * both snapshots with a non-blank, changed labor_type count; anyone whose
- * code never changes contributes nothing, so the result naturally stays a
- * short list instead of a full N×N matrix. */
-export function laborTypeTransitions(before: EmployeeRecord[], after: EmployeeRecord[], org?: OrgFilter): LaborTypeTransitionEntry[] {
+export interface LaborTypeMovementDetail {
+  newIn: LaborTypeNewInEntry[];
+  retagging: LaborTypeTransitionEntry[];
+}
+
+/** Month-to-month labor_type diff by noreg, split into the two things that
+ * can change a bar's composition: brand-new hires landing directly on a
+ * code ("New In"), and existing employees whose code itself was changed
+ * ("Retagging", e.g. A → B2). Both are collapsed into per-group tallies
+ * (sorted by count desc) instead of a flat per-person list, so a month with
+ * many labor types stays a short, scannable summary rather than an N×N
+ * matrix — the full person list for one specific retagging pair is still
+ * available via that entry's `people`. */
+export function laborTypeMovementDetail(before: EmployeeRecord[], after: EmployeeRecord[], org?: OrgFilter): LaborTypeMovementDetail {
   const scopedBefore = org ? filterEmployees(before, org) : before;
   const scopedAfter = org ? filterEmployees(after, org) : after;
   const beforeByNoreg = new Map(scopedBefore.filter((e) => e.noreg).map((e) => [e.noreg, e]));
-  const counts = new Map<string, number>();
+
+  const newInByCode = new Map<string, LaborTypeMovementPerson[]>();
+  const retaggingByPair = new Map<string, { from: string; to: string; people: LaborTypeMovementPerson[] }>();
+
   for (const a of scopedAfter) {
-    if (!a.noreg) continue;
+    if (!a.noreg || !a.labor_type) continue;
+    const person: LaborTypeMovementPerson = { noreg: a.noreg, nama: a.nama, division: a.division, dept: a.dept };
     const b = beforeByNoreg.get(a.noreg);
-    if (!b || !b.labor_type || !a.labor_type || b.labor_type === a.labor_type) continue;
-    const key = `${b.labor_type}→${a.labor_type}`;
-    counts.set(key, (counts.get(key) ?? 0) + 1);
+    if (!b) {
+      (newInByCode.get(a.labor_type) ?? newInByCode.set(a.labor_type, []).get(a.labor_type)!).push(person);
+    } else if (b.labor_type && b.labor_type !== a.labor_type) {
+      const key = `${b.labor_type}→${a.labor_type}`;
+      const entry = retaggingByPair.get(key) ?? { from: b.labor_type, to: a.labor_type, people: [] };
+      entry.people.push(person);
+      retaggingByPair.set(key, entry);
+    }
   }
-  return Array.from(counts.entries())
-    .map(([key, count]) => {
-      const [from, to] = key.split("→");
-      return { from, to, count };
-    })
+
+  const newIn = Array.from(newInByCode.entries())
+    .map(([laborType, people]) => ({ laborType, count: people.length, people }))
     .sort((a, b) => b.count - a.count);
+  const retagging = Array.from(retaggingByPair.values())
+    .map((e) => ({ ...e, count: e.people.length }))
+    .sort((a, b) => b.count - a.count);
+  return { newIn, retagging };
 }
 
 // ---------------------------------------------------------------------------
