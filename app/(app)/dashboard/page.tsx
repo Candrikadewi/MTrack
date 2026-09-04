@@ -23,11 +23,13 @@ import { FullWidthTabs } from "@/components/ui/Tabs";
 import { MonthBarChart } from "@/components/ui/MonthBarChart";
 import { CompositionChart } from "@/components/ui/CompositionChart";
 import { LaborTypeChart } from "@/components/ui/LaborTypeChart";
+import { AgeMovementChart } from "@/components/ui/AgeMovementChart";
 import { Badge, type Tone as BadgeTone } from "@/components/ui/Badge";
 import { EmptyState, TableWrap, Td, Th } from "@/components/ui/Table";
 import { useStoreList } from "@/lib/useStore";
 import { demandStore, pkwtReviewStore, projectStore, taktStore, utilPoolStore, vokasiStore, zparStore } from "@/lib/repo";
 import {
+  ageMovementForecast,
   candidateBatchesNeedingAction,
   currentMonthKey,
   demandSupplyRows,
@@ -56,6 +58,7 @@ import { useRole } from "@/lib/RoleContext";
 import type { Role } from "@/lib/roles";
 import type {
   Demand,
+  DemandCategory,
   EmployeeRecord,
   Plant,
   PkwtReview,
@@ -231,19 +234,35 @@ export default function DashboardPage() {
             selDivisions={selDivisions}
             selDepts={selDepts}
           />
+
+          {/* 4. Age Movement */}
+          <AgeMovementBlock
+            employees={employees}
+            selDirectorates={selDirectorates}
+            selDivisions={selDivisions}
+            selDepts={selDepts}
+          />
         </>
       ) : (
         <>
-          {/* 4 & 5. PKWT Review / Vokasi Ended per bulan */}
+          {/* PKWT Monitoring / Vokasi Monitoring — each folds its own
+              Demand-Supply table in, so it's not a separate card anymore. */}
           <div className="space-y-6">
-            <PkwtReviewChartBlock reviews={reviews} selDivisions={selDivisions} selDepts={selDepts} />
-            <VokasiEndedChartBlock vokasi={vokasi} selDivisions={selDivisions} selDepts={selDepts} />
+            <PkwtReviewChartBlock
+              reviews={reviews}
+              demands={demands}
+              selDivisions={selDivisions}
+              selDepts={selDepts}
+            />
+            <VokasiEndedChartBlock
+              vokasi={vokasi}
+              demands={demands}
+              selDivisions={selDivisions}
+              selDepts={selDepts}
+            />
           </div>
 
-          {/* 6. Demand-Supply Overview */}
-          <DemandSupplyBlock demands={demands} selDivisions={selDivisions} selDepts={selDepts} />
-
-          {/* 7 & 8. Project / Takt Time Summary */}
+          {/* Project Monitoring / Takt Time Monitoring */}
           <div className="grid gap-6 lg:grid-cols-2">
             <ProjectSummaryBlock projects={projects} demands={demands} />
             <TaktSummaryBlock taktCases={taktCases} demands={demands} utilPool={utilPool} />
@@ -706,6 +725,107 @@ function LaborTypeBlock({
   );
 }
 
+/** Forecast, not a live count — read against the Active ZPAR snapshot only,
+ * assuming nobody retiring gets replaced. Retirement age is 55: anyone
+ * projected past 55 drops out of the stacked buckets and is tracked instead
+ * as a dashed cumulative "Pensiun" line, so the bar's own height already
+ * shows what headcount becomes without backfill. */
+function AgeMovementBlock({
+  employees,
+  selDirectorates,
+  selDivisions,
+  selDepts,
+}: {
+  employees: EmployeeRecord[];
+  selDirectorates: string[];
+  selDivisions: string[];
+  selDepts: string[];
+}) {
+  const filtered = filterEmployees(employees, {
+    directorates: selDirectorates,
+    divisions: selDivisions,
+    depts: selDepts,
+  });
+  const checkpoints = useMemo(() => ageMovementForecast(filtered), [filtered]);
+  const [selectedKey, setSelectedKey] = useSessionState("dash.ageMovement.checkpoint", checkpoints[0]?.key ?? "");
+  const selected = checkpoints.find((c) => c.key === selectedKey) ?? checkpoints[0];
+
+  return (
+    <Card
+      title="Age Movement"
+      subtitle="Forecast dari ZPAR Active — asumsi tidak ada penggantian saat pensiun (usia > 55)."
+    >
+      {checkpoints.length === 0 ? (
+        <EmptyState text="Tidak ada data." />
+      ) : (
+        <div className="space-y-4">
+          <AgeMovementChart data={checkpoints} />
+          <div className="flex flex-wrap gap-2">
+            {checkpoints.map((c) => (
+              <button
+                key={c.key}
+                type="button"
+                onClick={() => setSelectedKey(c.key)}
+                className={`rounded-xl border px-3 py-1.5 text-xs font-medium transition-colors ${
+                  selected?.key === c.key
+                    ? "border-blue-500 bg-blue-50 text-blue-700 dark:border-blue-500 dark:bg-blue-500/10 dark:text-blue-300"
+                    : "border-slate-200 text-slate-500 hover:border-slate-300 dark:border-slate-700 dark:text-slate-400"
+                }`}
+              >
+                {c.key}
+              </button>
+            ))}
+          </div>
+          {selected && (
+            <div className="border-t border-slate-100 pt-4 dark:border-slate-800">
+              <div className="flex flex-wrap items-center gap-6">
+                <div>
+                  <div className="text-xs font-medium text-slate-500">Total Active — {selected.key}</div>
+                  <div className="mt-0.5 text-2xl font-bold text-slate-800 dark:text-slate-100">
+                    {selected.totalActive} <span className="text-sm font-normal text-slate-500">orang</span>
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs font-medium text-slate-500">Pensiun (kumulatif)</div>
+                  <div className="mt-0.5 text-2xl font-bold text-slate-800 dark:text-slate-100">
+                    {selected.pensiunKumulatif} <span className="text-sm font-normal text-slate-500">orang</span>
+                  </div>
+                </div>
+              </div>
+              <div className="mt-3">
+                <div className="text-xs font-medium text-slate-500">
+                  {selected.key === checkpoints[0].key
+                    ? "Sudah pensiun (usia > 55, dikeluarkan dari figure aktif)"
+                    : `Baru pensiun sejak ${checkpoints[checkpoints.indexOf(selected) - 1]?.key}`}
+                </div>
+                {selected.baruPensiun.length === 0 ? (
+                  <p className="mt-1 text-sm text-slate-400">Tidak ada.</p>
+                ) : (
+                  <div className="mt-1.5 max-h-48 space-y-1.5 overflow-y-auto pr-1">
+                    {selected.baruPensiun.map((r) => (
+                      <div
+                        key={r.noreg}
+                        className="flex items-center justify-between gap-2 rounded-lg border border-slate-100 px-2.5 py-1.5 text-xs dark:border-slate-800"
+                      >
+                        <span className="font-medium text-slate-700 dark:text-slate-200">
+                          {r.nama} ({r.noreg})
+                        </span>
+                        <span className="text-slate-400">
+                          {r.division} · {r.dept} · {r.usia} th
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 function CompactDetailList({ items, unit }: { items: { key: string; count: number }[]; unit: string }) {
   if (items.length === 0) return <p className="text-sm text-slate-400">Tidak ada {unit} bulan ini.</p>;
   return (
@@ -725,12 +845,31 @@ function CompactDetailList({ items, unit }: { items: { key: string; count: numbe
   );
 }
 
+/** Both PKWT/Vokasi Monitoring cards fold their category's Demand-Supply
+ * table in directly (the standalone "Demand-Supply Overview" card is gone —
+ * it only ever showed the same two tables side by side). Scoped to the real
+ * current month, same demandVisibleDate/demandTargetDate window Demand Pool
+ * itself uses, plus the page's org filter. */
+function scopedDemandSupplyRows(
+  demands: Demand[],
+  category: DemandCategory,
+  selDivisions: string[],
+  selDepts: string[]
+): DemandSupplyRow[] {
+  const today = currentMonthKey();
+  const monthDemands = demands.filter((d) => demandVisibleDate(demandTargetDate(d)).slice(0, 7) === today);
+  const scoped = filterByDivDept(monthDemands, selDivisions, selDepts);
+  return demandSupplyRows(scoped, category);
+}
+
 function PkwtReviewChartBlock({
   reviews,
+  demands,
   selDivisions,
   selDepts,
 }: {
   reviews: PkwtReview[];
+  demands: Demand[];
   selDivisions: string[];
   selDepts: string[];
 }) {
@@ -741,9 +880,10 @@ function PkwtReviewChartBlock({
   const detailItems = byMonth.get(selected) ?? [];
   const byStatusKontrak = groupCountBy(detailItems, (r) => r.status_kontrak);
   const byLaborType = groupCountBy(detailItems, (r) => r.labor_type || "Other");
+  const demandSupply = scopedDemandSupplyRows(demands, "PKWT", selDivisions, selDepts);
 
   return (
-    <Card title="PKWT Review per Bulan">
+    <Card title="PKWT Monitoring">
       <div className="space-y-4">
         <MonthBarChart data={buckets} selectedMonth={selected} onSelect={setSelected} showValueLabels />
         <div>
@@ -762,6 +902,10 @@ function PkwtReviewChartBlock({
             </div>
           </div>
         </div>
+        <div className="border-t border-slate-100 pt-4 dark:border-slate-800">
+          <div className="mb-2 text-xs font-semibold text-slate-500">Demand-Supply — Bulan berjalan ({today})</div>
+          <DemandSupplyTable label="PKWT" rows={demandSupply} />
+        </div>
       </div>
     </Card>
   );
@@ -769,10 +913,12 @@ function PkwtReviewChartBlock({
 
 function VokasiEndedChartBlock({
   vokasi,
+  demands,
   selDivisions,
   selDepts,
 }: {
   vokasi: VokasiRecord[];
+  demands: Demand[];
   selDivisions: string[];
   selDepts: string[];
 }) {
@@ -781,9 +927,10 @@ function VokasiEndedChartBlock({
   const { buckets, byMonth } = monthBuckets(filteredVokasi, (v) => v.tgl_ended?.slice(0, 7), 3, 5, today);
   const [selected, setSelected] = useSessionState("dash.vokasiEnded.month", today);
   const detailItems = byMonth.get(selected) ?? [];
+  const demandSupply = scopedDemandSupplyRows(demands, "Vokasi", selDivisions, selDepts);
 
   return (
-    <Card title="Vokasi Ended per Bulan">
+    <Card title="Vokasi Monitoring">
       <div className="space-y-4">
         <MonthBarChart data={buckets} selectedMonth={selected} onSelect={setSelected} showValueLabels />
         <div>
@@ -791,6 +938,10 @@ function VokasiEndedChartBlock({
           <div className="mt-1 text-2xl font-bold text-slate-800 dark:text-slate-100">
             {detailItems.length} <span className="text-sm font-normal text-slate-500">ended</span>
           </div>
+        </div>
+        <div className="border-t border-slate-100 pt-4 dark:border-slate-800">
+          <div className="mb-2 text-xs font-semibold text-slate-500">Demand-Supply — Bulan berjalan ({today})</div>
+          <DemandSupplyTable label="Vokasi" rows={demandSupply} />
         </div>
       </div>
     </Card>
@@ -847,37 +998,10 @@ function DemandSupplyTable({ label, rows }: { label: string; rows: DemandSupplyR
   );
 }
 
-function DemandSupplyBlock({
-  demands,
-  selDivisions,
-  selDepts,
-}: {
-  demands: Demand[];
-  selDivisions: string[];
-  selDepts: string[];
-}) {
-  // "Bulan berjalan" — scoped to the real current month using the same
-  // demandVisibleDate(demandTargetDate(d)) window Demand Pool itself uses,
-  // instead of an all-time cumulative total that only ever grows.
-  const today = currentMonthKey();
-  const monthDemands = demands.filter((d) => demandVisibleDate(demandTargetDate(d)).slice(0, 7) === today);
-  const scopedDemands = filterByDivDept(monthDemands, selDivisions, selDepts);
-  const pkwtRows = demandSupplyRows(scopedDemands, "PKWT");
-  const vokasiRows = demandSupplyRows(scopedDemands, "Vokasi");
-  return (
-    <Card title="Demand-Supply Overview" subtitle={`Bulan berjalan — ${today}`}>
-      <div className="grid gap-6 lg:grid-cols-2">
-        <DemandSupplyTable label="PKWT" rows={pkwtRows} />
-        <DemandSupplyTable label="Vokasi" rows={vokasiRows} />
-      </div>
-    </Card>
-  );
-}
-
 function ProjectSummaryBlock({ projects, demands }: { projects: Project[]; demands: Demand[] }) {
   const ongoing = projects.filter((p) => p.status === "Ongoing");
   return (
-    <Card title="Project Monitoring Summary">
+    <Card title="Project Monitoring">
       {ongoing.length === 0 ? (
         <EmptyState text="Tidak ada project Ongoing." />
       ) : (
@@ -924,7 +1048,7 @@ function TaktSummaryBlock({
   const plants: Plant[] = ["Plant 1", "Plant 2"];
   const todayStr = format(new Date(), "yyyy-MM-dd");
   return (
-    <Card title="Takt Time Monitoring Summary">
+    <Card title="Takt Time Monitoring">
       <div className="space-y-4">
         {plants.map((plant) => {
           const cases = taktCases.filter((t) => t.plant === plant);

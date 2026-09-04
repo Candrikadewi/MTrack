@@ -32,6 +32,10 @@ function pick<T>(arr: T[], i: number): T {
 }
 
 const LABOR_TYPE_CYCLE = ["A", "B1", "B2", "B3", "B4", "C1", "C2", "D", "E1", "E2", "F", "T"];
+// Months-ago-born, spread across the working-age range (22 to 58) so Age
+// Movement's forecast has something to show at every bucket, including a
+// couple already past the 55 retirement age and a few about to cross it.
+const AGE_MONTHS_AGO_CYCLE = [264, 300, 336, 372, 408, 444, 480, 516, 552, 588, 612, 636, 660, 672, 696];
 const POSISI_CYCLE = [
   "Team Member",
   "Team Member",
@@ -81,7 +85,7 @@ export function seedSampleData(): void {
             dept,
             section: dept,
             line: `Line ${(n % 3) + 1}`,
-            tgl_lahir: iso(subMonths(now(), 300 + n)),
+            tgl_lahir: iso(subMonths(now(), pick(AGE_MONTHS_AGO_CYCLE, n))),
             gender,
             plant: div.plant,
             posisi_struktural: pick(POSISI_CYCLE, n),

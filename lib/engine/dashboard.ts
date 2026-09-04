@@ -1,6 +1,6 @@
 // Aggregation helpers for the Dashboard — pure functions over the raw
 // stores, read-only per MTRACK_SPEC.md §5 / §11.
-import { addMonths, endOfMonth, format, parseISO, subMonths } from "date-fns";
+import { addMonths, addYears, differenceInYears, endOfMonth, endOfYear, format, parseISO, subMonths } from "date-fns";
 import { demandVisibleDate, fulfillmentDeadline, reviewFillDeadline, reviewReminderDate, sisaHari } from "./compute";
 import { demandTargetDate, effectiveDemandCategory } from "./enrollment";
 import { POSISI_STRUKTURAL_GROUPS } from "../types";
@@ -507,3 +507,77 @@ export function shopConfirmBatchesNeedingAction(demands: Demand[], category: Dem
 }
 
 export { subMonths };
+
+// ---------------------------------------------------------------------------
+// Age Movement — forecast of the active roster's age composition at three
+// checkpoints (now, end of this year, 5 years out), assuming nobody is
+// replaced. Retirement age is 55: age > 55 drops out of the active buckets
+// entirely (tracked separately as a cumulative "Pensiun" count instead), so
+// the total active figure at each checkpoint already IS "what headcount
+// becomes if nobody retiring gets backfilled".
+// ---------------------------------------------------------------------------
+
+export type AgeBucket = "<20" | "21-30" | "31-40" | "41-50" | "51-54" | "55";
+export const AGE_BUCKETS: AgeBucket[] = ["<20", "21-30", "31-40", "41-50", "51-54", "55"];
+
+function ageBucketOf(age: number): AgeBucket {
+  if (age <= 20) return "<20";
+  if (age <= 30) return "21-30";
+  if (age <= 40) return "31-40";
+  if (age <= 50) return "41-50";
+  if (age <= 54) return "51-54";
+  return "55";
+}
+
+export interface RetireeEntry {
+  noreg: string;
+  nama: string;
+  division: string;
+  dept: string;
+  usia: number;
+}
+
+export interface AgeMovementCheckpoint {
+  key: string; // "Saat Ini" | "Akhir 2026" | "Akhir 2031"
+  asOfDate: string; // yyyy-MM-dd
+  buckets: Record<AgeBucket, number>;
+  totalActive: number;
+  pensiunKumulatif: number;
+  /** Newly crossed into >55 since the previous checkpoint (empty for the
+   * first checkpoint, which has no "previous" to diff against). */
+  baruPensiun: RetireeEntry[];
+}
+
+/** `today` is injectable for tests/determinism; defaults to the real
+ * current date since this is meant to always read as "as of right now". */
+export function ageMovementForecast(employees: EmployeeRecord[], today: Date = new Date()): AgeMovementCheckpoint[] {
+  const checkpoints = [
+    { key: "Saat Ini", date: today },
+    { key: `Akhir ${today.getFullYear()}`, date: endOfYear(today) },
+    { key: `Akhir ${today.getFullYear() + 5}`, date: endOfYear(addYears(today, 5)) },
+  ];
+
+  let prevRetired = new Set<string>();
+  const result: AgeMovementCheckpoint[] = [];
+  for (const { key, date } of checkpoints) {
+    const buckets: Record<AgeBucket, number> = { "<20": 0, "21-30": 0, "31-40": 0, "41-50": 0, "51-54": 0, "55": 0 };
+    const retiredNow = new Set<string>();
+    const baruPensiun: RetireeEntry[] = [];
+    for (const e of employees) {
+      if (!e.tgl_lahir || !e.noreg) continue;
+      const age = differenceInYears(date, parseISO(e.tgl_lahir));
+      if (age > 55) {
+        retiredNow.add(e.noreg);
+        if (!prevRetired.has(e.noreg)) {
+          baruPensiun.push({ noreg: e.noreg, nama: e.nama, division: e.division, dept: e.dept, usia: age });
+        }
+      } else {
+        buckets[ageBucketOf(age)]++;
+      }
+    }
+    const totalActive = Object.values(buckets).reduce((a, b) => a + b, 0);
+    result.push({ key, asOfDate: format(date, "yyyy-MM-dd"), buckets, totalActive, pensiunKumulatif: retiredNow.size, baruPensiun });
+    prevRetired = retiredNow;
+  }
+  return result;
+}
