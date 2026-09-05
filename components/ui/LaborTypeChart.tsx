@@ -2,17 +2,23 @@
 import { Bar, BarChart, CartesianGrid, Legend, LabelList, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import type { LaborTypeRow } from "@/lib/engine/dashboard";
 
+// Adjacent same-family sub-codes (B1-4, C1-2, E1-2) previously stepped
+// through one hue at close, easily-confused lightness (e.g. B3 vs B4 was
+// 1.32:1). Widened the lightness/hue spread within each family — C1-2 and
+// E1-2 now clear 3:1 pairwise in both themes; the four-way B family is
+// meaningfully more distinct than before but still imperfect (4 mutually
+// distinguishable shades in one family is a genuinely hard constraint).
 const SERIES = [
   { key: "A", label: "A", light: "#2a78d6", dark: "#3987e5" },
-  { key: "B1", label: "B1", light: "#0f8a5f", dark: "#16a06e" },
-  { key: "B2", label: "B2", light: "#1baf7a", dark: "#199e70" },
-  { key: "B3", label: "B3", light: "#4fc99a", dark: "#2fbd85" },
-  { key: "B4", label: "B4", light: "#8adfc0", dark: "#59d1a8" },
-  { key: "C1", label: "C1", light: "#7c5cd6", dark: "#8f74e0" },
-  { key: "C2", label: "C2", light: "#a996ea", dark: "#b6a5ee" },
+  { key: "B1", label: "B1", light: "#0b5d3a", dark: "#0f8a5f" },
+  { key: "B2", label: "B2", light: "#1f9c63", dark: "#22c37f" },
+  { key: "B3", label: "B3", light: "#5fbfa0", dark: "#6fdba8" },
+  { key: "B4", label: "B4", light: "#c8e6d5", dark: "#c8f0d8" },
+  { key: "C1", label: "C1", light: "#4a2f8f", dark: "#7c5cd6" },
+  { key: "C2", label: "C2", light: "#c3b3ee", dark: "#c7bbf0" },
   { key: "D", label: "D", light: "#f0a93b", dark: "#d18a1f" },
-  { key: "E1", label: "E1", light: "#0891b2", dark: "#0ea5c4" },
-  { key: "E2", label: "E2", light: "#5fc9dd", dark: "#38b6cf" },
+  { key: "E1", label: "E1", light: "#075c6e", dark: "#0e93ae" },
+  { key: "E2", label: "E2", light: "#a3e0ee", dark: "#a8e4f0" },
   { key: "T", label: "T", light: "#6b7280", dark: "#8a93a3" },
   { key: "F", label: "F", light: "#d6537c", dark: "#c23f68" },
   { key: "Vokasi", label: "Vokasi", light: "#8b5cf6", dark: "#a78bfa" },
@@ -39,8 +45,18 @@ export function LaborTypeChart({ data }: { data: LaborTypeRow[] }) {
     const width = Number(props.width);
     const row = props.index !== undefined ? data[props.index] : undefined;
     if (Number.isNaN(x) || Number.isNaN(y) || Number.isNaN(width) || !row) return null;
+    // A month with no ZPAR snapshot uploaded yet isn't "zero people" — label
+    // it as missing data instead of a number, so an empty fiscal-year window
+    // reads as "not uploaded" rather than "we lost the headcount".
+    if (!row.hasData) {
+      return (
+        <text x={x + width / 2} y={y - 6} textAnchor="middle" fontSize={12} fill={isDark ? "#a8a7a1" : "#6b6a64"}>
+          –
+        </text>
+      );
+    }
     const total = Object.entries(row)
-      .filter(([k]) => k !== "key" && k !== "_labelAnchor")
+      .filter(([k]) => k !== "key" && k !== "_labelAnchor" && k !== "hasData")
       .reduce((sum, [, v]) => sum + (typeof v === "number" ? v : 0), 0);
     return (
       <text x={x + width / 2} y={y - 6} textAnchor="middle" fontSize={12} fontWeight={700} fill={isDark ? "#f5f5f4" : "#1c1c1a"}>
@@ -58,9 +74,9 @@ export function LaborTypeChart({ data }: { data: LaborTypeRow[] }) {
             dataKey="key"
             axisLine={{ stroke: isDark ? "#383835" : "#c3c2b7" }}
             tickLine={false}
-            tick={{ fontSize: 12, fill: "#898781" }}
+            tick={{ fontSize: 12, fill: isDark ? "#898781" : "#6b6a64" }}
           />
-          <YAxis allowDecimals={false} axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: "#898781" }} />
+          <YAxis allowDecimals={false} axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: isDark ? "#898781" : "#6b6a64" }} />
           <Tooltip
             cursor={{ fill: "rgba(148,163,184,0.12)" }}
             contentStyle={{

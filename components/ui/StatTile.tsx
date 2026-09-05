@@ -57,7 +57,7 @@ export function StatTile({
   return (
     <div className={`rounded-2xl border px-4 py-3.5 transition-transform duration-200 hover:-translate-y-0.5 ${s.card}`}>
       <div className="flex items-center justify-between gap-2">
-        <div className="text-xs font-medium text-slate-500 dark:text-slate-400">{label}</div>
+        <div className="text-xs font-medium text-slate-600 dark:text-slate-400">{label}</div>
         {Icon && (
           <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${s.iconBg}`}>
             <Icon size={14} strokeWidth={2.25} />
@@ -67,7 +67,7 @@ export function StatTile({
       <div className={big ? `mt-1 text-3xl font-bold tabular-nums ${s.text}` : `mt-1 text-xl font-semibold tabular-nums ${s.text}`}>
         {value}
       </div>
-      {sub && <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{sub}</div>}
+      {sub && <div className="mt-0.5 text-xs text-slate-600 dark:text-slate-400">{sub}</div>}
     </div>
   );
 }

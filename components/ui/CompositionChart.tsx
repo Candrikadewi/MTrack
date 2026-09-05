@@ -31,6 +31,15 @@ export function CompositionChart({ data, heightClass = "h-72" }: { data: Composi
     const width = Number(props.width);
     const row = props.index !== undefined ? data[props.index] : undefined;
     if (Number.isNaN(x) || Number.isNaN(y) || Number.isNaN(width) || !row) return null;
+    // A month with no ZPAR snapshot uploaded yet isn't "zero people" — label
+    // it as missing data instead of a number.
+    if (!row.hasData) {
+      return (
+        <text x={x + width / 2} y={y - 6} textAnchor="middle" fontSize={12} fill={isDark ? "#a8a7a1" : "#6b6a64"}>
+          –
+        </text>
+      );
+    }
     const total = row.permanen + row.kontrak + row.vokasi;
     return (
       <text x={x + width / 2} y={y - 6} textAnchor="middle" fontSize={12} fontWeight={700} fill={isDark ? "#f5f5f4" : "#1c1c1a"}>
@@ -48,13 +57,13 @@ export function CompositionChart({ data, heightClass = "h-72" }: { data: Composi
             dataKey="key"
             axisLine={{ stroke: isDark ? "#383835" : "#c3c2b7" }}
             tickLine={false}
-            tick={{ fontSize: 11, fill: "#898781" }}
+            tick={{ fontSize: 11, fill: isDark ? "#898781" : "#6b6a64" }}
             interval={0}
             angle={data.length > 5 ? -20 : 0}
             textAnchor={data.length > 5 ? "end" : "middle"}
             height={data.length > 5 ? 50 : 30}
           />
-          <YAxis allowDecimals={false} axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: "#898781" }} />
+          <YAxis allowDecimals={false} axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: isDark ? "#898781" : "#6b6a64" }} />
           <Tooltip
             cursor={{ fill: "rgba(148,163,184,0.12)" }}
             contentStyle={{

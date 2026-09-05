@@ -46,7 +46,7 @@ export function Td({
 
 export function EmptyState({ text }: { text: string }) {
   return (
-    <div className="flex items-center justify-center rounded-2xl border border-dashed border-slate-300 py-10 text-sm text-slate-400 dark:border-slate-700">
+    <div className="flex items-center justify-center rounded-2xl border border-dashed border-slate-300 py-10 text-sm text-slate-600 dark:text-slate-400 dark:border-slate-700">
       {text}
     </div>
   );

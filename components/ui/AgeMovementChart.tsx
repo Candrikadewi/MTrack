@@ -42,13 +42,13 @@ export function AgeMovementChart({ data }: { data: AgeMovementCheckpoint[] }) {
             dataKey="key"
             axisLine={{ stroke: isDark ? "#383835" : "#c3c2b7" }}
             tickLine={false}
-            tick={{ fontSize: 11, fill: "#898781" }}
+            tick={{ fontSize: 11, fill: isDark ? "#898781" : "#6b6a64" }}
             interval={0}
             angle={data.length > 5 ? -20 : 0}
             textAnchor={data.length > 5 ? "end" : "middle"}
             height={data.length > 5 ? 46 : 30}
           />
-          <YAxis allowDecimals={false} axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: "#898781" }} />
+          <YAxis allowDecimals={false} axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: isDark ? "#898781" : "#6b6a64" }} />
           <Tooltip
             cursor={{ fill: "rgba(148,163,184,0.12)" }}
             contentStyle={{
