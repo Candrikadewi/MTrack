@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Vendored AI-agent tooling (skills, agents) — not application source.
+    ".claude/**",
   ]),
 ]);
 
