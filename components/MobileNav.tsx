@@ -19,8 +19,8 @@ export function MobileNav({ role }: { role: Role }) {
   const nav = NAV.filter((item) => canAccessModule(role, item.href));
   return (
     <div className="flex items-center gap-3 border-b border-slate-200 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-950 md:hidden">
-      <div className="flex h-7 w-7 items-center justify-center rounded-md bg-blue-600 text-xs font-bold text-white">
-        M
+      <div className="flex h-7 w-7 items-center justify-center rounded-md bg-gradient-to-br from-blue-500 via-indigo-500 to-violet-500 text-xs font-bold text-white">
+        C
       </div>
       <select
         value={pathname ?? "/dashboard"}

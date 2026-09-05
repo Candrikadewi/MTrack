@@ -30,9 +30,9 @@ const SOURCE_TYPE_LABELS: Record<UtilPoolSource, string> = {
   Kaizen: "Kaizen",
 };
 
-const SOURCE_TYPE_TONE: Record<UtilPoolSource, "blue" | "violet" | "emerald"> = {
+const SOURCE_TYPE_TONE: Record<UtilPoolSource, "blue" | "cyan" | "emerald"> = {
   ProjectFinish: "blue",
-  TaktDown: "violet",
+  TaktDown: "cyan",
   Kaizen: "emerald",
 };
 

@@ -215,7 +215,7 @@ export default function DashboardPage() {
                 label="Vokasi Aktif"
                 value={vokasiActive.length}
                 sub={`L: ${genderCount(vokasiActive).L} · P: ${genderCount(vokasiActive).P}`}
-                tone="violet"
+                tone="cyan"
                 icon={GraduationCap}
               />
             </div>
@@ -445,9 +445,7 @@ function TotalManpowerCard({
           </span>
           <div>
             <div className="text-xs font-medium text-slate-500 dark:text-slate-400">Total Manpower</div>
-            <div className="mt-0.5 bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-3xl font-bold tabular-nums text-transparent">
-              {total}
-            </div>
+            <div className="mt-0.5 text-3xl font-bold tabular-nums text-blue-600 dark:text-blue-400">{total}</div>
             <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
               L: {gender.L} · P: {gender.P}
             </div>

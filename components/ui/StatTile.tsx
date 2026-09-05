@@ -1,32 +1,32 @@
 import type { LucideIcon } from "lucide-react";
 
-type Tone = "blue" | "emerald" | "amber" | "violet" | "rose" | "slate";
+type Tone = "blue" | "emerald" | "amber" | "cyan" | "rose" | "slate";
 
 const TONE_STYLES: Record<Tone, { card: string; iconBg: string; text: string }> = {
   blue: {
     card: "border-blue-100 bg-gradient-to-br from-blue-50 to-indigo-50 dark:border-blue-500/20 dark:from-blue-500/10 dark:to-indigo-500/10",
     iconBg: "bg-blue-500/15 text-blue-600 dark:text-blue-300",
-    text: "bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent",
+    text: "text-blue-600 dark:text-blue-400",
   },
   emerald: {
     card: "border-emerald-100 bg-gradient-to-br from-emerald-50 to-teal-50 dark:border-emerald-500/20 dark:from-emerald-500/10 dark:to-teal-500/10",
     iconBg: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-300",
-    text: "bg-gradient-to-r from-emerald-600 to-teal-600 bg-clip-text text-transparent",
+    text: "text-emerald-600 dark:text-emerald-400",
   },
   amber: {
     card: "border-amber-100 bg-gradient-to-br from-amber-50 to-orange-50 dark:border-amber-500/20 dark:from-amber-500/10 dark:to-orange-500/10",
     iconBg: "bg-amber-500/15 text-amber-600 dark:text-amber-300",
-    text: "bg-gradient-to-r from-amber-600 to-orange-600 bg-clip-text text-transparent",
+    text: "text-amber-600 dark:text-amber-400",
   },
-  violet: {
-    card: "border-violet-100 bg-gradient-to-br from-violet-50 to-purple-50 dark:border-violet-500/20 dark:from-violet-500/10 dark:to-purple-500/10",
-    iconBg: "bg-violet-500/15 text-violet-600 dark:text-violet-300",
-    text: "bg-gradient-to-r from-violet-600 to-purple-600 bg-clip-text text-transparent",
+  cyan: {
+    card: "border-cyan-100 bg-gradient-to-br from-cyan-50 to-sky-50 dark:border-cyan-500/20 dark:from-cyan-500/10 dark:to-sky-500/10",
+    iconBg: "bg-cyan-500/15 text-cyan-600 dark:text-cyan-300",
+    text: "text-cyan-600 dark:text-cyan-400",
   },
   rose: {
     card: "border-rose-100 bg-gradient-to-br from-rose-50 to-pink-50 dark:border-rose-500/20 dark:from-rose-500/10 dark:to-pink-500/10",
     iconBg: "bg-rose-500/15 text-rose-600 dark:text-rose-300",
-    text: "bg-gradient-to-r from-rose-600 to-pink-600 bg-clip-text text-transparent",
+    text: "text-rose-600 dark:text-rose-400",
   },
   slate: {
     card: "border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-950",
