@@ -1,9 +1,12 @@
 "use client";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { format } from "date-fns";
 import { useSessionState } from "@/lib/useSessionState";
 import {
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
   ClipboardList,
   Users2,
   UserCheck,
@@ -14,6 +17,7 @@ import {
   GraduationCap,
   HardHat,
   TrendingUp,
+  X,
 } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { StatTile, ProgressBar } from "@/components/ui/StatTile";
@@ -26,7 +30,8 @@ import { LaborTypeChart } from "@/components/ui/LaborTypeChart";
 import { AgeMovementChart } from "@/components/ui/AgeMovementChart";
 import { Badge, type Tone as BadgeTone } from "@/components/ui/Badge";
 import { EmptyState, TableWrap, Td, Th } from "@/components/ui/Table";
-import { useStoreList } from "@/lib/useStore";
+import { CardSkeleton } from "@/components/ui/Skeleton";
+import { useStoreList, useStoreReady } from "@/lib/useStore";
 import { demandStore, pkwtReviewStore, projectStore, taktStore, utilPoolStore, vokasiStore, zparStore } from "@/lib/repo";
 import {
   ageMovementForecast,
@@ -37,6 +42,7 @@ import {
   diffEmployees,
   directorates,
   divisionsOfAny,
+  effectiveDivisionScope,
   filterByLaborTypeStatus,
   filterEmployees,
   fiscalYearMonths,
@@ -74,6 +80,7 @@ import type {
 
 export default function DashboardPage() {
   const role = useRole();
+  const zparReady = useStoreReady(zparStore);
   const snapshots = useStoreList(zparStore);
   const vokasi = useStoreList(vokasiStore);
   const demands = useStoreList(demandStore);
@@ -119,11 +126,37 @@ export default function DashboardPage() {
   // (what needs tracking/action across reviews, demand-supply, project/takt).
   const [section, setSection] = useSessionState<"demography" | "monitoring">("dash.section", "demography");
 
+  if (!zparReady) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100">Dashboard</h1>
+          <p className="text-sm text-slate-500 dark:text-slate-400">
+            Ringkasan kondisi manpower, read-only, mengagregasi semua modul.
+          </p>
+        </div>
+        <CardSkeleton lines={1} />
+        <CardSkeleton lines={2} />
+        <CardSkeleton lines={3} />
+      </div>
+    );
+  }
+
   if (snapshots.length === 0) {
     return (
       <div className="space-y-4">
         <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100">Dashboard</h1>
-        <EmptyState text="Belum ada snapshot ZPAR. Upload data di Upload Center terlebih dahulu." />
+        <div className="rounded-2xl border border-dashed border-slate-300 px-6 py-10 text-center dark:border-slate-700">
+          <p className="text-sm text-slate-500 dark:text-slate-400">
+            Belum ada snapshot ZPAR. Upload data di Upload Center terlebih dahulu.
+          </p>
+          <Link
+            href="/upload"
+            className="mt-4 inline-flex items-center gap-1.5 rounded-xl bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+          >
+            Buka Upload Center
+          </Link>
+        </div>
       </div>
     );
   }
@@ -133,9 +166,14 @@ export default function DashboardPage() {
     divisions: selDivisions,
     depts: selDepts,
   });
+  // Vokasi has no `directorat` field — a Directorate-only selection must be
+  // translated into its divisions first, or it silently fails to scope Vokasi
+  // at all (the bug this replaces: Total Manpower's headline total mixed a
+  // filtered ZPAR count with an unfiltered Vokasi count).
+  const vokasiDivisionScope = effectiveDivisionScope(employees, selDirectorates, selDivisions);
   const filteredVokasi = vokasi.filter(
     (v) =>
-      (selDivisions.length === 0 || selDivisions.includes(v.div)) &&
+      (vokasiDivisionScope.length === 0 || vokasiDivisionScope.includes(v.div)) &&
       (selDepts.length === 0 || selDepts.includes(v.dept))
   );
 
@@ -150,6 +188,8 @@ export default function DashboardPage() {
     P: arr.filter((x) => x.gender === "P").length,
   });
 
+  const activeOrgFilterCount = selDirectorates.length + selDivisions.length + selDepts.length;
+
   return (
     <div className="space-y-6">
       <div>
@@ -160,7 +200,24 @@ export default function DashboardPage() {
       </div>
 
       {/* Org filter — applies to every section below. */}
-      <Card>
+      <Card
+        action={
+          activeOrgFilterCount > 0 && (
+            <button
+              type="button"
+              onClick={() => {
+                setSelDirectorates([]);
+                setSelDivisions([]);
+                setSelDepts([]);
+              }}
+              className="flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700 transition-colors hover:bg-blue-100 dark:bg-blue-500/10 dark:text-blue-300 dark:hover:bg-blue-500/20"
+            >
+              {activeOrgFilterCount} filter aktif
+              <X size={12} />
+            </button>
+          )
+        }
+      >
         <OrgCascadeFilter
           employees={employees}
           selDirectorates={selDirectorates}
@@ -173,7 +230,7 @@ export default function DashboardPage() {
       </Card>
 
       {/* 0. Action Needed */}
-      <ActionNeededBlock reviews={reviews} demands={demands} role={role} />
+      <ActionNeededBlock reviews={reviews} demands={demands} role={role} hasActiveFilter={activeOrgFilterCount > 0} />
 
       <FullWidthTabs
         tabs={[
@@ -256,12 +313,16 @@ export default function DashboardPage() {
             <PkwtReviewChartBlock
               reviews={reviews}
               demands={demands}
+              employees={employees}
+              selDirectorates={selDirectorates}
               selDivisions={selDivisions}
               selDepts={selDepts}
             />
             <VokasiEndedChartBlock
               vokasi={vokasi}
               demands={demands}
+              employees={employees}
+              selDirectorates={selDirectorates}
               selDivisions={selDivisions}
               selDepts={selDepts}
             />
@@ -305,7 +366,17 @@ const ROLE_ACTION_KEYS: Record<Role, string[] | null> = {
   guest: [],
 };
 
-function ActionNeededBlock({ reviews, demands, role }: { reviews: PkwtReview[]; demands: Demand[]; role: Role }) {
+function ActionNeededBlock({
+  reviews,
+  demands,
+  role,
+  hasActiveFilter,
+}: {
+  reviews: PkwtReview[];
+  demands: Demand[];
+  role: Role;
+  hasActiveFilter: boolean;
+}) {
   const reviewBatches = useMemo(() => reviewBatchesNeedingAction(reviews), [reviews]);
   const candidatePkwt = useMemo(() => candidateBatchesNeedingAction(demands, "PKWT"), [demands]);
   const candidateVokasi = useMemo(() => candidateBatchesNeedingAction(demands, "Vokasi"), [demands]);
@@ -324,12 +395,28 @@ function ActionNeededBlock({ reviews, demands, role }: { reviews: PkwtReview[]; 
 
   if (sections.length === 0) return null;
 
+  // Urgency should be scannable without reading every row: most-overdue
+  // first, and the routine "nothing to do here" rows collapsed out of the
+  // way instead of taking up equal space next to what actually needs action.
+  const active = sections.filter((s) => s.batches.length > 0);
+  const safe = sections.filter((s) => s.batches.length === 0);
+  const worstDaysOf = (s: ActionSectionSpec) => Math.min(...s.batches.map((b) => b.daysRemaining));
+  const sortedActive = [...active].sort((a, b) => worstDaysOf(a) - worstDaysOf(b));
+
   return (
-    <Card title="Action Needed" subtitle="Progres tiap tahap review, candidate mapping, dan shop confirmation — real-time.">
+    <Card
+      title="Action Needed"
+      subtitle={
+        hasActiveFilter
+          ? "Progres tiap tahap review, candidate mapping, dan shop confirmation — seluruh organisasi, tidak mengikuti filter di atas."
+          : "Progres tiap tahap review, candidate mapping, dan shop confirmation — real-time."
+      }
+    >
       <div className="divide-y divide-slate-100 dark:divide-slate-800">
-        {sections.map((section) => (
+        {sortedActive.map((section) => (
           <ActionSummaryRow key={section.key} section={section} />
         ))}
+        {safe.length > 0 && <SafeSectionsRow sections={safe} />}
       </div>
     </Card>
   );
@@ -337,16 +424,6 @@ function ActionNeededBlock({ reviews, demands, role }: { reviews: PkwtReview[]; 
 
 function ActionSummaryRow({ section }: { section: ActionSectionSpec }) {
   const { icon: Icon, title, anchor, batches } = section;
-  if (batches.length === 0) {
-    return (
-      <div className="flex items-center gap-3 py-2.5 text-sm">
-        <Icon size={15} className="shrink-0 text-slate-300 dark:text-slate-600" />
-        <span className="flex-1 text-slate-500 dark:text-slate-400">{title}</span>
-        <Badge tone="green">Aman</Badge>
-      </div>
-    );
-  }
-
   const totalGap = batches.reduce((sum, b) => sum + (b.total - b.done), 0);
   const worst = batches.reduce((a, b) => (b.daysRemaining < a.daysRemaining ? b : a));
   const overdue = worst.daysRemaining < 0;
@@ -363,17 +440,53 @@ function ActionSummaryRow({ section }: { section: ActionSectionSpec }) {
   return (
     <Link
       href={worst.href}
-      className="flex items-center gap-3 py-2.5 text-sm transition-colors hover:bg-slate-50 dark:hover:bg-slate-900/60"
+      className={`flex items-center gap-3 py-2.5 pl-2.5 pr-3 text-sm transition-colors hover:bg-slate-50 dark:hover:bg-slate-900/60 ${
+        overdue ? "bg-red-50/70 dark:bg-red-500/[0.06]" : ""
+      }`}
     >
-      <Icon size={15} className="shrink-0 text-slate-400" />
+      <Icon size={15} className={`shrink-0 ${overdue ? "text-red-500" : "text-slate-600 dark:text-slate-400"}`} />
       <span className="flex-1 text-slate-700 dark:text-slate-200">
         {title}{" "}
-        <span className="text-slate-400">
+        <span className="font-semibold text-slate-600 dark:text-slate-300">
           — {totalGap} MP tertunda · {batches.length} bulan
         </span>
       </span>
       <Badge tone={overdue ? "red" : "amber"}>{statusLabel}</Badge>
+      <ChevronRight size={15} className="shrink-0 text-slate-300 dark:text-slate-600" />
     </Link>
+  );
+}
+
+/** Collapses every "nothing to do" section into one line so routine status
+ * doesn't consume the same vertical space and visual weight as the rows that
+ * actually need attention; expands on demand for anyone who wants the list. */
+function SafeSectionsRow({ sections }: { sections: ActionSectionSpec[] }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="flex w-full items-center gap-3 py-2.5 pl-2.5 pr-3 text-left text-sm transition-colors hover:bg-slate-50 dark:hover:bg-slate-900/60"
+      >
+        <CheckCircle2 size={15} className="shrink-0 text-emerald-500" />
+        <span className="flex-1 text-slate-500 dark:text-slate-400">
+          {sections.length} tahap lainnya aman
+        </span>
+        <ChevronDown size={15} className={`shrink-0 text-slate-300 transition-transform dark:text-slate-600 ${expanded ? "rotate-180" : ""}`} />
+      </button>
+      {expanded && (
+        <div className="divide-y divide-slate-50 pb-1 dark:divide-slate-900">
+          {sections.map((s) => (
+            <div key={s.key} className="flex items-center gap-3 py-2 pl-9 pr-3 text-sm">
+              <s.icon size={14} className="shrink-0 text-slate-300 dark:text-slate-600" />
+              <span className="flex-1 text-slate-500 dark:text-slate-400">{s.title}</span>
+              <Badge tone="green">Aman</Badge>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -444,17 +557,17 @@ function TotalManpowerCard({
             <Users2 size={18} strokeWidth={2.25} />
           </span>
           <div>
-            <div className="text-xs font-medium text-slate-500 dark:text-slate-400">Total Manpower</div>
+            <div className="text-xs font-medium text-slate-600 dark:text-slate-400">Total Manpower</div>
             <div className="mt-0.5 text-3xl font-bold tabular-nums text-blue-600 dark:text-blue-400">{total}</div>
-            <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+            <div className="mt-0.5 text-xs text-slate-600 dark:text-slate-400">
               L: {gender.L} · P: {gender.P}
             </div>
           </div>
         </div>
         <div className="flex-1 sm:pl-1">
-          <div className="mb-1.5 text-xs font-semibold text-slate-500">Breakdown Posisi (Struktural)</div>
+          <div className="mb-1.5 text-xs font-semibold text-slate-600 dark:text-slate-400">Breakdown Posisi (Struktural)</div>
           {rows.length === 0 ? (
-            <p className="text-sm text-slate-400">Tidak ada data posisi struktural.</p>
+            <p className="text-sm text-slate-600 dark:text-slate-400">Tidak ada data posisi struktural.</p>
           ) : (
             <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 sm:grid-cols-3 lg:grid-cols-5">
               {rows.map((r) => (
@@ -535,10 +648,11 @@ function ManpowerMovementBlock({
   return (
     <Card
       title="Manpower Movement"
+      subtitle="Bulan bertanda “–” belum ada snapshot ZPAR-nya."
       action={
         availableMonths.length > 0 && (
           <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 dark:border-slate-800 dark:bg-slate-900">
-            <Shuffle size={14} className="text-slate-400" />
+            <Shuffle size={14} className="text-slate-600 dark:text-slate-400" />
             <span className="text-xs font-medium text-slate-500">Lihat Perubahan</span>
             <Select
               bare
@@ -602,7 +716,7 @@ function EmployeeDiffPanel({ diff, fromMonth, toMonth }: { diff: EmployeeDiff; f
   const fmtMonth = (m: string) => format(new Date(`${m}-01T00:00:00`), "MMM yyyy");
   return (
     <div className="space-y-4">
-      <p className="text-xs text-slate-400">
+      <p className="text-xs text-slate-600 dark:text-slate-400">
         Perubahan {fmtMonth(fromMonth)} → {fmtMonth(toMonth)}, berdasarkan noreg.
       </p>
       <div className="grid gap-4 lg:grid-cols-4">
@@ -686,7 +800,7 @@ function DiffColumn({
         <Icon size={13} /> {title}
       </div>
       {rows.length === 0 ? (
-        <p className="text-xs text-slate-400">{empty}</p>
+        <p className="text-xs text-slate-600 dark:text-slate-400">{empty}</p>
       ) : (
         <div className="max-h-56 space-y-1.5 overflow-y-auto pr-1">
           {rows.map((r) => (
@@ -695,7 +809,7 @@ function DiffColumn({
                 <span className="font-medium text-slate-700 dark:text-slate-200">{r.primary}</span>
                 {r.tag && <Badge tone={r.tagTone}>{r.tag}</Badge>}
               </div>
-              <div className="text-slate-400">{r.secondary}</div>
+              <div className="text-slate-600 dark:text-slate-400">{r.secondary}</div>
             </div>
           ))}
         </div>
@@ -778,7 +892,10 @@ function LaborTypeMovementBlock({
   const fmtMonth = (m: string) => format(new Date(`${m}-01T00:00:00`), "MMM yy");
 
   return (
-    <Card title="Labor Type Movement" subtitle="1 fiscal year berjalan, dari data ZPAR terbaru per bulan.">
+    <Card
+      title="Labor Type Movement"
+      subtitle="1 fiscal year berjalan, dari data ZPAR terbaru per bulan. Bulan bertanda “–” belum ada snapshot ZPAR-nya."
+    >
       {rows.length === 0 ? (
         <EmptyState text="Tidak ada data." />
       ) : (
@@ -818,7 +935,7 @@ function LaborTypeMovementBlock({
                       <span className="font-bold">{newInEmployeeCount}</span> orang
                     </div>
                     {newInOptions.length === 0 ? (
-                      <p className="mt-1 text-sm text-slate-400">Tidak ada MP baru masuk.</p>
+                      <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">Tidak ada MP baru masuk.</p>
                     ) : (
                       <>
                         <div className="mt-2">
@@ -840,7 +957,7 @@ function LaborTypeMovementBlock({
                                   <span className="font-medium text-slate-700 dark:text-slate-200">
                                     {p.nama} ({p.noreg})
                                   </span>
-                                  <span className="text-slate-400">
+                                  <span className="text-slate-600 dark:text-slate-400">
                                     {n.laborType} · {p.division} · {p.dept}
                                   </span>
                                 </div>
@@ -858,7 +975,7 @@ function LaborTypeMovementBlock({
                       <span className="font-bold">{retagEmployeeCount}</span> orang
                     </div>
                     {detail.retagging.length === 0 ? (
-                      <p className="mt-1 text-sm text-slate-400">Tidak ada retagging.</p>
+                      <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">Tidak ada retagging.</p>
                     ) : (
                       <>
                         <div className="mt-2 grid grid-cols-2 gap-2">
@@ -868,7 +985,7 @@ function LaborTypeMovementBlock({
                         {(selFrom.length > 0 || selTo.length > 0) && (
                           <div className="mt-2 max-h-48 space-y-2 overflow-y-auto pr-1">
                             {retagMatches.length === 0 ? (
-                              <p className="text-sm text-slate-400">Tidak ada.</p>
+                              <p className="text-sm text-slate-600 dark:text-slate-400">Tidak ada.</p>
                             ) : (
                               retagMatches.map((r) => (
                                 <div key={`${r.from}-${r.to}`}>
@@ -884,7 +1001,7 @@ function LaborTypeMovementBlock({
                                         <span className="font-medium text-slate-700 dark:text-slate-200">
                                           {p.nama} ({p.noreg})
                                         </span>
-                                        <span className="text-slate-400">
+                                        <span className="text-slate-600 dark:text-slate-400">
                                           {p.division} · {p.dept}
                                         </span>
                                       </div>
@@ -1002,7 +1119,7 @@ function AgeMovementBlock({
                     : `Baru pensiun sejak ${checkpoints[checkpoints.indexOf(selected) - 1]?.key}`}
                 </div>
                 {selected.baruPensiun.length === 0 ? (
-                  <p className="mt-1 text-sm text-slate-400">Tidak ada.</p>
+                  <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">Tidak ada.</p>
                 ) : (
                   <div className="mt-1.5 max-h-48 space-y-1.5 overflow-y-auto pr-1">
                     {selected.baruPensiun.map((r) => (
@@ -1013,7 +1130,7 @@ function AgeMovementBlock({
                         <span className="font-medium text-slate-700 dark:text-slate-200">
                           {r.nama} ({r.noreg})
                         </span>
-                        <span className="flex items-center gap-2 text-slate-400">
+                        <span className="flex items-center gap-2 text-slate-600 dark:text-slate-400">
                           {r.division} · {r.dept}
                           <span className="inline-flex items-center rounded-full bg-rose-100 px-2 py-0.5 text-[11px] font-bold text-rose-700 dark:bg-rose-500/15 dark:text-rose-300">
                             {r.bulanPensiun}
@@ -1033,7 +1150,7 @@ function AgeMovementBlock({
 }
 
 function CompactDetailList({ items, unit }: { items: { key: string; count: number }[]; unit: string }) {
-  if (items.length === 0) return <p className="text-sm text-slate-400">Tidak ada {unit} bulan ini.</p>;
+  if (items.length === 0) return <p className="text-sm text-slate-600 dark:text-slate-400">Tidak ada {unit} bulan ini.</p>;
   return (
     <div className="mt-1 flex flex-wrap gap-1.5">
       {items.map((d) => (
@@ -1059,34 +1176,41 @@ function CompactDetailList({ items, unit }: { items: { key: string; count: numbe
 function scopedDemandSupplyRows(
   demands: Demand[],
   category: DemandCategory,
-  selDivisions: string[],
+  divisionScope: string[],
   selDepts: string[]
 ): DemandSupplyRow[] {
   const today = currentMonthKey();
   const monthDemands = demands.filter((d) => demandVisibleDate(demandTargetDate(d)).slice(0, 7) === today);
-  const scoped = filterByDivDept(monthDemands, selDivisions, selDepts);
+  const scoped = filterByDivDept(monthDemands, divisionScope, selDepts);
   return demandSupplyRows(scoped, category);
 }
 
 function PkwtReviewChartBlock({
   reviews,
   demands,
+  employees,
+  selDirectorates,
   selDivisions,
   selDepts,
 }: {
   reviews: PkwtReview[];
   demands: Demand[];
+  employees: EmployeeRecord[];
+  selDirectorates: string[];
   selDivisions: string[];
   selDepts: string[];
 }) {
   const today = currentMonthKey();
-  const filteredReviews = filterByDivDept(reviews, selDivisions, selDepts);
+  // Reviews/demands carry no `directorat` field — translate a Directorate
+  // pick into its divisions first, same as the Total Manpower fix.
+  const divisionScope = effectiveDivisionScope(employees, selDirectorates, selDivisions);
+  const filteredReviews = filterByDivDept(reviews, divisionScope, selDepts);
   const { buckets, byMonth } = monthBuckets(filteredReviews, (r) => r.tgl_review?.slice(0, 7), 3, 5, today);
   const [selected, setSelected] = useSessionState("dash.pkwtReview.month", today);
   const detailItems = byMonth.get(selected) ?? [];
   const byStatusKontrak = groupCountBy(detailItems, (r) => r.status_kontrak);
   const byLaborType = groupCountBy(detailItems, (r) => r.labor_type || "Other");
-  const demandSupply = scopedDemandSupplyRows(demands, "PKWT", selDivisions, selDepts);
+  const demandSupply = scopedDemandSupplyRows(demands, "PKWT", divisionScope, selDepts);
 
   return (
     <Card title="PKWT Monitoring">
@@ -1120,20 +1244,25 @@ function PkwtReviewChartBlock({
 function VokasiEndedChartBlock({
   vokasi,
   demands,
+  employees,
+  selDirectorates,
   selDivisions,
   selDepts,
 }: {
   vokasi: VokasiRecord[];
   demands: Demand[];
+  employees: EmployeeRecord[];
+  selDirectorates: string[];
   selDivisions: string[];
   selDepts: string[];
 }) {
   const today = currentMonthKey();
-  const filteredVokasi = filterByDivDept(vokasi, selDivisions, selDepts);
+  const divisionScope = effectiveDivisionScope(employees, selDirectorates, selDivisions);
+  const filteredVokasi = filterByDivDept(vokasi, divisionScope, selDepts);
   const { buckets, byMonth } = monthBuckets(filteredVokasi, (v) => v.tgl_ended?.slice(0, 7), 3, 5, today);
   const [selected, setSelected] = useSessionState("dash.vokasiEnded.month", today);
   const detailItems = byMonth.get(selected) ?? [];
-  const demandSupply = scopedDemandSupplyRows(demands, "Vokasi", selDivisions, selDepts);
+  const demandSupply = scopedDemandSupplyRows(demands, "Vokasi", divisionScope, selDepts);
 
   return (
     <Card title="Vokasi Monitoring">
@@ -1279,13 +1408,18 @@ function TaktSummaryBlock({
               <div className="mb-2 text-sm font-semibold text-slate-700 dark:text-slate-200">{plant}</div>
 
               {!current ? (
-                <div className="text-xs text-slate-400">Belum ada Takt Time berjalan.</div>
+                <div className="text-xs text-slate-600 dark:text-slate-400">Belum ada Takt Time berjalan.</div>
               ) : (
                 <div className="flex items-center justify-between text-xs">
                   <span className="text-slate-500">Takt Saat Ini ({current.date})</span>
                   <span className="font-semibold text-slate-800 dark:text-slate-100">
                     {current.takt_after} menit{" "}
-                    <span className={taktMpDelta(current) >= 0 ? "text-emerald-600" : "text-rose-600"}>
+                    {/* Positive delta means the takt change created a
+                        manpower need (a gap to fill), not a win — matches
+                        the amber "Perlu N MP lagi" convention used for the
+                        same concept elsewhere on this page, instead of
+                        rendering a new headcount ask as a success color. */}
+                    <span className={taktMpDelta(current) > 0 ? "text-amber-600" : "text-emerald-600"}>
                       ({taktMpDelta(current) >= 0 ? "+" : ""}
                       {taktMpDelta(current)} MP)
                     </span>
@@ -1295,7 +1429,7 @@ function TaktSummaryBlock({
 
               <div className="mt-2 border-t border-dashed border-slate-100 pt-2 dark:border-slate-800">
                 {!next ? (
-                  <div className="text-xs text-slate-400">Belum ada rencana Next Takt Time Prep.</div>
+                  <div className="text-xs text-slate-600 dark:text-slate-400">Belum ada rencana Next Takt Time Prep.</div>
                 ) : (
                   <div className="text-xs">
                     <div className="flex items-center justify-between">

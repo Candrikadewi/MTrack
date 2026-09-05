@@ -32,6 +32,21 @@ export function deptsOfAny(employees: EmployeeRecord[], divisions: string[]): st
   return Array.from(new Set(scoped.map((e) => e.dept))).sort();
 }
 
+/** Vokasi, PKWT review, and Demand records carry no `directorat` field of
+ * their own — only `div`/`dept` — so a Directorate selection can only reach
+ * them by translating it into the divisions that actually belong to it in
+ * the current roster (the same translation the org filter's own Division
+ * dropdown already narrows by). An explicit Division pick is more specific
+ * than a Directorate pick and always wins; with neither set, no restriction
+ * applies. Every div/dept-only filter call site on records without a
+ * directorate field should scope through this instead of raw `selDivisions`,
+ * or a Directorate-only filter silently fails to narrow them at all. */
+export function effectiveDivisionScope(employees: EmployeeRecord[], selDirectorates: string[], selDivisions: string[]): string[] {
+  if (selDivisions.length > 0) return selDivisions;
+  if (selDirectorates.length > 0) return divisionsOfAny(employees, selDirectorates);
+  return [];
+}
+
 export interface OrgFilter {
   directorates: string[];
   divisions: string[];
@@ -54,6 +69,10 @@ export interface CompositionRow {
   vokasi: number;
   laki: number;
   perempuan: number;
+  /** False when no ZPAR snapshot was ever uploaded for this month, as
+   * distinct from a snapshot that genuinely counted zero people — a chart
+   * should render these differently instead of showing an identical "0". */
+  hasData: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -236,6 +255,7 @@ export function manpowerMovementByFiscalYear(
         permanenRows.filter((e) => e.gender === "P").length +
         kontrakRows.filter((e) => e.gender === "P").length +
         vokasiRows.filter((v) => v.gender === "P").length,
+      hasData: snapshotsByPeriod.has(month),
     };
   });
 }
@@ -264,11 +284,13 @@ export function filterByLaborTypeStatus(
 // A → B2) so the section reads as movement, not just a snapshot composition.
 // ---------------------------------------------------------------------------
 
-export type LaborTypeRow = { key: string } & Record<string, number | string>;
+export type LaborTypeRow = { key: string; hasData: boolean } & Record<string, number | string | boolean>;
 
 /** One row per FY month, each ZPAR labor_type code as its own stacked key
  * (A, B1-4, C1-2, D, E1-2, T, F) — sourced from the snapshot whose `period`
- * matches that month, same as manpowerMovementByFiscalYear. */
+ * matches that month, same as manpowerMovementByFiscalYear. `hasData` is
+ * false when no snapshot was ever uploaded for that month, as distinct from
+ * an uploaded snapshot that genuinely counted zero of a given code. */
 export function laborTypeMovementByFiscalYear(
   snapshotsByPeriod: Map<string, EmployeeRecord[]>,
   org: OrgFilter = { directorates: [], divisions: [], depts: [] },
@@ -276,7 +298,10 @@ export function laborTypeMovementByFiscalYear(
 ): LaborTypeRow[] {
   return fiscalYearMonths(refDate).map((month) => {
     const scoped = filterEmployees(snapshotsByPeriod.get(month) ?? [], org);
-    const row: LaborTypeRow = { key: format(new Date(`${month}-01T00:00:00`), "MMM yy") };
+    const row: LaborTypeRow = {
+      key: format(new Date(`${month}-01T00:00:00`), "MMM yy"),
+      hasData: snapshotsByPeriod.has(month),
+    };
     for (const e of scoped) {
       const code = e.labor_type.trim();
       if (!code) continue;

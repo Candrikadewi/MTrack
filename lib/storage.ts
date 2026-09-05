@@ -92,6 +92,14 @@ export function createStore<T extends { id: string }>(table: string): Store<T> {
         if (!res.error && res.data) cache = res.data;
         initialized = true;
         notify();
+      })
+      .catch((err: unknown) => {
+        // A network-level failure (offline, DNS, CORS) rejects instead of
+        // resolving with `{ error }` — still counts as "hydration attempt
+        // resolved" so ready() doesn't hang a loading state forever.
+        console.error(`select from ${table} failed:`, err);
+        initialized = true;
+        notify();
       });
 
     supabase
@@ -122,7 +130,8 @@ export function createStore<T extends { id: string }>(table: string): Store<T> {
           cache = res.data;
           notify();
         }
-      });
+      })
+      .catch((err: unknown) => console.error(`refetch ${table} failed:`, err));
   }
 
   return {
@@ -146,7 +155,8 @@ export function createStore<T extends { id: string }>(table: string): Store<T> {
         .insert(item)
         .then((res: WriteResult) => {
           if (res.error) console.error(`insert into ${table} failed:`, res.error.message);
-        });
+        })
+        .catch((err: unknown) => console.error(`insert into ${table} failed:`, err));
       return item;
     },
     insertMany(items) {
@@ -157,7 +167,8 @@ export function createStore<T extends { id: string }>(table: string): Store<T> {
         .insert(items)
         .then((res: WriteResult) => {
           if (res.error) console.error(`insertMany into ${table} failed:`, res.error.message);
-        });
+        })
+        .catch((err: unknown) => console.error(`insertMany into ${table} failed:`, err));
       return items;
     },
     update(id, patch) {
@@ -172,7 +183,8 @@ export function createStore<T extends { id: string }>(table: string): Store<T> {
         .eq("id", id)
         .then((res: WriteResult) => {
           if (res.error) console.error(`update ${table} failed:`, res.error.message);
-        });
+        })
+        .catch((err: unknown) => console.error(`update ${table} failed:`, err));
       return updated;
     },
     upsert(item) {
@@ -184,7 +196,8 @@ export function createStore<T extends { id: string }>(table: string): Store<T> {
         .upsert(item)
         .then((res: WriteResult) => {
           if (res.error) console.error(`upsert into ${table} failed:`, res.error.message);
-        });
+        })
+        .catch((err: unknown) => console.error(`upsert into ${table} failed:`, err));
       return item;
     },
     remove(id) {
@@ -196,7 +209,8 @@ export function createStore<T extends { id: string }>(table: string): Store<T> {
         .eq("id", id)
         .then((res: WriteResult) => {
           if (res.error) console.error(`delete from ${table} failed:`, res.error.message);
-        });
+        })
+        .catch((err: unknown) => console.error(`delete from ${table} failed:`, err));
     },
   };
 }
