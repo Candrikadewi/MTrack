@@ -444,14 +444,26 @@ function ActionSummaryRow({ section }: { section: ActionSectionSpec }) {
         overdue ? "bg-red-50/70 dark:bg-red-500/[0.06]" : ""
       }`}
     >
-      <Icon size={15} className={`shrink-0 ${overdue ? "text-red-500" : "text-slate-600 dark:text-slate-400"}`} />
+      <span
+        className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${
+          overdue ? "bg-red-600 text-white shadow-sm shadow-red-500/30" : "bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-400"
+        }`}
+      >
+        <Icon size={14} strokeWidth={2.25} />
+      </span>
       <span className="flex-1 text-slate-700 dark:text-slate-200">
         {title}{" "}
         <span className="font-semibold text-slate-600 dark:text-slate-300">
           — {totalGap} MP tertunda · {batches.length} bulan
         </span>
       </span>
-      <Badge tone={overdue ? "red" : "amber"}>{statusLabel}</Badge>
+      {overdue ? (
+        <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-red-600 px-2.5 py-0.5 text-xs font-semibold text-white">
+          {statusLabel}
+        </span>
+      ) : (
+        <Badge tone="amber">{statusLabel}</Badge>
+      )}
       <ChevronRight size={15} className="shrink-0 text-slate-300 dark:text-slate-600" />
     </Link>
   );
@@ -553,7 +565,7 @@ function TotalManpowerCard({
     <div className="rounded-2xl border border-blue-100 bg-gradient-to-br from-blue-50 to-indigo-50 p-4 dark:border-blue-500/20 dark:from-blue-500/10 dark:to-indigo-500/10">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
         <div className="flex shrink-0 items-center gap-3 sm:border-r sm:border-blue-200/60 sm:pr-5 dark:sm:border-blue-500/20">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-500/15 text-blue-600 dark:text-blue-300">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-blue-600 text-white shadow-sm shadow-blue-500/30">
             <Users2 size={18} strokeWidth={2.25} />
           </span>
           <div>
