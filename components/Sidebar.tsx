@@ -11,11 +11,11 @@ import {
   Users2,
   FileStack,
   LogOut,
-  Sparkles,
 } from "lucide-react";
 import { logout } from "@/app/login/actions";
 import { canAccessModule, type Role } from "@/lib/roles";
 import { clearSessionState } from "@/lib/useSessionState";
+import { BrandMark } from "@/components/ui/BrandMark";
 
 const NAV_TOP = [
   { href: "/upload", label: "Upload Center", icon: Upload },
@@ -79,12 +79,12 @@ export function Sidebar({ role, email }: { role: Role; email: string }) {
   return (
     <aside className="fixed inset-y-0 left-0 z-40 hidden w-64 flex-col border-r border-slate-200/80 bg-white/80 backdrop-blur-xl dark:border-slate-800/80 dark:bg-slate-950/80 md:flex">
       <div className="flex items-center gap-2.5 border-b border-slate-100 px-5 py-5 dark:border-slate-800">
-        <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 via-indigo-500 to-violet-500 text-sm font-bold text-white shadow-md shadow-indigo-500/25">
-          <Sparkles size={18} strokeWidth={2.25} />
-        </div>
+        <BrandMark className="h-9 w-9" />
         <div>
           <div className="text-sm font-bold tracking-tight text-slate-800 dark:text-slate-100">CIRCLE</div>
-          <div className="text-[11px] leading-tight text-slate-400">Centralized Information Record &amp; Control for Labor Excellence</div>
+          <div className="text-[11px] leading-tight text-slate-600 dark:text-slate-400">
+            Centralized Information Record &amp; Control for Labor Excellence
+          </div>
         </div>
       </div>
       <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
