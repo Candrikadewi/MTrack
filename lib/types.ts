@@ -7,6 +7,12 @@ export type Gender = "L" | "P";
 
 export type MpStatusKategori = "Vokasi" | "PKWT" | "Permanen" | "AKTI";
 
+/** Known Labor Type codes (Dashboard §Komposisi by Labor Type). Employee/Vokasi
+ * records store labor_type as free text — this is the recognized set used for
+ * chart grouping; anything else is bucketed as "Other". */
+export const LABOR_TYPES = ["A", "B1", "B2", "B3", "B4", "C1", "C2", "D", "E1", "E2", "F", "T"] as const;
+export type LaborType = (typeof LABOR_TYPES)[number];
+
 // ---------------------------------------------------------------------------
 // 3.1 / 3.2 — ZPAR Snapshot & Employee Record
 // ---------------------------------------------------------------------------
@@ -26,7 +32,23 @@ export interface EmployeeRecord {
   tgl_lahir: string;
   gender: Gender;
   plant: string; // derived from division
+  posisi_struktural: string; // ZPAR "Posisi (Struktural)" column, free text
 }
+
+/** Dashboard §Total Manpower position-breakdown order & abbreviation, keyed by
+ * the raw posisi_struktural text (case-insensitive substring match). */
+export const POSISI_STRUKTURAL_GROUPS: { match: string; label: string }[] = [
+  { match: "department head", label: "DpH" },
+  { match: "master", label: "Master" },
+  { match: "senior officer", label: "SO" },
+  { match: "section head", label: "SH" },
+  { match: "staff", label: "Staff" },
+  { match: "group leader", label: "GL" },
+  { match: "team leader", label: "TL" },
+  { match: "group expert", label: "GX" },
+  { match: "team expert", label: "TX" },
+  { match: "team member", label: "TM" },
+];
 
 export interface ZparSnapshot {
   id: string;
@@ -56,6 +78,7 @@ export interface VokasiRecord {
   utilisasi: string;
   status_saat_ini: VokasiStatusSaatIni;
   gender: Gender;
+  labor_type: string;
   upload_date: string; // metadata: when this batch record was uploaded
 }
 
@@ -76,6 +99,7 @@ export interface PkwtReview {
   tgl_review: string; // computed
   review_result: ReviewResult;
   demand_id?: string; // set once Terminate creates a Demand
+  labor_type: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -100,8 +124,11 @@ export type DemandStatus = "Open" | "Fulfilled";
 
 export type FsStatus = "Need FS" | "No Need FS" | "";
 
-/** PKWT Demand replacement path — see MTRACK_SPEC.md revision (Enrollment Kontrak). */
-export type ReplacementStatus = "" | "PKWT New Hire" | "MP Excess" | "MP Back Up" | "No Replace";
+/** Demand Supply "Source" — how a demand's vacancy actually gets filled.
+ * "PKWT New Hire" only appears as an option on the PKWT tab; "Vokasi New
+ * Hire" appears on both tabs (see effectiveDemandCategory in enrollment.ts)
+ * since a PKWT vacancy can be backfilled from the Vokasi pipeline. */
+export type ReplacementStatus = "" | "PKWT New Hire" | "Vokasi New Hire" | "MP Excess" | "MP Back Up" | "No Replace";
 
 /** Employment status of the replacement candidate — auto-derived from where the noreg was found. */
 export type EmploymentStatus = "" | "Kontrak" | "Permanen" | "Vokasi";
@@ -125,7 +152,7 @@ export interface Demand {
 
   fulfill_date: string; // target date replacement should start
 
-  replacement_status: ReplacementStatus; // PKWT only
+  replacement_status: ReplacementStatus;
   no_replace_reason: string; // set when replacement_status = "No Replace"
 
   replacement_noreg: string;
@@ -135,9 +162,21 @@ export interface Demand {
   replacement_dept: string; // department of the replacement (for fs_status)
   replacement_employment_status: EmploymentStatus;
 
-  fs_status: FsStatus; // PKWT only, computed
+  fs_status: FsStatus; // computed once a replacement source is known
 
   status: DemandStatus;
+  /** When the candidate mapping actually became official — contract signed
+   * (new hire) or officially assigned to destination dept (MP Back Up/
+   * Excess). This, not just having a name filled in, is what makes `status`
+   * "Fulfilled". Empty until confirmed. */
+  fulfillment_confirmed_date: string;
+
+  /** Shop floor confirms the replacement has actually reported for duty —
+   * separate from `fulfillment_confirmed_date` (HR/admin contract-sign or
+   * assignment step). Empty until confirmed. Drives the granular
+   * Open/DELAY/Need Replace ASAP/Fulfilled Ontime/Fulfilled but Delay status
+   * shown on the Supply-Demand page (see `supplyDemandStatus` in compute.ts). */
+  shop_confirmed_date: string;
 
   created_at: string;
 }
@@ -148,11 +187,14 @@ export interface Demand {
 
 export type ProjectStatus = "Ongoing" | "Finish";
 
+export type MpRole = "Proses" | "Backup";
+
 export interface ProjectMpNeedRow {
   id: string;
   division: string;
   dept: string;
   status_mp: MpStatusKategori;
+  mp_role: MpRole;
   qty: number;
   fulfill_date: string;
 }
@@ -178,6 +220,7 @@ export interface TaktDownPerson {
   noreg: string;
   nama: string;
   type: MpStatusKategori;
+  div: string;
   dept: string;
 }
 
@@ -200,7 +243,7 @@ export interface TaktCase {
 // 3.8 — Utilization Pool Entry
 // ---------------------------------------------------------------------------
 
-export type UtilPoolSource = "ProjectFinish" | "TaktDown";
+export type UtilPoolSource = "ProjectFinish" | "TaktDown" | "Kaizen";
 export type UtilPoolStatus = "Open" | "Assigned" | "Released";
 
 export interface UtilPoolEntry {
@@ -210,6 +253,7 @@ export interface UtilPoolEntry {
   type: MpStatusKategori;
   source: UtilPoolSource;
   source_label: string;
+  prev_div: string;
   prev_dept: string;
   entered_pool_date: string;
   contract_end: string | null; // null if Permanen

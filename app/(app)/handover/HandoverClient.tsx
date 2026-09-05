@@ -1,8 +1,9 @@
 "use client";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Field, Input, Select } from "@/components/ui/Form";
+import { MultiSelect } from "@/components/ui/MultiSelect";
 import { Badge, statusTone } from "@/components/ui/Badge";
 import { EmptyState, TableWrap, Td, Th } from "@/components/ui/Table";
 import { useStoreList } from "@/lib/useStore";
@@ -10,6 +11,7 @@ import { handoverStore, zparStore } from "@/lib/repo";
 import { deptsOf } from "@/lib/engine/dashboard";
 import { buildHandoverForm, finalizeHandoverForm } from "@/lib/engine/handover";
 import { fmtDate } from "@/lib/engine/compute";
+import { useSessionState } from "@/lib/useSessionState";
 
 export function HandoverClient() {
   const snapshots = useStoreList(zparStore);
@@ -24,6 +26,22 @@ export function HandoverClient() {
     if (!dept || !period) return;
     buildHandoverForm(dept, period);
   }
+
+  function finalize(id: string) {
+    if (!confirm("Finalize form ini? Status akan permanen menjadi Completed dan tidak bisa dikembalikan ke Draft."))
+      return;
+    finalizeHandoverForm(id);
+  }
+
+  // Filters the generated-forms list itself (separate from the dept/period
+  // above, which only scope the next form to generate) — without this, a
+  // year of monthly forms across several departments is one long flat scroll.
+  const [selDepts, setSelDepts] = useSessionState<string[]>("handover.list.depts", []);
+  const [selPeriod, setSelPeriod] = useSessionState<string>("handover.list.period", "");
+  const periodOptions = useMemo(() => Array.from(new Set(forms.map((f) => f.period))).sort().reverse(), [forms]);
+  const filteredForms = forms.filter(
+    (f) => (selDepts.length === 0 || selDepts.includes(f.dept)) && (selPeriod === "" || f.period === selPeriod)
+  );
 
   return (
     <div className="space-y-6">
@@ -61,17 +79,38 @@ export function HandoverClient() {
         <EmptyState text="Belum ada Handover Form." />
       ) : (
         <div className="space-y-4">
-          {forms.map((f) => (
+          <div className="grid gap-3 sm:grid-cols-3">
+            <MultiSelect label="Department" options={depts} selected={selDepts} onChange={setSelDepts} />
+            <div>
+              <span className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">Periode</span>
+              <Select value={selPeriod} onChange={(e) => setSelPeriod(e.target.value)}>
+                <option value="">Semua Periode</option>
+                {periodOptions.map((p) => (
+                  <option key={p} value={p}>
+                    {p}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          </div>
+
+          {filteredForms.length === 0 ? (
+            <EmptyState text="Tidak ada Handover Form sesuai filter." />
+          ) : (
+            filteredForms.map((f) => (
             <Card
               key={f.id}
-              title={`${f.dept} — ${f.period}`}
+              title={`${f.dept}: ${f.period}`}
               action={
                 <div className="flex items-center gap-2">
                   <Badge tone={statusTone(f.status)}>{f.status}</Badge>
                   {f.status === "Draft" && (
-                    <Button size="sm" variant="primary" onClick={() => finalizeHandoverForm(f.id)}>
-                      Finalize
-                    </Button>
+                    <div className="text-right">
+                      <Button size="sm" variant="primary" onClick={() => finalize(f.id)}>
+                        Finalize
+                      </Button>
+                      <p className="mt-0.5 text-[11px] text-slate-400">Permanen, tidak bisa dibatalkan</p>
+                    </div>
                   )}
                 </div>
               }
@@ -107,7 +146,8 @@ export function HandoverClient() {
                 </TableWrap>
               )}
             </Card>
-          ))}
+            ))
+          )}
         </div>
       )}
     </div>

@@ -9,9 +9,11 @@ import {
   taktStore,
   utilPoolStore,
   vokasiStore,
+  zparStore,
   getActiveSnapshot,
 } from "../repo";
 import { createClient } from "../supabase/client";
+import { pushToast } from "../toast";
 import { computeFsStatus, computeReviewDate, sisaHari, today } from "./compute";
 import type {
   Demand,
@@ -20,6 +22,7 @@ import type {
   EmployeeRecord,
   EmploymentStatus,
   MpStatusKategori,
+  PkwtReview,
   Project,
   ProjectMpNeedRow,
   ReplacementStatus,
@@ -28,6 +31,44 @@ import type {
   UtilPoolEntry,
   VokasiRecord,
 } from "../types";
+
+// ---------------------------------------------------------------------------
+// Upload Center — scoped delete (per snapshot / per batch, not "delete all")
+// ---------------------------------------------------------------------------
+
+export interface DeleteResult {
+  ok: boolean;
+  error?: string;
+}
+
+/** Refuses to delete the Active snapshot — every other page reads from it,
+ * so silently leaving nothing active (or auto-picking a replacement) would
+ * be a worse surprise than just asking the admin to activate another
+ * period first. */
+export function deleteZparSnapshot(id: string): DeleteResult {
+  const snapshot = zparStore.get(id);
+  if (!snapshot) return { ok: false, error: "Snapshot tidak ditemukan." };
+  if (snapshot.is_active) {
+    return { ok: false, error: "Tidak bisa menghapus snapshot yang sedang Active — aktifkan periode lain dulu." };
+  }
+  zparStore.remove(id);
+  return { ok: true };
+}
+
+/** Refuses to delete a Vokasi batch once any of its records already
+ * produced a VokasiEnded demand (ensureVokasiEndedDemands) — deleting the
+ * source record out from under a live demand would orphan it. */
+export function deleteVokasiBatch(batch: string): DeleteResult {
+  const records = vokasiStore.list().filter((v) => v.batch === batch);
+  if (records.length === 0) return { ok: false, error: "Batch tidak ditemukan." };
+  const recordIds = new Set(records.map((r) => r.id));
+  const hasLinkedDemand = demandStore.list().some((d) => d.origin_type === "VokasiEnded" && recordIds.has(d.origin_ref));
+  if (hasLinkedDemand) {
+    return { ok: false, error: "Batch ini sudah menghasilkan demand replacement, tidak bisa dihapus." };
+  }
+  for (const r of records) vokasiStore.remove(r.id);
+  return { ok: true };
+}
 
 export function mapMpStatusToDemandCategory(status: MpStatusKategori): DemandCategory {
   return status === "Vokasi" ? "Vokasi" : "PKWT";
@@ -81,6 +122,8 @@ function baseDemand(overrides: Partial<Demand>): Demand {
     replacement_employment_status: "",
     fs_status: "",
     status: "Open",
+    fulfillment_confirmed_date: "",
+    shop_confirmed_date: "",
     created_at: new Date().toISOString(),
     ...overrides,
   };
@@ -110,7 +153,7 @@ export function expandRowToDemands(
 }
 
 export function createDemandsFromProjectRow(project: Project, row: ProjectMpNeedRow): Demand[] {
-  return expandRowToDemands(row, "Project", project.id, `${project.name} — ${row.division} — ${row.dept}`);
+  return expandRowToDemands(row, "Project", project.id, project.name);
 }
 
 export function createDemandsFromTaktRow(takt: TaktCase, row: ProjectMpNeedRow): Demand[] {
@@ -118,7 +161,7 @@ export function createDemandsFromTaktRow(takt: TaktCase, row: ProjectMpNeedRow):
     row,
     "TaktUp",
     takt.id,
-    `Takt Up ${takt.plant} — ${row.division} — ${row.dept}`
+    `Takt Up ${takt.plant} - ${row.division} - ${row.dept}`
   );
 }
 
@@ -140,6 +183,11 @@ export function ensureVokasiEndedDemands(): void {
         dept: v.dept,
         tgl_masuk_outgoing: v.tgl_masuk,
         tgl_ended_outgoing: v.tgl_ended,
+        // Regular enrollment default: most vokasi seats get backfilled by a
+        // fresh vokasi intake, so pre-select the Source rather than forcing
+        // every row through the picker — still changeable to MP Excess/Back
+        // Up/No Replace on the Supply-Demand page.
+        replacement_status: "Vokasi New Hire",
       })
     );
   }
@@ -180,17 +228,18 @@ export function generatePkwtReviews(): void {
   if (!snap) return;
   const existing = pkwtReviewStore.list();
   const kontrakTypes = new Set(["Kontrak 1.1", "Kontrak 1.2", "Kontrak 2"]);
-  const seenIds = new Set<string>();
+  // Collected into one insertMany() call — firing one insert() per employee
+  // (previously up to hundreds of concurrent requests) risked silent partial
+  // failures where a review would show up locally (optimistic cache) but
+  // never actually land in Supabase, later failing set_review_result with
+  // "Review not found".
+  const toCreate: PkwtReview[] = [];
   for (const emp of snap.employees) {
     if (!kontrakTypes.has(emp.status_kontrak)) continue;
     const tgl_review = computeReviewDate(emp.tgl_masuk, emp.status_kontrak);
     const prior = existing.find((r) => r.noreg === emp.noreg && r.tgl_review === tgl_review);
-    if (prior) {
-      seenIds.add(prior.id);
-      // keep as-is (preserves review_result / demand_id)
-      continue;
-    }
-    const rec = {
+    if (prior) continue; // keep as-is (preserves review_result / demand_id)
+    toCreate.push({
       id: genId("pkwtrev"),
       noreg: emp.noreg,
       nama: emp.nama,
@@ -200,23 +249,38 @@ export function generatePkwtReviews(): void {
       tgl_masuk: emp.tgl_masuk,
       tgl_review,
       review_result: "" as ReviewResult,
-    };
-    pkwtReviewStore.insert(rec);
-    seenIds.add(rec.id);
+      labor_type: emp.labor_type,
+    });
   }
+  if (toCreate.length) pkwtReviewStore.insertMany(toCreate);
 }
 
 /**
  * Routed through the `set_review_result` Postgres RPC (see supabase/schema.sql)
  * so the Admin/HR-only rule is enforced in the database, not just the UI.
- * The local cache updates shortly after via the realtime subscription.
+ * Applies an optimistic local update immediately (the RPC bypasses the
+ * generic Store.update() write path, so without this the UI only reflects
+ * the change once a realtime event arrives) and reverts + surfaces the
+ * error if the RPC itself is rejected (e.g. a role/permission mismatch).
  */
 export function setReviewResult(reviewId: string, result: ReviewResult): void {
+  const previous = pkwtReviewStore.get(reviewId)?.review_result;
+  pkwtReviewStore.update(reviewId, { review_result: result });
   const supabase = createClient();
   supabase
     .rpc("set_review_result", { p_review_id: reviewId, p_result: result })
     .then((res: { error: { message: string } | null }) => {
-      if (res.error) console.error("set_review_result failed:", res.error.message);
+      if (res.error) {
+        console.error("set_review_result failed:", res.error.message);
+        pkwtReviewStore.update(reviewId, { review_result: previous ?? "" });
+        pushToast(`Gagal menyimpan review result: ${res.error.message}`);
+        return;
+      }
+      // On Terminate, the RPC creates a new Demand server-side — the client
+      // never inserted it locally, so without this the new "PKWT Demand" row
+      // only shows up once/if a realtime event arrives. Re-fetch instead of
+      // waiting on that.
+      if (result === "Terminate") demandStore.refetch();
     });
 }
 
@@ -255,7 +319,7 @@ export function setDemandReplacementByNoreg(
     dept = vokasi?.dept ?? emp?.dept ?? "";
     batch = vokasi?.batch ?? "";
     tglMasuk = vokasi?.tgl_masuk ?? emp?.tgl_masuk ?? null;
-    fs_status = demand.category === "PKWT" ? computeFsStatus(demand.dept, dept, vokasi?.tgl_ended) : "";
+    fs_status = computeFsStatus(replacementStatus, demand.dept, dept, vokasi?.tgl_ended);
     employmentStatus = getEmploymentStatus(noreg);
   }
 
@@ -274,7 +338,12 @@ export function setDemandReplacementByNoreg(
       p_no_replace_reason: "",
     })
     .then((res: { error: { message: string } | null }) => {
-      if (res.error) console.error("set_demand_replacement failed:", res.error.message);
+      if (res.error) {
+        console.error("set_demand_replacement failed:", res.error.message);
+        pushToast(`Gagal menyimpan replacement: ${res.error.message}`);
+        return;
+      }
+      demandStore.refetch();
     });
 }
 
@@ -295,7 +364,12 @@ export function setDemandNoReplace(demandId: string, reason: string): void {
       p_no_replace_reason: reason,
     })
     .then((res: { error: { message: string } | null }) => {
-      if (res.error) console.error("set_demand_replacement (no replace) failed:", res.error.message);
+      if (res.error) {
+        console.error("set_demand_replacement (no replace) failed:", res.error.message);
+        pushToast(`Gagal menyimpan replacement: ${res.error.message}`);
+        return;
+      }
+      demandStore.refetch();
     });
 }
 
@@ -303,7 +377,71 @@ export function setDemandFulfillDate(demandId: string, date: string): void {
   demandStore.update(demandId, { fulfill_date: date });
 }
 
-/** §4.2 auto-matching: new Vokasi batch upload -> fill Open Vokasi Demand of same dept. */
+/**
+ * Supply-Demand: confirms a mapped candidate actually signed contract (new
+ * hire) or was officially assigned to the destination department (MP Back
+ * Up/Excess) — separate from `setDemandReplacementByNoreg`, which only maps
+ * who the candidate is. Passing an empty date un-confirms it. Routed through
+ * `confirm_demand_fulfillment` (see supabase/migration_4.sql) so the same
+ * admin/shop-PKWT rule as replacement-mapping is enforced server-side.
+ */
+export function confirmDemandFulfillment(demandId: string, confirmedDate: string): void {
+  const previous = demandStore.get(demandId);
+  if (!previous) return;
+  demandStore.update(demandId, {
+    fulfillment_confirmed_date: confirmedDate,
+    status: confirmedDate ? "Fulfilled" : "Open",
+  });
+  const supabase = createClient();
+  supabase
+    .rpc("confirm_demand_fulfillment", { p_demand_id: demandId, p_confirmed_date: confirmedDate || null })
+    .then((res: { error: { message: string } | null }) => {
+      if (res.error) {
+        console.error("confirm_demand_fulfillment failed:", res.error.message);
+        demandStore.update(demandId, {
+          fulfillment_confirmed_date: previous.fulfillment_confirmed_date,
+          status: previous.status,
+        });
+        pushToast(`Gagal konfirmasi fulfillment: ${res.error.message}`);
+        return;
+      }
+      demandStore.refetch();
+    });
+}
+
+/**
+ * Supply-Demand: shop floor confirms the replacement candidate has actually
+ * reported for duty — separate from `confirmDemandFulfillment` (Sign
+ * Kontrak/Assigned), which only reflects the HR/admin paperwork step.
+ * Passing an empty date un-confirms it. Routed through
+ * `confirm_shop_receipt` (see supabase/migration_5.sql) so the same
+ * admin/shop-PKWT rule as replacement-mapping is enforced server-side. Does
+ * not touch `status`/`fulfillment_confirmed_date` — the granular
+ * Open/DELAY/Need Replace ASAP/Fulfilled Ontime/Fulfilled but Delay label is
+ * derived client-side (see `supplyDemandStatus` in compute.ts).
+ */
+export function confirmShopReceipt(demandId: string, confirmedDate: string): void {
+  const previous = demandStore.get(demandId);
+  if (!previous) return;
+  demandStore.update(demandId, { shop_confirmed_date: confirmedDate });
+  const supabase = createClient();
+  supabase
+    .rpc("confirm_shop_receipt", { p_demand_id: demandId, p_confirmed_date: confirmedDate || null })
+    .then((res: { error: { message: string } | null }) => {
+      if (res.error) {
+        console.error("confirm_shop_receipt failed:", res.error.message);
+        demandStore.update(demandId, { shop_confirmed_date: previous.shop_confirmed_date });
+        pushToast(`Gagal konfirmasi shop: ${res.error.message}`);
+        return;
+      }
+      demandStore.refetch();
+    });
+}
+
+/** §4.2 auto-matching: new Vokasi batch upload -> fill Open Demand whose
+ * Source is "Vokasi New Hire" (regardless of which tab it lives on — a PKWT
+ * demand backfilled from the Vokasi pipeline is just as eligible as a
+ * Vokasi-origin one) with a same-dept candidate from the batch. */
 export function autoMatchVokasiBatch(newRecords: VokasiRecord[]): number {
   const usedNoreg = new Set(
     demandStore
@@ -313,14 +451,14 @@ export function autoMatchVokasiBatch(newRecords: VokasiRecord[]): number {
   );
   const openDemands = demandStore
     .list()
-    .filter((d) => d.category === "Vokasi" && d.status === "Open" && !d.replacement_noreg);
+    .filter((d) => d.replacement_status === "Vokasi New Hire" && d.status === "Open" && !d.replacement_noreg);
 
   let matched = 0;
   for (const demand of openDemands) {
     const candidate = newRecords.find((r) => r.dept === demand.dept && !usedNoreg.has(r.noreg));
     if (!candidate) continue;
     usedNoreg.add(candidate.noreg);
-    setDemandReplacementByNoreg(demand.id, candidate.noreg);
+    setDemandReplacementByNoreg(demand.id, candidate.noreg, "Vokasi New Hire");
     matched++;
   }
   return matched;
@@ -370,6 +508,43 @@ export function projectSuppliedCount(project: Project): number {
   return demandStore.list().filter((d) => project.demand_ids.includes(d.id) && d.status === "Fulfilled").length;
 }
 
+/** Edit-after-registration: name/dates only — rows/demands are handled by
+ * addProjectRow / increaseProjectRowQty below, which never delete or shrink
+ * existing demand records (only additive changes are safe post-registration). */
+export function updateProjectDetails(
+  projectId: string,
+  input: { name?: string; start_date?: string; end_date?: string }
+): void {
+  projectStore.update(projectId, input);
+}
+
+/** Adds a brand-new MP need row to an already-registered project, expanding
+ * it into demand records immediately (same as at creation time). Always
+ * re-reads the project from the store so sequential calls in a loop don't
+ * clobber each other's row/demand_ids updates. */
+export function addProjectRow(projectId: string, row: Omit<ProjectMpNeedRow, "id">): void {
+  const project = projectStore.get(projectId);
+  if (!project) return;
+  const newRow: ProjectMpNeedRow = { ...row, id: genId("row") };
+  const updatedRows = [...project.rows, newRow];
+  const created = createDemandsFromProjectRow({ ...project, rows: updatedRows }, newRow);
+  projectStore.update(projectId, { rows: updatedRows, demand_ids: [...project.demand_ids, ...created.map((d) => d.id)] });
+}
+
+/** Increases an existing row's qty, creating demand records only for the
+ * delta. Decreasing qty is intentionally not supported here — it would mean
+ * silently deleting demand records that may already be Fulfilled. */
+export function increaseProjectRowQty(projectId: string, rowId: string, newQty: number): void {
+  const project = projectStore.get(projectId);
+  if (!project) return;
+  const row = project.rows.find((r) => r.id === rowId);
+  if (!row || newQty <= row.qty) return;
+  const delta = newQty - row.qty;
+  const updatedRows = project.rows.map((r) => (r.id === rowId ? { ...r, qty: newQty } : r));
+  const created = expandRowToDemands({ ...row, qty: delta }, "Project", project.id, project.name);
+  projectStore.update(projectId, { rows: updatedRows, demand_ids: [...project.demand_ids, ...created.map((d) => d.id)] });
+}
+
 /** §7 / §12 Auto Project Finish: run when Project Monitoring module is opened. */
 export function autoProjectFinishCheck(): void {
   const projects = projectStore.list();
@@ -384,7 +559,7 @@ export function autoProjectFinishCheck(): void {
 
     for (const d of fulfilledDemands) {
       const type: MpStatusKategori =
-        d.category === "Vokasi" ? "Vokasi" : d.replacement_batch ? "Vokasi" : "PKWT";
+        d.replacement_status === "Vokasi New Hire" || d.replacement_batch ? "Vokasi" : "PKWT";
       const contractEnd = estimateContractEnd(d.replacement_noreg, type);
       const stillValid = contractEnd === null || sisaHari(contractEnd) >= 0;
       if (!stillValid) continue;
@@ -394,6 +569,7 @@ export function autoProjectFinishCheck(): void {
         type,
         source: "ProjectFinish",
         source_label: project.name,
+        prev_div: d.div,
         prev_dept: d.dept,
         contract_end: contractEnd,
       });
@@ -437,7 +613,7 @@ export function createTaktDown(input: {
   date: string;
   takt_before: number;
   takt_after: number;
-  released_persons: { noreg: string; nama: string; type: MpStatusKategori; dept: string }[];
+  released_persons: { noreg: string; nama: string; type: MpStatusKategori; div: string; dept: string }[];
 }): TaktCase {
   const takt: TaktCase = {
     id: genId("takt"),
@@ -460,6 +636,7 @@ export function createTaktDown(input: {
       type: p.type,
       source: "TaktDown",
       source_label: `Takt Down ${input.plant}`,
+      prev_div: p.div,
       prev_dept: p.dept,
       contract_end: contractEnd,
     });
@@ -478,8 +655,10 @@ export function pushToUtilPool(input: {
   type: MpStatusKategori;
   source: UtilPoolEntry["source"];
   source_label: string;
+  prev_div: string;
   prev_dept: string;
   contract_end: string | null;
+  entered_pool_date?: string;
 }): UtilPoolEntry {
   const entry: UtilPoolEntry = {
     id: genId("pool"),
@@ -488,8 +667,9 @@ export function pushToUtilPool(input: {
     type: input.type,
     source: input.source,
     source_label: input.source_label,
+    prev_div: input.prev_div,
     prev_dept: input.prev_dept,
-    entered_pool_date: today().toISOString().slice(0, 10),
+    entered_pool_date: input.entered_pool_date ?? today().toISOString().slice(0, 10),
     contract_end: input.contract_end,
     status: "Open",
     action_note: "",
@@ -498,21 +678,76 @@ export function pushToUtilPool(input: {
   return entry;
 }
 
+/** Kaizen-driven headcount release: each year, a shop/department is
+ * challenged to improve its process and free up MP — this records who came
+ * out of that effort and pushes them straight into Supply Pool (like
+ * Takt Down), grouped per Divisi so each shop's yearly result gets its own
+ * Source Summary card. Contract due date is auto-estimated the same way as
+ * every other Supply Pool source (see estimateContractEnd). */
+export function createKaizenSupply(input: {
+  releaseDate: string;
+  persons: { noreg: string; nama: string; type: MpStatusKategori; div: string; dept: string }[];
+}): UtilPoolEntry[] {
+  const year = input.releaseDate.slice(0, 4);
+  return input.persons.map((p) => {
+    const contractEnd = estimateContractEnd(p.noreg, p.type);
+    return pushToUtilPool({
+      noreg: p.noreg,
+      nama: p.nama,
+      type: p.type,
+      source: "Kaizen",
+      source_label: `Kaizen ${year} - ${p.div}`,
+      prev_div: p.div,
+      prev_dept: p.dept,
+      contract_end: contractEnd,
+      entered_pool_date: input.releaseDate,
+    });
+  });
+}
+
+/** Assigning a pool entry (MP Back Up/Excess) to a demand IS the "officially
+ * assigned to destination department" moment — so this both maps the
+ * candidate and confirms fulfillment in one step, unlike the New Hire path
+ * (map via setDemandReplacementByNoreg, confirm separately via
+ * confirmDemandFulfillment once contract is signed). */
 export function assignPoolEntryToDemand(poolEntryId: string, demandId: string): void {
   const entry = utilPoolStore.get(poolEntryId);
-  if (!entry) return;
+  const demand = demandStore.get(demandId);
+  if (!entry || !demand) return;
+
+  // Swapping to a different candidate — release whichever pool entry was
+  // previously assigned to this demand back to Open, so it doesn't stay
+  // stuck "Assigned" once it's no longer actually backing anything.
+  if (demand.replacement_noreg && demand.replacement_noreg !== entry.noreg) {
+    const previousEntry = utilPoolStore
+      .list()
+      .find((e) => e.noreg === demand.replacement_noreg && e.status === "Assigned");
+    if (previousEntry) {
+      utilPoolStore.update(previousEntry.id, { status: "Open", action_note: "" });
+    }
+  }
+
+  const confirmedDate = today().toISOString().slice(0, 10);
+  // Util Pool assign is always an MP Back Up/Excess-style redeployment
+  // (someone already employed, not a fresh hire) — default the Source to
+  // MP Excess if it wasn't already set via the Demand Supply page, so the
+  // row doesn't get stuck behind the "pick Source first" gate despite
+  // already being fully mapped and confirmed here.
+  const replacement_status: ReplacementStatus =
+    demand.replacement_status === "" || demand.replacement_status === "No Replace"
+      ? "MP Excess"
+      : demand.replacement_status;
+  const fs_status = computeFsStatus(replacement_status, demand.dept, entry.prev_dept, undefined);
   demandStore.update(demandId, {
+    replacement_status,
     replacement_noreg: entry.noreg,
     replacement_nama: entry.nama,
     replacement_dept: entry.prev_dept,
     replacement_batch: "",
+    fs_status,
+    fulfillment_confirmed_date: confirmedDate,
     status: "Fulfilled",
   });
-  const demand = demandStore.get(demandId);
-  if (demand?.category === "PKWT") {
-    const fs_status = computeFsStatus(demand.dept, entry.prev_dept, undefined);
-    demandStore.update(demandId, { fs_status });
-  }
   utilPoolStore.update(poolEntryId, {
     status: "Assigned",
     action_note: `Assigned to demand ${demandId}`,

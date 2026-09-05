@@ -3,6 +3,7 @@
 // so real-world exports with slightly different column names still parse.
 import * as XLSX from "xlsx";
 import { format } from "date-fns";
+import { computeVokasiEndedDate } from "./engine/compute";
 import type { EmployeeRecord, Gender, StatusKontrak, VokasiRecord } from "./types";
 
 async function sheetToRows(file: File): Promise<Record<string, unknown>[]> {
@@ -12,10 +13,18 @@ async function sheetToRows(file: File): Promise<Record<string, unknown>[]> {
   return XLSX.utils.sheet_to_json(sheet, { defval: "" }) as Record<string, unknown>[];
 }
 
+/** Collapses whitespace/parens differences ("Posisi (Struktural)" vs "posisi
+ * struktural" vs "Posisi(Struktural) ") so real-world header formatting
+ * quirks don't break column matching. */
+function normalizeHeader(s: string): string {
+  return s.trim().toLowerCase().replace(/[\s()]+/g, "");
+}
+
 function findValue(row: Record<string, unknown>, aliases: string[]): string {
   const keys = Object.keys(row);
-  for (const alias of aliases) {
-    const key = keys.find((k) => k.trim().toLowerCase() === alias);
+  const normalizedAliases = aliases.map(normalizeHeader);
+  for (const alias of normalizedAliases) {
+    const key = keys.find((k) => normalizeHeader(k) === alias);
     if (key !== undefined && row[key] !== "") return String(row[key]);
   }
   return "";
@@ -46,6 +55,10 @@ function normalizeGender(raw: string): Gender {
   const s = raw.toLowerCase().trim();
   if (s.startsWith("p") || s.startsWith("f")) return "P";
   return "L";
+}
+
+function normalizeLaborType(raw: string): string {
+  return raw.trim().toUpperCase();
 }
 
 export function derivePlant(division: string): string {
@@ -82,7 +95,7 @@ export async function parseZparFile(file: File): Promise<ZparParseResult> {
     employees.push({
       noreg: findValue(row, ["noreg", "no reg", "nik", "employee id", "emp id", "id"]),
       nama: findValue(row, ["nama", "name", "nama lengkap", "employee name"]),
-      labor_type: findValue(row, ["labor type", "labor_type", "tipe tenaga kerja"]),
+      labor_type: normalizeLaborType(findValue(row, ["labor type", "labor_type", "tipe tenaga kerja"])),
       tgl_masuk: toIsoDate(findValue(row, ["tgl masuk", "tanggal masuk", "hire date", "joining date", "tmt"])),
       status_kontrak,
       eg: "Active",
@@ -94,6 +107,15 @@ export async function parseZparFile(file: File): Promise<ZparParseResult> {
       tgl_lahir: toIsoDate(findValue(row, ["tgl lahir", "tanggal lahir", "birth date", "dob"])),
       gender: normalizeGender(findValue(row, ["gender", "jk", "jenis kelamin", "sex"])),
       plant: derivePlant(division),
+      posisi_struktural: findValue(row, [
+        "posisi (struktural)",
+        "posisi struktural",
+        "posisi",
+        "jabatan struktural",
+        "jabatan",
+        "structural position",
+        "position",
+      ]),
     });
   }
   return { employees, totalRows: rows.length, skipped };
@@ -115,10 +137,12 @@ export async function parseVokasiFile(file: File, defaultTglMasuk: string): Prom
       dept: findValue(row, ["dept", "shop", "department", "departemen"]),
       lokasi: findValue(row, ["lokasi", "location"]),
       tgl_masuk: tglMasuk,
-      tgl_ended: toIsoDate(findValue(row, ["tgl ended", "tanggal ended", "end date", "ended"])),
+      // Business rule: Vokasi selalu 6 bulan − 1 hari dari tgl_masuk, bukan dari file upload.
+      tgl_ended: computeVokasiEndedDate(tglMasuk),
       utilisasi: findValue(row, ["utilisasi", "utilization"]),
       status_saat_ini: "Active" as const,
       gender: normalizeGender(findValue(row, ["gender", "jk", "jenis kelamin", "sex"])),
+      labor_type: normalizeLaborType(findValue(row, ["labor type", "labor_type", "tipe tenaga kerja"])),
     };
   });
   return { records, totalRows: rows.length };

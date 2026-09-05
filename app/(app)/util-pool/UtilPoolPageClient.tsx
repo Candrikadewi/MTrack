@@ -1,0 +1,361 @@
+"use client";
+import { useMemo, useState } from "react";
+import { Card } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
+import { Badge, statusTone } from "@/components/ui/Badge";
+import { ProgressBar, StatTile } from "@/components/ui/StatTile";
+import { FullWidthTabs } from "@/components/ui/Tabs";
+import { MultiSelect } from "@/components/ui/MultiSelect";
+import { Select } from "@/components/ui/Form";
+import { EmptyState, TableWrap, Td, Th } from "@/components/ui/Table";
+import { KaizenModal } from "@/components/util-pool/KaizenModal";
+import { useStoreList } from "@/lib/useStore";
+import { utilPoolStore } from "@/lib/repo";
+import { contractRemainingLabel, contractUrgency, fmtDate, poolLeadTimeDays } from "@/lib/engine/compute";
+import { naturalRelease } from "@/lib/engine/actions";
+import { useRole } from "@/lib/RoleContext";
+import { useSessionState } from "@/lib/useSessionState";
+import type { UtilPoolEntry, UtilPoolSource } from "@/lib/types";
+
+const urgencyClass: Record<string, string> = {
+  red: "text-red-600 font-semibold",
+  orange: "text-amber-600 font-semibold",
+  green: "text-emerald-600",
+  none: "text-slate-500",
+};
+
+const SOURCE_TYPE_LABELS: Record<UtilPoolSource, string> = {
+  ProjectFinish: "Project Finish",
+  TaktDown: "Takt Down",
+  Kaizen: "Kaizen",
+};
+
+const SOURCE_TYPE_TONE: Record<UtilPoolSource, "blue" | "cyan" | "emerald"> = {
+  ProjectFinish: "blue",
+  TaktDown: "cyan",
+  Kaizen: "emerald",
+};
+
+const SOURCE_TYPE_ORDER: UtilPoolSource[] = ["ProjectFinish", "TaktDown", "Kaizen"];
+
+/** Rolls up every source_label sharing the same source TYPE (e.g. every
+ * "Kaizen 2026 - <Divisi>" card) into one total — a shop running Kaizen
+ * across several divisions or years otherwise has no single number for
+ * "how much did Kaizen yield this year" without adding up cards by hand. */
+function summarizeBySourceType(entries: UtilPoolEntry[]): { source: UtilPoolSource; total: number }[] {
+  return SOURCE_TYPE_ORDER.map((source) => ({
+    source,
+    total: entries.filter((e) => e.source === source).length,
+  })).filter((s) => s.total > 0);
+}
+
+interface SourceSummary {
+  label: string;
+  total: number;
+  utilized: number;
+  open: number;
+  avgLeadTimeDays: number;
+}
+
+function summarizeBySource(entries: UtilPoolEntry[]): SourceSummary[] {
+  const groups = new Map<string, UtilPoolEntry[]>();
+  for (const e of entries) {
+    const list = groups.get(e.source_label) ?? [];
+    list.push(e);
+    groups.set(e.source_label, list);
+  }
+  return Array.from(groups.entries())
+    .map(([label, list]) => ({
+      label,
+      total: list.length,
+      utilized: list.filter((e) => e.status === "Assigned").length,
+      open: list.filter((e) => e.status === "Open").length,
+      avgLeadTimeDays: Math.round(
+        list.reduce((sum, e) => sum + poolLeadTimeDays(e.entered_pool_date), 0) / list.length
+      ),
+    }))
+    .sort((a, b) => b.total - a.total);
+}
+
+export function UtilPoolPageClient() {
+  const role = useRole();
+  const [kaizenOpen, setKaizenOpen] = useState(false);
+  const entries = useStoreList(utilPoolStore).sort((a, b) => b.entered_pool_date.localeCompare(a.entered_pool_date));
+
+  const sourceSummaries = useMemo(() => summarizeBySource(entries), [entries]);
+  const sourceTypeTotals = useMemo(() => summarizeBySourceType(entries), [entries]);
+  const totalUtilized = entries.filter((e) => e.status === "Assigned").length;
+  const totalUtilizedPct = entries.length > 0 ? (totalUtilized / entries.length) * 100 : 0;
+
+  const [tab, setTab] = useSessionState<"open" | "history">("utilpool.tab", "open");
+  const openAllEntries = useMemo(() => entries.filter((e) => e.status === "Open"), [entries]);
+  const historyAllEntries = useMemo(() => entries.filter((e) => e.status !== "Open"), [entries]);
+
+  const [selOpenSources, setSelOpenSources] = useSessionState<string[]>("utilpool.open.sources", []);
+  const openEntries = useMemo(
+    () =>
+      openAllEntries.filter(
+        (e) => selOpenSources.length === 0 || selOpenSources.includes(SOURCE_TYPE_LABELS[e.source])
+      ),
+    [openAllEntries, selOpenSources]
+  );
+
+  const [selDivs, setSelDivs] = useSessionState<string[]>("utilpool.history.divs", []);
+  const [selDepts, setSelDepts] = useSessionState<string[]>("utilpool.history.depts", []);
+  const [selMonth, setSelMonth] = useSessionState<string>("utilpool.history.month", "");
+  const [selHistorySources, setSelHistorySources] = useSessionState<string[]>("utilpool.history.sources", []);
+
+  const divOptions = useMemo(
+    () => Array.from(new Set(historyAllEntries.map((e) => e.prev_div).filter(Boolean))).sort(),
+    [historyAllEntries]
+  );
+  const deptOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          historyAllEntries
+            .filter((e) => selDivs.length === 0 || selDivs.includes(e.prev_div))
+            .map((e) => e.prev_dept)
+            .filter(Boolean)
+        )
+      ).sort(),
+    [historyAllEntries, selDivs]
+  );
+  const monthOptions = useMemo(
+    () => Array.from(new Set(historyAllEntries.map((e) => e.entered_pool_date.slice(0, 7)))).sort().reverse(),
+    [historyAllEntries]
+  );
+  const historySourceOptions = useMemo(
+    () => Array.from(new Set(historyAllEntries.map((e) => SOURCE_TYPE_LABELS[e.source]))).sort(),
+    [historyAllEntries]
+  );
+  const openSourceOptions = useMemo(
+    () => Array.from(new Set(openAllEntries.map((e) => SOURCE_TYPE_LABELS[e.source]))).sort(),
+    [openAllEntries]
+  );
+  const filteredHistory = useMemo(
+    () =>
+      historyAllEntries.filter(
+        (e) =>
+          (selDivs.length === 0 || selDivs.includes(e.prev_div)) &&
+          (selDepts.length === 0 || selDepts.includes(e.prev_dept)) &&
+          (selMonth === "" || e.entered_pool_date.slice(0, 7) === selMonth) &&
+          (selHistorySources.length === 0 || selHistorySources.includes(SOURCE_TYPE_LABELS[e.source]))
+      ),
+    [historyAllEntries, selDivs, selDepts, selMonth, selHistorySources]
+  );
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100">Supply Pool</h1>
+          <p className="text-sm text-slate-500 dark:text-slate-400">
+            Personil sementara tidak bertugas, dari Project Finish, Takt Down, atau Kaizen. Entry yang masih Open bisa
+            dipilih sebagai pengganti (MP Excess/MP Back Up) langsung dari Demand Pool.
+          </p>
+        </div>
+        {role === "admin" && (
+          <Button variant="primary" onClick={() => setKaizenOpen(true)}>
+            + Tambah Kaizen
+          </Button>
+        )}
+      </div>
+
+      {entries.length === 0 ? (
+        <EmptyState text="Supply Pool kosong." />
+      ) : (
+        <>
+          {sourceTypeTotals.length > 1 && (
+            <div className="grid gap-3 sm:grid-cols-3">
+              {sourceTypeTotals.map((s) => (
+                <StatTile
+                  key={s.source}
+                  label={`Total ${SOURCE_TYPE_LABELS[s.source]}`}
+                  value={s.total}
+                  tone={SOURCE_TYPE_TONE[s.source]}
+                />
+              ))}
+            </div>
+          )}
+
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {sourceSummaries.map((s) => (
+              <SourceSummaryCard key={s.label} summary={s} />
+            ))}
+            <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+              <div className="text-sm font-semibold text-slate-700 dark:text-slate-200">Total Utilisasi</div>
+              <div className="mt-3">
+                <ProgressBar percent={totalUtilizedPct} />
+              </div>
+              <div className="mt-1 text-xs text-slate-400">
+                {totalUtilized}/{entries.length} supply sudah diutilize (semua sumber)
+              </div>
+            </div>
+          </div>
+
+          <FullWidthTabs
+            tabs={[
+              { key: "open", label: `Open Supply (${openAllEntries.length})` },
+              { key: "history", label: `History (${historyAllEntries.length})` },
+            ]}
+            active={tab}
+            onChange={(k) => setTab(k as "open" | "history")}
+          />
+
+          {tab === "open" ? (
+            <Card>
+              <div className="mb-4 max-w-xs">
+                <MultiSelect label="Sumber" options={openSourceOptions} selected={selOpenSources} onChange={setSelOpenSources} />
+              </div>
+              {openEntries.length === 0 ? (
+                <EmptyState text="Tidak ada supply yang masih Open sesuai filter." />
+              ) : (
+                <TableWrap>
+                  <thead>
+                    <tr>
+                      <Th>Noreg</Th>
+                      <Th>Nama</Th>
+                      <Th>Tipe</Th>
+                      <Th>Sumber</Th>
+                      <Th>Divisi</Th>
+                      <Th>Prev Dept</Th>
+                      <Th>Tanggal Masuk Pool</Th>
+                      <Th>Lead Time in Pool</Th>
+                      <Th>Sisa Kontrak</Th>
+                      <Th>Aksi</Th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {openEntries.map((e) => {
+                      const urgency = contractUrgency(e.contract_end);
+                      return (
+                        <tr key={e.id}>
+                          <Td>{e.noreg}</Td>
+                          <Td>{e.nama}</Td>
+                          <Td>{e.type}</Td>
+                          <Td>{e.source_label}</Td>
+                          <Td>{e.prev_div}</Td>
+                          <Td>{e.prev_dept}</Td>
+                          <Td>{fmtDate(e.entered_pool_date)}</Td>
+                          <Td>{poolLeadTimeDays(e.entered_pool_date)} hari</Td>
+                          <Td className={urgencyClass[urgency]}>{contractRemainingLabel(e.contract_end)}</Td>
+                          <Td>
+                            {role === "admin" && (
+                              <Button size="sm" variant="danger" onClick={() => naturalRelease(e.id)}>
+                                Natural Release
+                              </Button>
+                            )}
+                          </Td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </TableWrap>
+              )}
+            </Card>
+          ) : (
+            <Card>
+              <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <MultiSelect
+                  label="Divisi"
+                  options={divOptions}
+                  selected={selDivs}
+                  onChange={(v) => {
+                    setSelDivs(v);
+                    setSelDepts([]);
+                  }}
+                />
+                <MultiSelect label="Department" options={deptOptions} selected={selDepts} onChange={setSelDepts} />
+                <MultiSelect label="Sumber" options={historySourceOptions} selected={selHistorySources} onChange={setSelHistorySources} />
+                <div>
+                  <span className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">Bulan</span>
+                  <Select value={selMonth} onChange={(e) => setSelMonth(e.target.value)}>
+                    <option value="">Semua Bulan</option>
+                    {monthOptions.map((m) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+              </div>
+              {filteredHistory.length === 0 ? (
+                <EmptyState text="Tidak ada riwayat sesuai filter." />
+              ) : (
+                <TableWrap>
+                  <thead>
+                    <tr>
+                      <Th>Noreg</Th>
+                      <Th>Nama</Th>
+                      <Th>Tipe</Th>
+                      <Th>Sumber</Th>
+                      <Th>Divisi</Th>
+                      <Th>Prev Dept</Th>
+                      <Th>Tanggal Masuk Pool</Th>
+                      <Th>Lead Time in Pool</Th>
+                      <Th>Status</Th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredHistory.map((e) => (
+                      <tr key={e.id}>
+                        <Td>{e.noreg}</Td>
+                        <Td>{e.nama}</Td>
+                        <Td>{e.type}</Td>
+                        <Td>{e.source_label}</Td>
+                        <Td>{e.prev_div}</Td>
+                        <Td>{e.prev_dept}</Td>
+                        <Td>{fmtDate(e.entered_pool_date)}</Td>
+                        <Td>{poolLeadTimeDays(e.entered_pool_date)} hari</Td>
+                        <Td>
+                          <Badge tone={statusTone(e.status)}>{e.status}</Badge>
+                        </Td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </TableWrap>
+              )}
+            </Card>
+          )}
+        </>
+      )}
+
+      {role === "admin" && kaizenOpen && <KaizenModal open onClose={() => setKaizenOpen(false)} />}
+    </div>
+  );
+}
+
+/** Per-source snapshot: how much supply this source has produced, how much
+ * of it is currently deployed (Assigned) vs still waiting (Open) — bar width
+ * covers the full total, so any gap after Utilized+Sisa is supply that left
+ * the pool via Natural Release. */
+function SourceSummaryCard({ summary }: { summary: SourceSummary }) {
+  const { label, total, utilized, open, avgLeadTimeDays } = summary;
+  const utilizedPct = total > 0 ? (utilized / total) * 100 : 0;
+  const openPct = total > 0 ? (open / total) * 100 : 0;
+
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-sm font-semibold text-slate-700 dark:text-slate-200">{label}</div>
+        <div className="text-xs text-slate-400">Total {total}</div>
+      </div>
+      <div className="mt-3 h-2.5 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
+        <div className="flex h-full">
+          <div className="h-full bg-emerald-500" style={{ width: `${utilizedPct}%` }} />
+          <div className="h-full bg-amber-400" style={{ width: `${openPct}%` }} />
+        </div>
+      </div>
+      <div className="mt-2 flex items-center gap-3 text-xs text-slate-500 dark:text-slate-400">
+        <span className="flex items-center gap-1">
+          <span className="h-2 w-2 rounded-full bg-emerald-500" /> {utilized} diutilize
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="h-2 w-2 rounded-full bg-amber-400" /> {open} sisa
+        </span>
+      </div>
+      <div className="mt-2 text-xs text-slate-400">Avg lead time: {avgLeadTimeDays} hari</div>
+    </div>
+  );
+}

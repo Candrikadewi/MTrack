@@ -3,6 +3,7 @@ import { getCurrentProfile } from "@/lib/auth";
 import { RoleProvider } from "@/lib/RoleContext";
 import { Sidebar } from "@/components/Sidebar";
 import { MobileNav } from "@/components/MobileNav";
+import { ToastHost } from "@/components/ui/ToastHost";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const profile = await getCurrentProfile();
@@ -10,6 +11,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   return (
     <RoleProvider role={profile.role}>
+      <ToastHost />
       <Sidebar role={profile.role} email={profile.email} />
       <div className="flex min-h-screen flex-col md:pl-64">
         <MobileNav role={profile.role} />

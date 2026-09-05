@@ -1,64 +1,48 @@
-// Aggregation & filtering helpers specific to Enrollment Monitoring (§6).
-import { format } from "date-fns";
+// Aggregation & filtering helpers specific to Enrollment Monitoring (§6) and
+// Supply-Demand.
+import { format, parseISO, subBusinessDays } from "date-fns";
 import { pkwtReviewStore } from "../repo";
+import { fulfillmentDeadline, supplyDemandStatus, type SupplyStatus } from "./compute";
 import type { Demand, DemandCategory } from "../types";
 
-export function relevantDate(d: Demand): string {
-  return d.tgl_ended_outgoing || d.fulfill_date || "";
-}
-
-export function relevantMonth(d: Demand): string {
-  return relevantDate(d).slice(0, 7);
-}
-
-export function demandsForTabAndMonth(demands: Demand[], category: DemandCategory, month: string): Demand[] {
-  return demands.filter((d) => d.category === category && relevantMonth(d) === month);
-}
-
-export interface EnrollmentSummary {
-  total: number;
-  fulfilled: number;
-  percent: number;
-  byDate: { date: string; total: number; fulfilled: number }[];
-  takt: { total: number; fulfilled: number };
-  project: { total: number; fulfilled: number };
-}
-
-export function computeEnrollmentSummary(monthDemands: Demand[]): EnrollmentSummary {
-  const personBased = monthDemands.filter((d) => d.origin_type !== "Project" && d.origin_type !== "TaktUp");
-  const taktDemands = monthDemands.filter((d) => d.origin_type === "TaktUp");
-  const projectDemands = monthDemands.filter((d) => d.origin_type === "Project");
-
-  const byDateMap = new Map<string, { total: number; fulfilled: number }>();
-  for (const d of personBased) {
-    const date = relevantDate(d) || "—";
-    const entry = byDateMap.get(date) ?? { total: 0, fulfilled: 0 };
-    entry.total++;
-    if (d.status === "Fulfilled") entry.fulfilled++;
-    byDateMap.set(date, entry);
+/** Supply-Demand: "Arrival to Shop" — the target date the replacement must
+ * be active/present. `fulfill_date` is the shop-arrival date once explicitly
+ * set (for any origin, and always for Project/Takt Up). Before that, both
+ * Vokasi Ended and PKWT Terminate (regular enrollment, not a manual/
+ * additional demand) default to 2 weeks (10 hari kerja) before the outgoing
+ * person's actual end date, so there's runway to onboard/train the
+ * replacement before the seat is vacated — matching the shop-training
+ * overlap the real handover needs. */
+export function demandTargetDate(d: Demand): string {
+  if (d.fulfill_date) return d.fulfill_date;
+  if ((d.origin_type === "VokasiEnded" || d.origin_type === "PkwtTerminate") && d.tgl_ended_outgoing) {
+    return format(subBusinessDays(parseISO(d.tgl_ended_outgoing), 10), "yyyy-MM-dd");
   }
+  return d.tgl_ended_outgoing || "";
+}
 
-  return {
-    total: monthDemands.length,
-    fulfilled: monthDemands.filter((d) => d.status === "Fulfilled").length,
-    percent: monthDemands.length
-      ? (monthDemands.filter((d) => d.status === "Fulfilled").length / monthDemands.length) * 100
-      : 0,
-    byDate: Array.from(byDateMap.entries())
-      .map(([date, v]) => ({ date, ...v }))
-      .sort((a, b) => a.date.localeCompare(b.date)),
-    takt: { total: taktDemands.length, fulfilled: taktDemands.filter((d) => d.status === "Fulfilled").length },
-    project: {
-      total: projectDemands.length,
-      fulfilled: projectDemands.filter((d) => d.status === "Fulfilled").length,
-    },
-  };
+/** Supply-Demand: the category a demand should actually be tracked/tabbed
+ * under. Normally this matches its origin category, but picking "Vokasi New
+ * Hire" as the Source on a PKWT-origin demand means the vacancy is being
+ * backfilled from the Vokasi pipeline instead — the demand belongs on the
+ * Vokasi tab from that point on, even though it originated from a PKWT
+ * termination. One-directional only: there's no "PKWT New Hire" source on
+ * the Vokasi tab, so a Vokasi-origin demand never moves the other way. */
+export function effectiveDemandCategory(d: Demand): DemandCategory {
+  return d.replacement_status === "Vokasi New Hire" ? "Vokasi" : d.category;
+}
+
+/** Supply-Demand page's granular status column — see supplyDemandStatus. */
+export function demandGranularStatus(d: Demand): SupplyStatus {
+  const target = demandTargetDate(d);
+  const deadline = fulfillmentDeadline(target, d.fs_status);
+  return supplyDemandStatus(target, deadline, d.shop_confirmed_date);
 }
 
 export function demandStatusLabel(d: Demand): string {
   if (d.origin_type === "PkwtTerminate") {
     const review = pkwtReviewStore.get(d.origin_ref);
-    if (review) return review.status_kontrak;
+    return review ? review.status_kontrak : "PKWT Terminate";
   }
   const labels: Record<string, string> = {
     Project: "Project",
@@ -67,7 +51,7 @@ export function demandStatusLabel(d: Demand): string {
     Pension: "Pensiun",
     GST: "GST",
     Unfit: "Unfit",
-    Others: d.origin_label ? `Others: ${d.origin_label}` : "Others",
+    Others: d.origin_label || "Others",
     Manual: "Manual",
     VokasiEnded: "Vokasi Ended",
   };
@@ -92,9 +76,4 @@ export function filterByDivDept<T extends { div: string; dept: string }>(
   return rows.filter(
     (r) => (divisions.length === 0 || divisions.includes(r.div)) && (depts.length === 0 || depts.includes(r.dept))
   );
-}
-
-export function monthLabel(month: string): string {
-  if (!month) return "-";
-  return format(new Date(`${month}-01T00:00:00`), "MMMM yyyy");
 }

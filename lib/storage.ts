@@ -34,8 +34,23 @@ export function getChangeVersion(): number {
   return changeVersion;
 }
 
+/**
+ * Every table's `id` column is Postgres `uuid` (see supabase/schema.sql),
+ * and the RPCs (set_review_result, set_demand_replacement) type their id
+ * params as `uuid` too — so this MUST return an actual UUID, not just an
+ * opaque string, or every insert/RPC call is silently/loudly rejected by
+ * Postgres with "invalid input syntax for type uuid". The `prefix` param
+ * is accepted for call-site readability but no longer affects the output.
+ */
 export function genId(prefix = "id"): string {
-  return `${prefix}_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`;
+  void prefix;
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  // Fallback for environments without Web Crypto's randomUUID (shouldn't
+  // happen in any supported browser/Node runtime) — still not a real v4
+  // UUID, so writes would still fail; this only prevents a hard crash.
+  return `${Date.now().toString(16)}-0000-4000-8000-${Math.random().toString(16).slice(2, 14).padEnd(12, "0")}`;
 }
 
 export interface Store<T extends { id: string }> {
@@ -49,6 +64,10 @@ export interface Store<T extends { id: string }> {
   ready(): boolean;
   /** Client-only, idempotent: hydrates the cache and opens the realtime subscription. */
   init(): void;
+  /** Forces a fresh select("*") from Supabase into the cache — use after a
+   * server-side mutation (e.g. an RPC that inserts rows the client didn't
+   * create locally) so the UI doesn't have to wait on realtime to catch up. */
+  refetch(): void;
   key: string;
 }
 
@@ -73,6 +92,14 @@ export function createStore<T extends { id: string }>(table: string): Store<T> {
         if (!res.error && res.data) cache = res.data;
         initialized = true;
         notify();
+      })
+      .catch((err: unknown) => {
+        // A network-level failure (offline, DNS, CORS) rejects instead of
+        // resolving with `{ error }` — still counts as "hydration attempt
+        // resolved" so ready() doesn't hang a loading state forever.
+        console.error(`select from ${table} failed:`, err);
+        initialized = true;
+        notify();
       });
 
     supabase
@@ -93,9 +120,24 @@ export function createStore<T extends { id: string }>(table: string): Store<T> {
       .subscribe();
   }
 
+  function refetch() {
+    if (typeof window === "undefined") return;
+    client()
+      .from(table)
+      .select("*")
+      .then((res: ReadResult<T>) => {
+        if (!res.error && res.data) {
+          cache = res.data;
+          notify();
+        }
+      })
+      .catch((err: unknown) => console.error(`refetch ${table} failed:`, err));
+  }
+
   return {
     key: table,
     init: start,
+    refetch,
     ready() {
       return initialized;
     },
@@ -113,7 +155,8 @@ export function createStore<T extends { id: string }>(table: string): Store<T> {
         .insert(item)
         .then((res: WriteResult) => {
           if (res.error) console.error(`insert into ${table} failed:`, res.error.message);
-        });
+        })
+        .catch((err: unknown) => console.error(`insert into ${table} failed:`, err));
       return item;
     },
     insertMany(items) {
@@ -124,7 +167,8 @@ export function createStore<T extends { id: string }>(table: string): Store<T> {
         .insert(items)
         .then((res: WriteResult) => {
           if (res.error) console.error(`insertMany into ${table} failed:`, res.error.message);
-        });
+        })
+        .catch((err: unknown) => console.error(`insertMany into ${table} failed:`, err));
       return items;
     },
     update(id, patch) {
@@ -139,7 +183,8 @@ export function createStore<T extends { id: string }>(table: string): Store<T> {
         .eq("id", id)
         .then((res: WriteResult) => {
           if (res.error) console.error(`update ${table} failed:`, res.error.message);
-        });
+        })
+        .catch((err: unknown) => console.error(`update ${table} failed:`, err));
       return updated;
     },
     upsert(item) {
@@ -151,7 +196,8 @@ export function createStore<T extends { id: string }>(table: string): Store<T> {
         .upsert(item)
         .then((res: WriteResult) => {
           if (res.error) console.error(`upsert into ${table} failed:`, res.error.message);
-        });
+        })
+        .catch((err: unknown) => console.error(`upsert into ${table} failed:`, err));
       return item;
     },
     remove(id) {
@@ -163,7 +209,8 @@ export function createStore<T extends { id: string }>(table: string): Store<T> {
         .eq("id", id)
         .then((res: WriteResult) => {
           if (res.error) console.error(`delete from ${table} failed:`, res.error.message);
-        });
+        })
+        .catch((err: unknown) => console.error(`delete from ${table} failed:`, err));
     },
   };
 }
