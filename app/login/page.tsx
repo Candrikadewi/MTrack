@@ -12,8 +12,8 @@ export default function LoginPage() {
             <Sparkles size={20} strokeWidth={2.25} />
           </div>
           <div>
-            <div className="text-sm font-bold tracking-tight text-slate-800 dark:text-slate-100">M-TRACK</div>
-            <div className="text-[11px] text-slate-400">Manpower Tracking</div>
+            <div className="text-sm font-bold tracking-tight text-slate-800 dark:text-slate-100">CIRCLE</div>
+            <div className="text-[11px] leading-tight text-slate-400">Centralized Information Record &amp; Control for Labor Excellence</div>
           </div>
         </div>
         <LoginForm />

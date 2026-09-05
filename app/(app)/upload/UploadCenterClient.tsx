@@ -142,7 +142,7 @@ export function UploadCenterClient() {
   }
 
   function resetAll() {
-    if (!confirm("Hapus SEMUA data M-TRACK dari database (untuk semua user)? Tindakan ini tidak bisa dibatalkan.")) return;
+    if (!confirm("Hapus SEMUA data CIRCLE dari database (untuk semua user)? Tindakan ini tidak bisa dibatalkan.")) return;
     setResetModalOpen(true);
   }
 
@@ -374,7 +374,7 @@ function ResetAllModal({ open, onClose }: { open: boolean; onClose: () => void }
     <Modal open={open} onClose={handleClose} title="Konfirmasi Reset All Data">
       <div className="space-y-4">
         <p className="text-sm text-slate-600 dark:text-slate-300">
-          Ini akan menghapus <b>seluruh data M-TRACK</b> secara permanen. Masukkan email dan password akun Anda untuk
+          Ini akan menghapus <b>seluruh data CIRCLE</b> secara permanen. Masukkan email dan password akun Anda untuk
           melanjutkan.
         </p>
         <Field label="Email">
