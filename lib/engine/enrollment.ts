@@ -3,7 +3,7 @@
 import { format, parseISO, subBusinessDays } from "date-fns";
 import { pkwtReviewStore } from "../repo";
 import { fulfillmentDeadline, supplyDemandStatus, type SupplyStatus } from "./compute";
-import type { Demand, DemandCategory } from "../types";
+import type { Demand, DemandCategory, UtilPoolEntry } from "../types";
 
 /** Supply-Demand: "Arrival to Shop" — the target date the replacement must
  * be active/present. `fulfill_date` is the shop-arrival date once explicitly
@@ -76,4 +76,32 @@ export function filterByDivDept<T extends { div: string; dept: string }>(
   return rows.filter(
     (r) => (divisions.length === 0 || divisions.includes(r.div)) && (depts.length === 0 || depts.includes(r.dept))
   );
+}
+
+/** Ranks a Util Pool entry against a demand it might fill: same department
+ * AND matching MP status first (the strongest "utilize this before hiring"
+ * signal), then same department, then matching status, then everything
+ * else. Lower is better/first. Same department is weighted above matching
+ * status because a same-shop excess MP is the concrete org policy this
+ * implements ("MP excess yang same shop dulu") — PAD/admin's check is
+ * specifically about catching a shop's own unsurfaced excess. */
+function poolMatchRank(entry: UtilPoolEntry, demand: Demand): number {
+  const deptMatch = entry.prev_dept === demand.dept;
+  const statusMatch = entry.type === demand.category;
+  if (deptMatch && statusMatch) return 0;
+  if (deptMatch) return 1;
+  if (statusMatch) return 2;
+  return 3;
+}
+
+/** Open Util Pool entries eligible to fill a demand (plus whichever entry
+ * is already assigned to it, so an in-progress selection doesn't vanish
+ * mid-edit), ranked by poolMatchRank so the best-matching, same-shop
+ * candidates surface first — this is the "MP Excess muncul sebagai
+ * rekomendasi 1st" ordering for both the Source recommendation banner and
+ * the candidate picker on the Demand Pool page. */
+export function eligiblePoolEntriesForDemand(poolEntries: UtilPoolEntry[], demand: Demand): UtilPoolEntry[] {
+  return poolEntries
+    .filter((e) => e.status === "Open" || e.noreg === demand.replacement_noreg)
+    .sort((a, b) => poolMatchRank(a, demand) - poolMatchRank(b, demand));
 }

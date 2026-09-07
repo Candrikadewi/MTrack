@@ -19,6 +19,7 @@ import {
   deptsOfRows,
   divisionsOfRows,
   effectiveDemandCategory,
+  eligiblePoolEntriesForDemand,
   filterByDivDept,
 } from "@/lib/engine/enrollment";
 import {
@@ -267,6 +268,12 @@ function SupplyDemandRow({
   const hasCandidate = Boolean(d.replacement_noreg);
   const isPoolSource = POOL_SOURCES.includes(d.replacement_status);
   const status = supplyDemandStatus(target, deadline, d.shop_confirmed_date);
+  // Org policy: utilize excess/under-utilized MP before treating a demand as
+  // a fresh hire — when no Source is picked yet and there's Open Supply
+  // Pool supply for this demand, recommend "MP Excess" instead of leaving
+  // that check to happen informally (or not at all).
+  const recommendedEntries = !d.replacement_status ? eligiblePoolEntriesForDemand(poolEntries, d) : [];
+  const isRecommended = recommendedEntries.length > 0;
   // A demand shows under `tab` via effectiveDemandCategory, which can differ
   // from its origin category once Source = "Vokasi New Hire" moves a
   // PKWT-origin demand onto the Vokasi tab — trace that back for the reader.
@@ -308,12 +315,13 @@ function SupplyDemandRow({
               if (replStatus === "No Replace") setDemandNoReplace(d.id, d.no_replace_reason);
               else setDemandReplacementByNoreg(d.id, d.replacement_noreg, replStatus);
             }}
-            className="min-w-[140px]"
+            className={`min-w-[140px] ${isRecommended ? "border-blue-400 ring-1 ring-blue-300 dark:border-blue-500 dark:ring-blue-500/40" : ""}`}
           >
             <option value="">- pilih -</option>
             {sourceOptions.map((s) => (
-              <option key={s} value={s}>
+              <option key={s} value={s} className={isRecommended && s === "MP Excess" ? "font-semibold" : undefined}>
                 {s}
+                {isRecommended && s === "MP Excess" ? " ← rekomendasi" : ""}
               </option>
             ))}
           </Select>
@@ -340,9 +348,27 @@ function SupplyDemandRow({
           <Td className="text-slate-400">-</Td>
         </>
       ) : !d.replacement_status ? (
-        <Td colSpan={4} className="text-slate-400">
-          Pilih Source terlebih dahulu
-        </Td>
+        isRecommended ? (
+          <Td colSpan={4} className="whitespace-normal">
+            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1.5 dark:border-blue-500/30 dark:bg-blue-500/10">
+              <span className="shrink-0 rounded-full bg-blue-600 px-2 py-0.5 text-[10px] font-semibold text-white">
+                Rekomendasi
+              </span>
+              <span className="text-xs text-blue-700 dark:text-blue-300">
+                {recommendedEntries.length} MP Excess tersedia untuk diutilize —
+              </span>
+              {canEditReplacement ? (
+                <PoolReplacementSelect demand={d} poolEntries={poolEntries} />
+              ) : (
+                <span className="text-xs text-blue-700 dark:text-blue-300">lihat kolom Source.</span>
+              )}
+            </div>
+          </Td>
+        ) : (
+          <Td colSpan={4} className="text-slate-400">
+            Pilih Source terlebih dahulu
+          </Td>
+        )
       ) : (
         <>
           <Td className="whitespace-normal">
@@ -404,16 +430,15 @@ function SupplyDemandRow({
 
 /** MP Excess/MP Back Up candidates come from the Supply Pool, not a typed
  * noreg — selecting one both maps and confirms the assignment in one step
- * (see assignPoolEntryToDemand). Same-department entries sort first;
- * cross-department entries are flagged in red so the FS-status implication
- * is visible before picking. Once a candidate is set, this cell collapses
- * back to plain noreg text (Nama/Dept already have their own columns) —
- * click it to reopen the picker. */
+ * (see assignPoolEntryToDemand). Ranked via eligiblePoolEntriesForDemand so
+ * same-department, matching-status entries sort first; cross-department
+ * entries are flagged in red so the FS-status implication is visible before
+ * picking. Once a candidate is set, this cell collapses back to plain noreg
+ * text (Nama/Dept already have their own columns) — click it to reopen the
+ * picker. */
 function PoolReplacementSelect({ demand, poolEntries }: { demand: Demand; poolEntries: UtilPoolEntry[] }) {
   const [editing, setEditing] = useState(false);
-  const eligible = poolEntries
-    .filter((e) => e.status === "Open" || e.noreg === demand.replacement_noreg)
-    .sort((a, b) => (a.prev_dept === demand.dept ? 0 : 1) - (b.prev_dept === demand.dept ? 0 : 1));
+  const eligible = eligiblePoolEntriesForDemand(poolEntries, demand);
 
   if (demand.replacement_noreg && !editing) {
     return (
