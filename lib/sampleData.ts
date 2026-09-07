@@ -217,8 +217,18 @@ export function seedSampleData(): void {
     date: iso(subMonths(now(), 2)),
     takt_before: 70,
     takt_after: 75,
+    plan_rows: [
+      { division: employees[10].division, dept: employees[10].dept, status_mp: "PKWT", role: "Team Member", qty: 1 },
+    ],
     released_persons: [
-      { noreg: employees[10].noreg, nama: employees[10].nama, type: "PKWT", div: employees[10].division, dept: employees[10].dept },
+      {
+        noreg: employees[10].noreg,
+        nama: employees[10].nama,
+        type: "PKWT",
+        role: "Team Member",
+        div: employees[10].division,
+        dept: employees[10].dept,
+      },
     ],
   });
 }

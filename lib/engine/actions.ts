@@ -15,6 +15,7 @@ import {
 import { createClient } from "../supabase/client";
 import { pushToast } from "../toast";
 import { computeFsStatus, computeReviewDate, sisaHari, today } from "./compute";
+import { POSISI_STRUKTURAL_GROUPS } from "../types";
 import type {
   Demand,
   DemandCategory,
@@ -28,6 +29,9 @@ import type {
   ReplacementStatus,
   ReviewResult,
   TaktCase,
+  TaktDownPerson,
+  TaktDownPlanRow,
+  TaktDownRole,
   UtilPoolEntry,
   VokasiRecord,
 } from "../types";
@@ -608,12 +612,23 @@ export function createTaktUp(input: {
   return taktStore.update(takt.id, { demand_ids: demandIds })!;
 }
 
+/** Coarse position-level bucket for Takt Down planning — see TaktDownRole.
+ * Reuses POSISI_STRUKTURAL_GROUPS' own "team member" substring match rather
+ * than inventing a second taxonomy: anyone matching it is "Team Member",
+ * everyone else (GL/TL/SH/SO/Master/DpH/unrecognized) is "Leader". */
+export function taktDownRoleOf(posisiStruktural: string): TaktDownRole {
+  const teamMemberGroup = POSISI_STRUKTURAL_GROUPS.find((g) => g.label === "TM");
+  const isTeamMember = teamMemberGroup ? posisiStruktural?.toLowerCase().includes(teamMemberGroup.match) : false;
+  return isTeamMember ? "Team Member" : "Leader";
+}
+
 export function createTaktDown(input: {
   plant: TaktCase["plant"];
   date: string;
   takt_before: number;
   takt_after: number;
-  released_persons: { noreg: string; nama: string; type: MpStatusKategori; div: string; dept: string }[];
+  plan_rows: Omit<TaktDownPlanRow, "id">[];
+  released_persons: TaktDownPerson[];
 }): TaktCase {
   const takt: TaktCase = {
     id: genId("takt"),
@@ -622,6 +637,7 @@ export function createTaktDown(input: {
     category: "down",
     takt_before: input.takt_before,
     takt_after: input.takt_after,
+    plan_rows: input.plan_rows.map((r) => ({ ...r, id: genId("plan") })),
     released_persons: input.released_persons,
     demand_ids: [],
     released_pool_ids: [],
@@ -643,6 +659,106 @@ export function createTaktDown(input: {
     poolIds.push(entry.id);
   }
   return taktStore.update(takt.id, { released_pool_ids: poolIds })!;
+}
+
+/**
+ * Edits an existing Takt Down case — plan_rows, released_persons, and the
+ * case's own fields all stay changeable after creation, unlike the original
+ * one-shot flow, since one takt-time change block commonly affects several
+ * shops discovered/refined over more than one sitting.
+ *
+ * Only persons still "Open" in the Supply Pool are safe to drop — once a
+ * released person has been Assigned (mapped to a Demand) or Released, their
+ * Util Pool entry is left alone rather than silently deleted, so an
+ * in-progress Demand mapping never gets orphaned by a Takt Down edit. The
+ * caller (TaktDownModal) disables removal of non-Open persons in the UI;
+ * this is the same invariant enforced again server-side of the store.
+ */
+export function updateTaktDown(
+  taktId: string,
+  input: {
+    plant: TaktCase["plant"];
+    date: string;
+    takt_before: number;
+    takt_after: number;
+    plan_rows: TaktDownPlanRow[];
+    released_persons: TaktDownPerson[];
+  }
+): TaktCase | undefined {
+  const takt = taktStore.get(taktId);
+  if (!takt) return undefined;
+
+  const poolByNoreg = new Map(
+    (takt.released_pool_ids ?? [])
+      .map((id) => utilPoolStore.get(id))
+      .filter((e): e is UtilPoolEntry => Boolean(e))
+      .map((e) => [e.noreg, e])
+  );
+
+  const nextNoregs = new Set(input.released_persons.map((p) => p.noreg));
+  const removedButLocked: TaktDownPerson[] = [];
+  const keptPoolIds: string[] = [];
+
+  for (const [noreg, entry] of poolByNoreg) {
+    const stillPresent = nextNoregs.has(noreg);
+    if (stillPresent) {
+      keptPoolIds.push(entry.id);
+      // Keep the Supply Pool entry in sync with an in-place edit (e.g.
+      // correcting a person's shop or status) — only while it's still
+      // Open; an already-Assigned/Released entry keeps its snapshot.
+      if (entry.status === "Open") {
+        const edited = input.released_persons.find((p) => p.noreg === noreg);
+        if (
+          edited &&
+          (edited.nama !== entry.nama ||
+            edited.type !== entry.type ||
+            edited.div !== entry.prev_div ||
+            edited.dept !== entry.prev_dept)
+        ) {
+          utilPoolStore.update(entry.id, { nama: edited.nama, type: edited.type, prev_div: edited.div, prev_dept: edited.dept });
+        }
+      }
+      continue;
+    }
+    if (entry.status === "Open") {
+      utilPoolStore.remove(entry.id);
+    } else {
+      // Already utilized elsewhere — keep the pool entry and the person on
+      // the case instead of orphaning what it's now backing.
+      const prevPerson = (takt.released_persons ?? []).find((p) => p.noreg === noreg);
+      if (prevPerson) removedButLocked.push(prevPerson);
+      keptPoolIds.push(entry.id);
+    }
+  }
+
+  const newPersons = input.released_persons.filter((p) => !poolByNoreg.has(p.noreg));
+  const newPoolIds: string[] = [];
+  for (const p of newPersons) {
+    const contractEnd = estimateContractEnd(p.noreg, p.type);
+    const entry = pushToUtilPool({
+      noreg: p.noreg,
+      nama: p.nama,
+      type: p.type,
+      source: "TaktDown",
+      source_label: `Takt Down ${input.plant}`,
+      prev_div: p.div,
+      prev_dept: p.dept,
+      contract_end: contractEnd,
+    });
+    newPoolIds.push(entry.id);
+  }
+
+  const finalPersons = [...input.released_persons.filter((p) => nextNoregs.has(p.noreg)), ...removedButLocked];
+
+  return taktStore.update(taktId, {
+    plant: input.plant,
+    date: input.date,
+    takt_before: input.takt_before,
+    takt_after: input.takt_after,
+    plan_rows: input.plan_rows,
+    released_persons: finalPersons,
+    released_pool_ids: [...keptPoolIds, ...newPoolIds],
+  });
 }
 
 // ---------------------------------------------------------------------------

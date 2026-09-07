@@ -47,4 +47,8 @@ select
     where conrelid = 'util_pool'::regclass
       and conname = 'util_pool_source_check'
       and pg_get_constraintdef(oid) like '%Kaizen%'
-  );
+  )
+union all
+select
+  'migration_10 (Takt Down plan_rows)',
+  exists (select 1 from information_schema.columns where table_name = 'takt_cases' and column_name = 'plan_rows');

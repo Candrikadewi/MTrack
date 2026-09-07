@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight, Pencil } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Badge, statusTone } from "@/components/ui/Badge";
@@ -30,6 +30,7 @@ export function TaktPageClient() {
   const role = useRole();
   const [upOpen, setUpOpen] = useState(false);
   const [downOpen, setDownOpen] = useState(false);
+  const [editingDown, setEditingDown] = useState<TaktCase | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const cases = useStoreList(taktStore).sort((a, b) => b.date.localeCompare(a.date));
@@ -78,6 +79,8 @@ export function TaktPageClient() {
               utilPool={utilPool}
               isExpanded={expanded.has(c.id)}
               onToggle={() => toggle(c.id)}
+              canEdit={role === "admin" && c.category === "down"}
+              onEdit={() => setEditingDown(c)}
             />
           ))}
         </div>
@@ -86,7 +89,15 @@ export function TaktPageClient() {
       {role === "admin" && (
         <>
           <TaktUpModal open={upOpen} onClose={() => setUpOpen(false)} />
-          <TaktDownModal open={downOpen} onClose={() => setDownOpen(false)} />
+          {downOpen && <TaktDownModal onClose={() => setDownOpen(false)} poolEntries={utilPool} />}
+          {editingDown && (
+            <TaktDownModal
+              key={editingDown.id}
+              onClose={() => setEditingDown(null)}
+              editing={editingDown}
+              poolEntries={utilPool}
+            />
+          )}
         </>
       )}
     </div>
@@ -99,12 +110,16 @@ function TaktCaseCard({
   utilPool,
   isExpanded,
   onToggle,
+  canEdit,
+  onEdit,
 }: {
   takt: TaktCase;
   demands: Demand[];
   utilPool: UtilPoolEntry[];
   isExpanded: boolean;
   onToggle: () => void;
+  canEdit: boolean;
+  onEdit: () => void;
 }) {
   const isUp = c.category === "up";
   const ok = isUp
@@ -113,8 +128,8 @@ function TaktCaseCard({
 
   return (
     <Card>
-      <button type="button" onClick={onToggle} className="flex w-full flex-wrap items-center justify-between gap-3 text-left">
-        <div className="flex items-center gap-2">
+      <div className="flex w-full flex-wrap items-center justify-between gap-3">
+        <button type="button" onClick={onToggle} className="flex flex-1 items-center gap-2 text-left">
           {isExpanded ? (
             <ChevronDown size={16} className="shrink-0 text-slate-400" />
           ) : (
@@ -132,13 +147,24 @@ function TaktCaseCard({
               {isUp ? `${c.demand_ids.length} demand dibuat` : `${c.released_pool_ids.length} personil dilepas`}
             </div>
           </div>
+        </button>
+        <div className="flex items-center gap-2">
+          {canEdit && (
+            <button
+              type="button"
+              onClick={onEdit}
+              className="flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+            >
+              <Pencil size={12} /> Edit
+            </button>
+          )}
+          {ok ? (
+            <Badge tone="green">✅ {isUp ? "MP Terpenuhi" : "Semua Diutilisasi"}</Badge>
+          ) : (
+            <Badge tone="amber">⚠️ {isUp ? "Perlu Supply" : "Belum Diutilisasi"}</Badge>
+          )}
         </div>
-        {ok ? (
-          <Badge tone="green">✅ {isUp ? "MP Terpenuhi" : "Semua Diutilisasi"}</Badge>
-        ) : (
-          <Badge tone="amber">⚠️ {isUp ? "Perlu Supply" : "Belum Diutilisasi"}</Badge>
-        )}
-      </button>
+      </div>
 
       {isExpanded && (
         <div className="mt-4 border-t border-slate-100 pt-4 dark:border-slate-800">
@@ -246,7 +272,7 @@ function TaktDownDetail({ takt: c, utilPool }: { takt: TaktCase; utilPool: UtilP
                         key={p.noreg}
                         className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
                       >
-                        {p.nama} ({p.noreg})
+                        {p.nama} ({p.noreg}) · {p.role}
                         <Badge tone={utilizedPerson ? "green" : "amber"}>{pool?.status ?? "Open"}</Badge>
                       </span>
                     );

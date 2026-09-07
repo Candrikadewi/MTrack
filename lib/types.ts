@@ -216,10 +216,33 @@ export interface Project {
 export type Plant = "Plant 1" | "Plant 2";
 export type TaktCategory = "up" | "down";
 
+/** Coarse position-level bucket used only for Takt Down planning — a
+ * simplification of the full posisi_struktural hierarchy (see
+ * POSISI_STRUKTURAL_GROUPS) down to the two levels that actually change a
+ * shop's release composition. "Team Member" matches the same "team member"
+ * substring POSISI_STRUKTURAL_GROUPS matches for the TM label; everything
+ * else (GL, TL, SH, SO, Master, DpH, or unrecognized) counts as "Leader". */
+export type TaktDownRole = "Team Member" | "Leader";
+
+/** A shop's planned Takt Down composition — how many of each MP status and
+ * role a division/department is releasing — recorded before anyone maps
+ * actual names against it. One Takt Down case commonly spans several shops,
+ * each with its own status/role mix, so this is a list of rows, one per
+ * shop × status × role combination. */
+export interface TaktDownPlanRow {
+  id: string;
+  division: string;
+  dept: string;
+  status_mp: MpStatusKategori;
+  role: TaktDownRole;
+  qty: number;
+}
+
 export interface TaktDownPerson {
   noreg: string;
   nama: string;
   type: MpStatusKategori;
+  role: TaktDownRole;
   div: string;
   dept: string;
 }
@@ -234,7 +257,10 @@ export interface TaktCase {
   // "up" inputs
   need_rows?: ProjectMpNeedRow[];
   demand_ids: string[];
-  // "down" inputs
+  // "down" inputs — plan_rows is the per-shop/status/role quantity plan,
+  // released_persons is the actual name-by-name mapping against it; both
+  // stay editable after the case is created (see updateTaktDown).
+  plan_rows?: TaktDownPlanRow[];
   released_persons?: TaktDownPerson[];
   released_pool_ids: string[];
 }
