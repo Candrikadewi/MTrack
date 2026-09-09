@@ -1,7 +1,6 @@
 "use client";
 import { useState } from "react";
 import * as XLSX from "xlsx";
-import { X } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
 import { Field, Input, Select } from "@/components/ui/Form";
 import { Button } from "@/components/ui/Button";
@@ -9,9 +8,10 @@ import { Badge } from "@/components/ui/Badge";
 import { FullWidthTabs } from "@/components/ui/Tabs";
 import { MultiSelect } from "@/components/ui/MultiSelect";
 import { TableWrap, Th, Td, EmptyState } from "@/components/ui/Table";
+import { CompositionRowsEditor, emptyCompositionRow, type CompositionRow } from "@/components/takt/CompositionRowsEditor";
 import { getActiveSnapshot, vokasiStore } from "@/lib/repo";
-import { createTaktDown, updateTaktDown, taktDownRoleOf } from "@/lib/engine/actions";
-import type { MpStatusKategori, Plant, TaktCase, TaktDownPerson, TaktDownPlanRow, TaktDownRole, UtilPoolEntry } from "@/lib/types";
+import { createTaktDown, updateTaktDown } from "@/lib/engine/actions";
+import type { MpStatusKategori, Plant, TaktCase, TaktDownPerson, TaktDownPlanRow, UtilPoolEntry } from "@/lib/types";
 
 interface Candidate {
   noreg: string;
@@ -19,30 +19,26 @@ interface Candidate {
   div: string;
   dept: string;
   type: MpStatusKategori;
-  role: TaktDownRole;
 }
 
-type DraftPlanRow = Omit<TaktDownPlanRow, "id"> & { id: string };
+function toPlanRow(row: CompositionRow): Omit<TaktDownPlanRow, "id"> {
+  return { division: row.division, dept: row.dept, status_mp: row.status_mp, qty: row.qty, release_date: row.date };
+}
 
-const emptyPlanRow = (): DraftPlanRow => ({
-  id: crypto.randomUUID(),
-  division: "",
-  dept: "",
-  status_mp: "PKWT",
-  role: "Team Member",
-  qty: 1,
-});
+function fromPlanRow(row: TaktDownPlanRow): CompositionRow {
+  return { id: row.id, division: row.division, dept: row.dept, status_mp: row.status_mp, qty: row.qty, date: row.release_date };
+}
 
 /** Legacy cases created before plan_rows existed have no plan — synthesize
  * a starting plan from the actual released persons instead of handing the
  * editor an empty table. */
-function planRowsFromPersons(persons: TaktDownPerson[]): DraftPlanRow[] {
-  const groups = new Map<string, DraftPlanRow>();
+function planRowsFromPersons(persons: TaktDownPerson[]): CompositionRow[] {
+  const groups = new Map<string, CompositionRow>();
   for (const p of persons) {
-    const key = `${p.div}|${p.dept}|${p.type}|${p.role}`;
+    const key = `${p.div}|${p.dept}|${p.type}`;
     const existing = groups.get(key);
     if (existing) existing.qty += 1;
-    else groups.set(key, { id: crypto.randomUUID(), division: p.div, dept: p.dept, status_mp: p.type, role: p.role, qty: 1 });
+    else groups.set(key, emptyCompositionRow({ division: p.div, dept: p.dept, status_mp: p.type, qty: 1 }));
   }
   return Array.from(groups.values());
 }
@@ -72,10 +68,10 @@ export function TaktDownModal({
   const [date, setDate] = useState(editing?.date ?? new Date().toISOString().slice(0, 10));
   const [taktBefore, setTaktBefore] = useState(editing?.takt_before ?? 0);
   const [taktAfter, setTaktAfter] = useState(editing?.takt_after ?? 0);
-  const [planRows, setPlanRows] = useState<DraftPlanRow[]>(() => {
-    if (!editing) return [emptyPlanRow()];
-    const rows = editing.plan_rows?.length ? editing.plan_rows : planRowsFromPersons(editing.released_persons ?? []);
-    return rows.length ? rows.map((r) => ({ ...r })) : [emptyPlanRow()];
+  const [planRows, setPlanRows] = useState<CompositionRow[]>(() => {
+    if (!editing) return [emptyCompositionRow()];
+    const rows = editing.plan_rows?.length ? editing.plan_rows.map(fromPlanRow) : planRowsFromPersons(editing.released_persons ?? []);
+    return rows.length ? rows : [emptyCompositionRow()];
   });
   const [mode, setMode] = useState<"checklist" | "cari" | "bulk">("checklist");
   const [selected, setSelected] = useState<TaktDownPerson[]>(() => (editing?.released_persons ?? []).map((p) => ({ ...p })));
@@ -88,14 +84,6 @@ export function TaktDownModal({
   const [bulkResult, setBulkResult] = useState<{ added: number; notFound: string[] } | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
 
-  function updatePlanRow(id: string, patch: Partial<DraftPlanRow>) {
-    setPlanRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
-  }
-
-  function removePlanRow(id: string) {
-    setPlanRows((prev) => prev.filter((r) => r.id !== id));
-  }
-
   function loadCandidates(): Candidate[] {
     const snap = getActiveSnapshot();
     const fromEmployees: Candidate[] = (snap?.employees ?? []).map((e) => ({
@@ -104,17 +92,13 @@ export function TaktDownModal({
       div: e.division,
       dept: e.dept,
       type: e.status_kontrak === "Permanen" ? "Permanen" : e.status_kontrak === "AKTI" ? "AKTI" : "PKWT",
-      role: taktDownRoleOf(e.posisi_struktural),
     }));
-    // VokasiRecord carries no posisi_struktural — apprentices default to
-    // Team Member, the level Vokasi placements are actually at.
     const fromVokasi: Candidate[] = vokasiStore.list().map((v) => ({
       noreg: v.noreg,
       nama: v.nama,
       div: v.div,
       dept: v.dept,
       type: "Vokasi",
-      role: "Team Member",
     }));
     return [...fromEmployees, ...fromVokasi];
   }
@@ -216,7 +200,7 @@ export function TaktDownModal({
         date,
         takt_before: taktBefore,
         takt_after: taktAfter,
-        plan_rows: validRows,
+        plan_rows: validRows.map((r) => ({ ...toPlanRow(r), id: r.id })),
         released_persons: selected,
       });
     } else {
@@ -225,7 +209,7 @@ export function TaktDownModal({
         date,
         takt_before: taktBefore,
         takt_after: taktAfter,
-        plan_rows: validRows.map((r) => ({ division: r.division, dept: r.dept, status_mp: r.status_mp, role: r.role, qty: r.qty })),
+        plan_rows: validRows.map(toPlanRow),
         released_persons: selected,
       });
     }
@@ -234,10 +218,8 @@ export function TaktDownModal({
 
   // Progress per plan row — informational, not enforced, so mapping can
   // proceed even when the exact composition still needs adjusting.
-  function progressFor(row: DraftPlanRow): number {
-    return selected.filter(
-      (s) => s.div === row.division && s.dept === row.dept && s.type === row.status_mp && s.role === row.role
-    ).length;
+  function progressFor(row: CompositionRow): number {
+    return selected.filter((s) => s.div === row.division && s.dept === row.dept && s.type === row.status_mp).length;
   }
 
   return (
@@ -271,71 +253,11 @@ export function TaktDownModal({
           <div className="space-y-3">
             <p className="text-xs text-slate-500 dark:text-slate-400">
               Satu perubahan takt time biasanya berdampak ke beberapa shop sekaligus, dengan komposisi status MP
-              (Permanen/Vokasi/Kontrak) dan Team Member/Leader yang berbeda-beda. Tentukan rencana per shop dulu di sini,
-              baru pilih orangnya di langkah berikutnya.
+              (Permanen/Vokasi/Kontrak) yang berbeda-beda per shop. Tentukan rencana per shop dulu di sini, baru pilih
+              orangnya di langkah berikutnya.
             </p>
-            <div className="flex items-center justify-between">
-              <h4 className="text-xs font-semibold text-slate-500">Rencana Rilis per Shop</h4>
-              <Button size="sm" onClick={() => setPlanRows((prev) => [...prev, emptyPlanRow()])}>
-                + Baris
-              </Button>
-            </div>
-            <div className="space-y-2">
-              {planRows.map((row) => (
-                <div
-                  key={row.id}
-                  className="flex flex-wrap items-end gap-2 rounded-lg border border-slate-100 p-2 dark:border-slate-800"
-                >
-                  <div className="min-w-[150px] flex-1">
-                    <span className="mb-1 block text-[11px] font-medium text-slate-500">Divisi</span>
-                    <Input value={row.division} onChange={(e) => updatePlanRow(row.id, { division: e.target.value })} />
-                  </div>
-                  <div className="min-w-[150px] flex-1">
-                    <span className="mb-1 block text-[11px] font-medium text-slate-500">Department</span>
-                    <Input value={row.dept} onChange={(e) => updatePlanRow(row.id, { dept: e.target.value })} />
-                  </div>
-                  <div className="w-32">
-                    <span className="mb-1 block text-[11px] font-medium text-slate-500">Status MP</span>
-                    <Select
-                      value={row.status_mp}
-                      onChange={(e) => updatePlanRow(row.id, { status_mp: e.target.value as MpStatusKategori })}
-                    >
-                      <option value="Vokasi">Vokasi</option>
-                      <option value="PKWT">PKWT</option>
-                      <option value="Permanen">Permanen</option>
-                      <option value="AKTI">AKTI</option>
-                    </Select>
-                  </div>
-                  <div className="w-36">
-                    <span className="mb-1 block text-[11px] font-medium text-slate-500">Role</span>
-                    <Select value={row.role} onChange={(e) => updatePlanRow(row.id, { role: e.target.value as TaktDownRole })}>
-                      <option value="Team Member">Team Member</option>
-                      <option value="Leader">Leader</option>
-                    </Select>
-                  </div>
-                  <div className="w-24">
-                    <span className="mb-1 block text-[11px] font-medium text-slate-500">Jumlah</span>
-                    <Input
-                      type="number"
-                      min={1}
-                      className="text-center text-base font-semibold"
-                      value={row.qty}
-                      onChange={(e) => updatePlanRow(row.id, { qty: Number(e.target.value) })}
-                    />
-                  </div>
-                  {planRows.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => removePlanRow(row.id)}
-                      className="mb-1.5 rounded-md p-2 text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950"
-                      aria-label="Hapus baris"
-                    >
-                      <X size={16} />
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
+            <h4 className="text-xs font-semibold text-slate-500">Rencana Rilis per Shop</h4>
+            <CompositionRowsEditor rows={planRows} onChange={setPlanRows} dateLabel="Tanggal Release" />
             <div className="flex justify-end pt-2">
               <Button variant="primary" onClick={() => setStep("names")}>
                 Lanjut ke Mapping Name-by-Name →
@@ -358,7 +280,7 @@ export function TaktDownModal({
                         key={row.id}
                         className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs dark:border-slate-700 dark:bg-slate-800"
                       >
-                        {row.division} · {row.dept} · {row.status_mp} · {row.role}
+                        {row.division} · {row.dept} · {row.status_mp}
                         <Badge tone={done >= row.qty ? "green" : "amber"}>
                           {done}/{row.qty}
                         </Badge>
@@ -426,7 +348,6 @@ export function TaktDownModal({
                         <Th>Divisi</Th>
                         <Th>Department</Th>
                         <Th>Status MP</Th>
-                        <Th>Role</Th>
                       </tr>
                     </thead>
                     <tbody>
@@ -445,7 +366,6 @@ export function TaktDownModal({
                           <Td>{c.div}</Td>
                           <Td>{c.dept}</Td>
                           <Td>{c.type}</Td>
-                          <Td>{c.role}</Td>
                         </tr>
                       ))}
                     </tbody>
@@ -520,9 +440,7 @@ export function TaktDownModal({
                         <span>
                           {c.noreg} - {c.nama} <span className="text-slate-400">({c.dept})</span>
                         </span>
-                        <span className="text-xs text-slate-400">
-                          {c.type} · {c.role}
-                        </span>
+                        <span className="text-xs text-slate-400">{c.type}</span>
                       </button>
                     ))}
                   </div>
@@ -544,7 +462,7 @@ export function TaktDownModal({
                         className="flex items-center justify-between rounded-lg border border-slate-100 px-3 py-1.5 text-sm dark:border-slate-800"
                       >
                         <span>
-                          {s.noreg} - {s.nama} ({s.type}, {s.role}, {s.dept})
+                          {s.noreg} - {s.nama} ({s.type}, {s.dept})
                         </span>
                         {removable ? (
                           <button onClick={() => removeCandidate(s.noreg)} className="text-red-500 hover:text-red-700">

@@ -1,9 +1,10 @@
 "use client";
 import { useState } from "react";
+import Link from "next/link";
 import { ChevronDown, ChevronRight, Pencil } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
-import { Badge, statusTone } from "@/components/ui/Badge";
+import { Badge } from "@/components/ui/Badge";
 import { EmptyState, TableWrap, Td, Th } from "@/components/ui/Table";
 import { AssignedList } from "@/components/ui/AssignedList";
 import { TaktUpModal } from "@/components/takt/TaktUpModal";
@@ -12,18 +13,13 @@ import { useStoreList } from "@/lib/useStore";
 import { demandStore, taktStore, utilPoolStore } from "@/lib/repo";
 import { fmtDate } from "@/lib/engine/compute";
 import { useRole } from "@/lib/RoleContext";
-import type { Demand, MpRole, MpStatusKategori, TaktCase, UtilPoolEntry } from "@/lib/types";
+import type { Demand, MpStatusKategori, TaktCase, UtilPoolEntry } from "@/lib/types";
 
 const MP_STATUS_TONE: Record<MpStatusKategori, "green" | "amber" | "violet"> = {
   Permanen: "green",
   Vokasi: "violet",
   PKWT: "amber",
   AKTI: "amber",
-};
-
-const MP_ROLE_TONE: Record<MpRole, "blue" | "slate"> = {
-  Proses: "blue",
-  Backup: "slate",
 };
 
 export function TaktPageClient() {
@@ -126,28 +122,44 @@ function TaktCaseCard({
     ? demands.filter((d) => c.demand_ids.includes(d.id)).every((d) => d.status === "Fulfilled")
     : utilPool.filter((u) => c.released_pool_ids.includes(u.id)).every((u) => u.status !== "Open");
 
+  const header = (
+    <div className="flex flex-1 items-center gap-2">
+      {isUp ? (
+        isExpanded ? (
+          <ChevronDown size={16} className="shrink-0 text-slate-400" />
+        ) : (
+          <ChevronRight size={16} className="shrink-0 text-slate-400" />
+        )
+      ) : (
+        <ChevronRight size={16} className="shrink-0 text-slate-400" />
+      )}
+      <div>
+        <div className="flex items-center gap-2">
+          <h3 className="font-semibold text-slate-800 dark:text-slate-100">
+            {isUp ? "Takt Up" : "Takt Down"} — {c.plant}
+          </h3>
+          <Badge tone={isUp ? "blue" : "violet"}>{fmtDate(c.date)}</Badge>
+        </div>
+        <div className="text-xs text-slate-500">
+          {c.takt_before} menit → {c.takt_after} menit ·{" "}
+          {isUp ? `${c.demand_ids.length} demand dibuat` : `${c.released_pool_ids.length} personil dilepas`}
+        </div>
+      </div>
+    </div>
+  );
+
   return (
     <Card>
       <div className="flex w-full flex-wrap items-center justify-between gap-3">
-        <button type="button" onClick={onToggle} className="flex flex-1 items-center gap-2 text-left">
-          {isExpanded ? (
-            <ChevronDown size={16} className="shrink-0 text-slate-400" />
-          ) : (
-            <ChevronRight size={16} className="shrink-0 text-slate-400" />
-          )}
-          <div>
-            <div className="flex items-center gap-2">
-              <h3 className="font-semibold text-slate-800 dark:text-slate-100">
-                {isUp ? "Takt Up" : "Takt Down"} — {c.plant}
-              </h3>
-              <Badge tone={isUp ? "blue" : "violet"}>{fmtDate(c.date)}</Badge>
-            </div>
-            <div className="text-xs text-slate-500">
-              {c.takt_before} menit → {c.takt_after} menit ·{" "}
-              {isUp ? `${c.demand_ids.length} demand dibuat` : `${c.released_pool_ids.length} personil dilepas`}
-            </div>
-          </div>
-        </button>
+        {isUp ? (
+          <button type="button" onClick={onToggle} className="flex flex-1 items-center text-left">
+            {header}
+          </button>
+        ) : (
+          <Link href={`/takt/${c.id}`} className="flex flex-1 items-center text-left">
+            {header}
+          </Link>
+        )}
         <div className="flex items-center gap-2">
           {canEdit && (
             <button
@@ -166,9 +178,9 @@ function TaktCaseCard({
         </div>
       </div>
 
-      {isExpanded && (
+      {isUp && isExpanded && (
         <div className="mt-4 border-t border-slate-100 pt-4 dark:border-slate-800">
-          {isUp ? <TaktUpDetail takt={c} demands={demands} /> : <TaktDownDetail takt={c} utilPool={utilPool} />}
+          <TaktUpDetail takt={c} demands={demands} />
         </div>
       )}
     </Card>
@@ -188,7 +200,6 @@ function TaktUpDetail({ takt: c, demands }: { takt: TaktCase; demands: Demand[] 
           <Th>Divisi</Th>
           <Th>Department</Th>
           <Th>Status MP</Th>
-          <Th>MP Role</Th>
           <Th>Qty</Th>
           <Th>Tanggal Pemenuhan</Th>
           <Th>Assigned</Th>
@@ -208,9 +219,6 @@ function TaktUpDetail({ takt: c, demands }: { takt: TaktCase; demands: Demand[] 
               <Td>
                 <Badge tone={MP_STATUS_TONE[r.status_mp]}>{r.status_mp}</Badge>
               </Td>
-              <Td>
-                <Badge tone={MP_ROLE_TONE[r.mp_role]}>{r.mp_role}</Badge>
-              </Td>
               <Td>{r.qty}</Td>
               <Td>{fmtDate(r.fulfill_date)}</Td>
               <Td className="whitespace-normal">
@@ -218,72 +226,6 @@ function TaktUpDetail({ takt: c, demands }: { takt: TaktCase; demands: Demand[] 
               </Td>
               <Td>
                 {fulfilledCount}/{r.qty}
-              </Td>
-            </tr>
-          );
-        })}
-      </tbody>
-    </TableWrap>
-  );
-}
-
-/** Groups released_persons by (Divisi, Department) so the shop-by-shop
- * composition of who was let go is visible at a glance, cross-referencing
- * Supply Pool status (via released_pool_ids) for how many of each group
- * have since been utilized (Assigned) vs are still sitting Open. */
-function TaktDownDetail({ takt: c, utilPool }: { takt: TaktCase; utilPool: UtilPoolEntry[] }) {
-  const persons = c.released_persons ?? [];
-  if (persons.length === 0) return <p className="text-sm text-slate-400">Tidak ada rincian personil.</p>;
-
-  const poolByNoreg = new Map(utilPool.filter((u) => c.released_pool_ids.includes(u.id)).map((u) => [u.noreg, u]));
-  const groups = new Map<string, { division: string; dept: string; persons: typeof persons }>();
-  for (const p of persons) {
-    const key = `${p.div}|${p.dept}`;
-    const group = groups.get(key) ?? { division: p.div, dept: p.dept, persons: [] };
-    group.persons.push(p);
-    groups.set(key, group);
-  }
-
-  return (
-    <TableWrap>
-      <thead>
-        <tr>
-          <Th>Divisi</Th>
-          <Th>Department</Th>
-          <Th>Personil Released</Th>
-          <Th>Jumlah</Th>
-          <Th>Utilized</Th>
-        </tr>
-      </thead>
-      <tbody>
-        {Array.from(groups.values()).map((g) => {
-          const utilized = g.persons.filter((p) => poolByNoreg.get(p.noreg)?.status !== "Open").length;
-          return (
-            <tr key={`${g.division}|${g.dept}`}>
-              <Td>{g.division}</Td>
-              <Td>{g.dept}</Td>
-              <Td className="whitespace-normal">
-                <div className="flex flex-wrap gap-1.5">
-                  {g.persons.map((p) => {
-                    const pool = poolByNoreg.get(p.noreg);
-                    const utilizedPerson = pool?.status !== "Open";
-                    return (
-                      <span
-                        key={p.noreg}
-                        className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
-                      >
-                        {p.nama} ({p.noreg}) · {p.role}
-                        <Badge tone={utilizedPerson ? "green" : "amber"}>{pool?.status ?? "Open"}</Badge>
-                      </span>
-                    );
-                  })}
-                </div>
-              </Td>
-              <Td>{g.persons.length}</Td>
-              <Td>
-                <Badge tone={statusTone(utilized === g.persons.length ? "Fulfilled" : "Open")}>
-                  {utilized}/{g.persons.length}
-                </Badge>
               </Td>
             </tr>
           );

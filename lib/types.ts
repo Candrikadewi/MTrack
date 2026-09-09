@@ -216,33 +216,28 @@ export interface Project {
 export type Plant = "Plant 1" | "Plant 2";
 export type TaktCategory = "up" | "down";
 
-/** Coarse position-level bucket used only for Takt Down planning — a
- * simplification of the full posisi_struktural hierarchy (see
- * POSISI_STRUKTURAL_GROUPS) down to the two levels that actually change a
- * shop's release composition. "Team Member" matches the same "team member"
- * substring POSISI_STRUKTURAL_GROUPS matches for the TM label; everything
- * else (GL, TL, SH, SO, Master, DpH, or unrecognized) counts as "Leader". */
-export type TaktDownRole = "Team Member" | "Leader";
-
-/** A shop's planned Takt Down composition — how many of each MP status and
- * role a division/department is releasing — recorded before anyone maps
+/** A shop's planned Takt Down composition — how many of each MP status a
+ * division/department is releasing and when — recorded before anyone maps
  * actual names against it. One Takt Down case commonly spans several shops,
- * each with its own status/role mix, so this is a list of rows, one per
- * shop × status × role combination. */
+ * each with its own status mix, so this is a list of rows, one per shop ×
+ * status combination. release_date drives entered_pool_date on the Supply
+ * Pool entries created from this row (see createTaktDown), the same way
+ * ProjectMpNeedRow.fulfill_date drives each Demand it expands into. MP
+ * Role (Proses/Backup) is deliberately not part of this — that distinction
+ * only applies to Project rows. */
 export interface TaktDownPlanRow {
   id: string;
   division: string;
   dept: string;
   status_mp: MpStatusKategori;
-  role: TaktDownRole;
   qty: number;
+  release_date: string;
 }
 
 export interface TaktDownPerson {
   noreg: string;
   nama: string;
   type: MpStatusKategori;
-  role: TaktDownRole;
   div: string;
   dept: string;
 }

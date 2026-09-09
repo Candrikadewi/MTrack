@@ -15,7 +15,6 @@ import {
 import { createClient } from "../supabase/client";
 import { pushToast } from "../toast";
 import { computeFsStatus, computeReviewDate, sisaHari, today } from "./compute";
-import { POSISI_STRUKTURAL_GROUPS } from "../types";
 import type {
   Demand,
   DemandCategory,
@@ -31,7 +30,6 @@ import type {
   TaktCase,
   TaktDownPerson,
   TaktDownPlanRow,
-  TaktDownRole,
   UtilPoolEntry,
   VokasiRecord,
 } from "../types";
@@ -612,14 +610,17 @@ export function createTaktUp(input: {
   return taktStore.update(takt.id, { demand_ids: demandIds })!;
 }
 
-/** Coarse position-level bucket for Takt Down planning — see TaktDownRole.
- * Reuses POSISI_STRUKTURAL_GROUPS' own "team member" substring match rather
- * than inventing a second taxonomy: anyone matching it is "Team Member",
- * everyone else (GL/TL/SH/SO/Master/DpH/unrecognized) is "Leader". */
-export function taktDownRoleOf(posisiStruktural: string): TaktDownRole {
-  const teamMemberGroup = POSISI_STRUKTURAL_GROUPS.find((g) => g.label === "TM");
-  const isTeamMember = teamMemberGroup ? posisiStruktural?.toLowerCase().includes(teamMemberGroup.match) : false;
-  return isTeamMember ? "Team Member" : "Leader";
+/** The plan row a released person's composition matches (division + dept +
+ * status), used to carry that row's planned release_date onto the Supply
+ * Pool entry created for them — the same relationship
+ * ProjectMpNeedRow.fulfill_date has to the Demands it expands into. Falls
+ * back to the case's own date when a person doesn't line up with any row
+ * (e.g. added via bulk/search without a matching plan entry). */
+function releaseDateFor(person: TaktDownPerson, planRows: TaktDownPlanRow[], fallbackDate: string): string {
+  const row = planRows.find(
+    (r) => r.division === person.div && r.dept === person.dept && r.status_mp === person.type
+  );
+  return row?.release_date || fallbackDate;
 }
 
 export function createTaktDown(input: {
@@ -630,6 +631,7 @@ export function createTaktDown(input: {
   plan_rows: Omit<TaktDownPlanRow, "id">[];
   released_persons: TaktDownPerson[];
 }): TaktCase {
+  const planRowsWithIds = input.plan_rows.map((r) => ({ ...r, id: genId("plan") }));
   const takt: TaktCase = {
     id: genId("takt"),
     plant: input.plant,
@@ -637,7 +639,7 @@ export function createTaktDown(input: {
     category: "down",
     takt_before: input.takt_before,
     takt_after: input.takt_after,
-    plan_rows: input.plan_rows.map((r) => ({ ...r, id: genId("plan") })),
+    plan_rows: planRowsWithIds,
     released_persons: input.released_persons,
     demand_ids: [],
     released_pool_ids: [],
@@ -655,6 +657,7 @@ export function createTaktDown(input: {
       prev_div: p.div,
       prev_dept: p.dept,
       contract_end: contractEnd,
+      entered_pool_date: releaseDateFor(p, planRowsWithIds, input.date),
     });
     poolIds.push(entry.id);
   }
@@ -744,6 +747,7 @@ export function updateTaktDown(
       prev_div: p.div,
       prev_dept: p.dept,
       contract_end: contractEnd,
+      entered_pool_date: releaseDateFor(p, input.plan_rows, input.date),
     });
     newPoolIds.push(entry.id);
   }
