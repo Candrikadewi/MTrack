@@ -39,3 +39,11 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# impeccable (design-QA skill) — engine binary is fetched per platform on
+# first run and never tracked; the launcher script next to it is.
+**/skills/impeccable/scripts/bin/
+# Runtime/local state (critique snapshots, hook cache, live-mode session
+# files) — not shareable build output. PRODUCT.md/DESIGN.md, if created,
+# stay tracked (durable project context, not runtime state).
+/.impeccable/

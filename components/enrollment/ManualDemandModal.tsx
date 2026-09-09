@@ -101,11 +101,11 @@ export function ManualDemandModal({
             <Input value={othersReason} onChange={(e) => setOthersReason(e.target.value)} placeholder="Alasan lainnya..." />
           </Field>
         )}
-        <Field label="Noreg Outgoing (wajib) — nama/divisi/department akan terisi otomatis">
+        <Field label="Noreg Outgoing (wajib): nama/divisi/department akan terisi otomatis">
           <Input value={outgoingNoreg} onChange={(e) => lookupNoreg(e.target.value)} />
           {notFound && (
             <p className="mt-1 text-xs text-amber-600">
-              Noreg tidak ditemukan di data ZPAR aktif — isi nama/divisi/department manual di bawah.
+              Noreg tidak ditemukan di data ZPAR aktif. Isi nama/divisi/department manual di bawah.
             </p>
           )}
         </Field>

@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-type Tone = "slate" | "blue" | "green" | "amber" | "red" | "violet";
+export type Tone = "slate" | "blue" | "green" | "amber" | "red" | "violet";
 
 const toneClasses: Record<Tone, string> = {
   slate: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300",
@@ -24,6 +24,7 @@ export function Badge({ children, tone = "slate" }: { children: ReactNode; tone?
 export function statusTone(status: string): Tone {
   switch (status) {
     case "Fulfilled":
+    case "Fulfilled Ontime":
     case "Completed":
     case "Finish":
     case "Continue":
@@ -37,7 +38,12 @@ export function statusTone(status: string): Tone {
     case "Need FS":
     case "Terminate":
     case "Released":
+    case "DELAY":
       return "amber";
+    case "Need Replace ASAP":
+      return "red";
+    case "Fulfilled but Delay":
+      return "violet";
     default:
       return "slate";
   }

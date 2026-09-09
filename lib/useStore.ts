@@ -26,3 +26,18 @@ export function useDataVersion(): number {
   const getSnapshot = useCallback(() => getChangeVersion(), []);
   return useSyncExternalStore(subscribeStorage, getSnapshot, () => 0);
 }
+
+/**
+ * True once a store's first hydration attempt has resolved (success or
+ * failure) — lets a page tell "still loading" apart from "genuinely empty",
+ * which an empty `list()` alone can't do on the very first render.
+ */
+export function useStoreReady<T extends { id: string }>(store: Store<T>): boolean {
+  useEffect(() => {
+    store.init();
+  }, [store]);
+
+  const getSnapshot = useCallback(() => store.ready(), [store]);
+  const getServerSnapshot = useCallback(() => false, []);
+  return useSyncExternalStore(subscribeStorage, getSnapshot, getServerSnapshot);
+}
