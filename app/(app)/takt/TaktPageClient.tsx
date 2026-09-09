@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import Link from "next/link";
-import { ChevronDown, ChevronRight, Pencil } from "lucide-react";
+import { ChevronDown, ChevronRight, Pencil, Trash2 } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
@@ -11,6 +11,7 @@ import { TaktUpModal } from "@/components/takt/TaktUpModal";
 import { TaktDownModal } from "@/components/takt/TaktDownModal";
 import { useStoreList } from "@/lib/useStore";
 import { demandStore, taktStore, utilPoolStore } from "@/lib/repo";
+import { deleteTaktDown } from "@/lib/engine/actions";
 import { fmtDate } from "@/lib/engine/compute";
 import { useRole } from "@/lib/RoleContext";
 import type { Demand, MpStatusKategori, TaktCase, UtilPoolEntry } from "@/lib/types";
@@ -77,6 +78,15 @@ export function TaktPageClient() {
               onToggle={() => toggle(c.id)}
               canEdit={role === "admin" && c.category === "down"}
               onEdit={() => setEditingDown(c)}
+              onDelete={
+                role === "admin" && c.category === "down"
+                  ? () => {
+                      if (!confirm(`Hapus kasus Takt Down ${c.plant} (${fmtDate(c.date)})? Tindakan ini tidak bisa dibatalkan.`))
+                        return;
+                      deleteTaktDown(c.id);
+                    }
+                  : undefined
+              }
             />
           ))}
         </div>
@@ -108,6 +118,7 @@ function TaktCaseCard({
   onToggle,
   canEdit,
   onEdit,
+  onDelete,
 }: {
   takt: TaktCase;
   demands: Demand[];
@@ -116,6 +127,7 @@ function TaktCaseCard({
   onToggle: () => void;
   canEdit: boolean;
   onEdit: () => void;
+  onDelete?: () => void;
 }) {
   const isUp = c.category === "up";
   const ok = isUp
@@ -168,6 +180,15 @@ function TaktCaseCard({
               className="flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
             >
               <Pencil size={12} /> Edit
+            </button>
+          )}
+          {onDelete && (
+            <button
+              type="button"
+              onClick={onDelete}
+              className="flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-600 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-600 dark:border-slate-700 dark:text-slate-300 dark:hover:border-red-900 dark:hover:bg-red-950 dark:hover:text-red-400"
+            >
+              <Trash2 size={12} /> Hapus
             </button>
           )}
           {ok ? (

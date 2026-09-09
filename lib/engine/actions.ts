@@ -547,6 +547,24 @@ export function increaseProjectRowQty(projectId: string, rowId: string, newQty: 
   projectStore.update(projectId, { rows: updatedRows, demand_ids: [...project.demand_ids, ...created.map((d) => d.id)] });
 }
 
+/**
+ * Deletes a project. Same safety invariant as deleteTaktDown: a demand it
+ * generated that's still Open (no candidate mapped yet) is cleaned up with
+ * it, but one already Fulfilled is left standing on its own — deleting the
+ * project never erases a real, already-completed assignment.
+ */
+export function deleteProject(projectId: string): boolean {
+  const project = projectStore.get(projectId);
+  if (!project) return false;
+
+  for (const demandId of project.demand_ids) {
+    const demand = demandStore.get(demandId);
+    if (demand && demand.status !== "Fulfilled") demandStore.remove(demandId);
+  }
+  projectStore.remove(projectId);
+  return true;
+}
+
 /** §7 / §12 Auto Project Finish: run when Project Monitoring module is opened. */
 export function autoProjectFinishCheck(): void {
   const projects = projectStore.list();
@@ -763,6 +781,26 @@ export function updateTaktDown(
     released_persons: finalPersons,
     released_pool_ids: [...keptPoolIds, ...newPoolIds],
   });
+}
+
+/**
+ * Deletes a Takt Down case. Same safety invariant as updateTaktDown's
+ * removal path: a released person still "Open" in the Supply Pool is
+ * cleaned up with the case (nothing depends on it), but one already
+ * Assigned or Released is left in place — the case record disappears, but
+ * the Supply Pool entry it produced (and whatever Demand it's backing)
+ * keeps standing on its own. Returns false if the case doesn't exist.
+ */
+export function deleteTaktDown(taktId: string): boolean {
+  const takt = taktStore.get(taktId);
+  if (!takt || takt.category !== "down") return false;
+
+  for (const poolId of takt.released_pool_ids ?? []) {
+    const entry = utilPoolStore.get(poolId);
+    if (entry && entry.status === "Open") utilPoolStore.remove(entry.id);
+  }
+  taktStore.remove(taktId);
+  return true;
 }
 
 // ---------------------------------------------------------------------------

@@ -92,12 +92,50 @@ export function UtilPoolPageClient() {
   const historyAllEntries = useMemo(() => entries.filter((e) => e.status !== "Open"), [entries]);
 
   const [selOpenSources, setSelOpenSources] = useSessionState<string[]>("utilpool.open.sources", []);
+  const [selOpenDivs, setSelOpenDivs] = useSessionState<string[]>("utilpool.open.divs", []);
+  const [selOpenDepts, setSelOpenDepts] = useSessionState<string[]>("utilpool.open.depts", []);
+  const [selOpenStatus, setSelOpenStatus] = useSessionState<string[]>("utilpool.open.status", []);
+  const [selOpenMonth, setSelOpenMonth] = useSessionState<string>("utilpool.open.month", "");
+
+  const openDivOptions = useMemo(
+    () => Array.from(new Set(openAllEntries.map((e) => e.prev_div).filter(Boolean))).sort(),
+    [openAllEntries]
+  );
+  const openDeptOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          openAllEntries
+            .filter((e) => selOpenDivs.length === 0 || selOpenDivs.includes(e.prev_div))
+            .map((e) => e.prev_dept)
+            .filter(Boolean)
+        )
+      ).sort(),
+    [openAllEntries, selOpenDivs]
+  );
+  // "Status" here is the released person's own MP status (Vokasi/PKWT/
+  // Permanen/AKTI) — the `type` field, historically labeled "Tipe" in the
+  // table but that undersold what it actually represents.
+  const openStatusOptions = useMemo(
+    () => Array.from(new Set(openAllEntries.map((e) => e.type))).sort(),
+    [openAllEntries]
+  );
+  const openMonthOptions = useMemo(
+    () => Array.from(new Set(openAllEntries.map((e) => e.entered_pool_date.slice(0, 7)))).sort().reverse(),
+    [openAllEntries]
+  );
+
   const openEntries = useMemo(
     () =>
       openAllEntries.filter(
-        (e) => selOpenSources.length === 0 || selOpenSources.includes(SOURCE_TYPE_LABELS[e.source])
+        (e) =>
+          (selOpenSources.length === 0 || selOpenSources.includes(SOURCE_TYPE_LABELS[e.source])) &&
+          (selOpenDivs.length === 0 || selOpenDivs.includes(e.prev_div)) &&
+          (selOpenDepts.length === 0 || selOpenDepts.includes(e.prev_dept)) &&
+          (selOpenStatus.length === 0 || selOpenStatus.includes(e.type)) &&
+          (selOpenMonth === "" || e.entered_pool_date.slice(0, 7) === selOpenMonth)
       ),
-    [openAllEntries, selOpenSources]
+    [openAllEntries, selOpenSources, selOpenDivs, selOpenDepts, selOpenStatus, selOpenMonth]
   );
 
   const [selDivs, setSelDivs] = useSessionState<string[]>("utilpool.history.divs", []);
@@ -205,8 +243,30 @@ export function UtilPoolPageClient() {
 
           {tab === "open" ? (
             <Card>
-              <div className="mb-4 max-w-xs">
+              <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                <MultiSelect
+                  label="Divisi"
+                  options={openDivOptions}
+                  selected={selOpenDivs}
+                  onChange={(v) => {
+                    setSelOpenDivs(v);
+                    setSelOpenDepts([]);
+                  }}
+                />
+                <MultiSelect label="Department" options={openDeptOptions} selected={selOpenDepts} onChange={setSelOpenDepts} />
                 <MultiSelect label="Sumber" options={openSourceOptions} selected={selOpenSources} onChange={setSelOpenSources} />
+                <MultiSelect label="Status" options={openStatusOptions} selected={selOpenStatus} onChange={setSelOpenStatus} />
+                <div>
+                  <span className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">Bulan</span>
+                  <Select value={selOpenMonth} onChange={(e) => setSelOpenMonth(e.target.value)}>
+                    <option value="">Semua Bulan</option>
+                    {openMonthOptions.map((m) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
               </div>
               {openEntries.length === 0 ? (
                 <EmptyState text="Tidak ada supply yang masih Open sesuai filter." />
@@ -216,7 +276,7 @@ export function UtilPoolPageClient() {
                     <tr>
                       <Th>Noreg</Th>
                       <Th>Nama</Th>
-                      <Th>Tipe</Th>
+                      <Th>Status</Th>
                       <Th>Sumber</Th>
                       <Th>Divisi</Th>
                       <Th>Prev Dept</Th>

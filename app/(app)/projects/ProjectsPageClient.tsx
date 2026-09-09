@@ -1,36 +1,23 @@
 "use client";
 import { useEffect, useState } from "react";
-import { ChevronDown, ChevronRight, Pencil } from "lucide-react";
+import Link from "next/link";
+import { Pencil, Trash2 } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Badge, statusTone } from "@/components/ui/Badge";
-import { EmptyState, TableWrap, Td, Th } from "@/components/ui/Table";
-import { AssignedList } from "@/components/ui/AssignedList";
+import { EmptyState } from "@/components/ui/Table";
 import { NewProjectModal } from "@/components/projects/NewProjectModal";
 import { useStoreList } from "@/lib/useStore";
-import { demandStore, projectStore } from "@/lib/repo";
-import { autoProjectFinishCheck, projectSuppliedCount } from "@/lib/engine/actions";
+import { projectStore } from "@/lib/repo";
+import { autoProjectFinishCheck, deleteProject, projectSuppliedCount } from "@/lib/engine/actions";
 import { fmtDate } from "@/lib/engine/compute";
 import { useRole } from "@/lib/RoleContext";
-import type { Demand, MpRole, MpStatusKategori, Project } from "@/lib/types";
-
-const MP_STATUS_TONE: Record<MpStatusKategori, "green" | "amber" | "violet"> = {
-  Permanen: "green",
-  Vokasi: "violet",
-  PKWT: "amber",
-  AKTI: "amber",
-};
-
-const MP_ROLE_TONE: Record<MpRole, "blue" | "slate"> = {
-  Proses: "blue",
-  Backup: "slate",
-};
+import type { Project } from "@/lib/types";
 
 export function ProjectsPageClient() {
   const role = useRole();
   const [modalOpen, setModalOpen] = useState(false);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     // Only Admin can write (RLS); Shop/HR just view, so skip the auto-check
@@ -39,16 +26,6 @@ export function ProjectsPageClient() {
   }, [role]);
 
   const projects = useStoreList(projectStore).sort((a, b) => b.start_date.localeCompare(a.start_date));
-  const demands = useStoreList(demandStore);
-
-  function toggle(id: string) {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
 
   return (
     <div className="space-y-6">
@@ -74,11 +51,16 @@ export function ProjectsPageClient() {
             <ProjectCard
               key={p.id}
               project={p}
-              demands={demands}
               role={role}
-              isExpanded={expanded.has(p.id)}
-              onToggle={() => toggle(p.id)}
               onEdit={() => setEditingProject(p)}
+              onDelete={
+                role === "admin"
+                  ? () => {
+                      if (!confirm(`Hapus project "${p.name}"? Tindakan ini tidak bisa dibatalkan.`)) return;
+                      deleteProject(p.id);
+                    }
+                  : undefined
+              }
             />
           ))}
         </div>
@@ -94,18 +76,14 @@ export function ProjectsPageClient() {
 
 function ProjectCard({
   project: p,
-  demands,
   role,
-  isExpanded,
-  onToggle,
   onEdit,
+  onDelete,
 }: {
   project: Project;
-  demands: Demand[];
   role: ReturnType<typeof useRole>;
-  isExpanded: boolean;
-  onToggle: () => void;
   onEdit: () => void;
+  onDelete?: () => void;
 }) {
   const needed = p.rows.reduce((sum, r) => sum + r.qty, 0);
   const supplied = projectSuppliedCount(p);
@@ -113,90 +91,44 @@ function ProjectCard({
 
   return (
     <Card>
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <button
-          type="button"
-          onClick={onToggle}
-          className="flex min-w-0 flex-1 items-center gap-2 text-left"
-        >
-          {isExpanded ? (
-            <ChevronDown size={16} className="shrink-0 text-slate-400" />
-          ) : (
-            <ChevronRight size={16} className="shrink-0 text-slate-400" />
-          )}
+      <div className="flex w-full flex-wrap items-center justify-between gap-3">
+        <Link href={`/projects/${p.id}`} className="flex min-w-0 flex-1 items-center gap-2 text-left">
           <div>
             <div className="flex items-center gap-2">
               <h3 className="font-semibold text-slate-800 dark:text-slate-100">{p.name}</h3>
               <Badge tone={statusTone(p.status)}>{p.status}</Badge>
             </div>
             <div className="text-xs text-slate-500">
-              {fmtDate(p.start_date)} - {fmtDate(p.end_date)}
+              {fmtDate(p.start_date)} - {fmtDate(p.end_date)} · Supplied {supplied}/{needed}
             </div>
           </div>
-        </button>
-        <div className="flex items-center gap-4 text-sm">
-          <span className="text-slate-500">
-            Supplied: <span className="font-semibold text-slate-800 dark:text-slate-100">{supplied}</span> / {needed}
-          </span>
+        </Link>
+        <div className="flex items-center gap-2">
+          {role === "admin" && (
+            <button
+              type="button"
+              onClick={onEdit}
+              className="flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+            >
+              <Pencil size={12} /> Edit
+            </button>
+          )}
+          {onDelete && (
+            <button
+              type="button"
+              onClick={onDelete}
+              className="flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-600 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-600 dark:border-slate-700 dark:text-slate-300 dark:hover:border-red-900 dark:hover:bg-red-950 dark:hover:text-red-400"
+            >
+              <Trash2 size={12} /> Hapus
+            </button>
+          )}
           {gap <= 0 ? (
             <Badge tone="green">✅ MP Terpenuhi</Badge>
           ) : (
             <Badge tone="amber">⚠️ Perlu {gap} MP lagi</Badge>
           )}
-          {role === "admin" && (
-            <Button variant="secondary" size="sm" onClick={onEdit}>
-              <Pencil size={13} /> Edit
-            </Button>
-          )}
         </div>
       </div>
-
-      {isExpanded && (
-        <div className="mt-4 border-t border-slate-100 pt-4 dark:border-slate-800">
-          <TableWrap>
-            <thead>
-              <tr>
-                <Th>Divisi</Th>
-                <Th>Department</Th>
-                <Th>Status MP</Th>
-                <Th>MP Role</Th>
-                <Th>Qty</Th>
-                <Th>Tanggal Pemenuhan</Th>
-                <Th>Assigned</Th>
-                <Th>Fulfilled</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {p.rows.map((r) => {
-                const rowDemands = demands.filter(
-                  (d) => p.demand_ids.includes(d.id) && d.div === r.division && d.dept === r.dept && d.fulfill_date === r.fulfill_date
-                );
-                const fulfilledCount = rowDemands.filter((d) => d.status === "Fulfilled").length;
-                return (
-                  <tr key={r.id}>
-                    <Td>{r.division}</Td>
-                    <Td>{r.dept}</Td>
-                    <Td>
-                      <Badge tone={MP_STATUS_TONE[r.status_mp]}>{r.status_mp}</Badge>
-                    </Td>
-                    <Td>
-                      <Badge tone={MP_ROLE_TONE[r.mp_role]}>{r.mp_role}</Badge>
-                    </Td>
-                    <Td>{r.qty}</Td>
-                    <Td>{fmtDate(r.fulfill_date)}</Td>
-                    <Td className="whitespace-normal">
-                      <AssignedList demands={rowDemands} />
-                    </Td>
-                    <Td>
-                      {fulfilledCount}/{r.qty}
-                    </Td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </TableWrap>
-        </div>
-      )}
     </Card>
   );
 }

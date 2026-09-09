@@ -80,6 +80,18 @@ export function TaktDownModal({
   const [filterDivs, setFilterDivs] = useState<string[]>([]);
   const [filterDepts, setFilterDepts] = useState<string[]>([]);
   const [filterType, setFilterType] = useState<MpStatusKategori | "">("");
+  const [activePlanRowId, setActivePlanRowId] = useState<string | null>(null);
+
+  /** Jumping into a specific plan row's mapping — sets the checklist filter
+   * to exactly that row's shop/status so the candidate table is already
+   * scoped instead of showing everyone across every shop in the plan. */
+  function focusPlanRow(row: CompositionRow) {
+    setActivePlanRowId(row.id);
+    setMode("checklist");
+    setFilterDivs(row.division ? [row.division] : []);
+    setFilterDepts(row.dept ? [row.dept] : []);
+    setFilterType(row.status_mp);
+  }
   const [bulkText, setBulkText] = useState("");
   const [bulkResult, setBulkResult] = useState<{ added: number; notFound: string[] } | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
@@ -257,7 +269,7 @@ export function TaktDownModal({
               orangnya di langkah berikutnya.
             </p>
             <h4 className="text-xs font-semibold text-slate-500">Rencana Rilis per Shop</h4>
-            <CompositionRowsEditor rows={planRows} onChange={setPlanRows} dateLabel="Tanggal Release" />
+            <CompositionRowsEditor rows={planRows} onChange={setPlanRows} dateLabel="Tanggal Release" laborTypeFilter="A" />
             <div className="flex justify-end pt-2">
               <Button variant="primary" onClick={() => setStep("names")}>
                 Lanjut ke Mapping Name-by-Name →
@@ -269,22 +281,31 @@ export function TaktDownModal({
         {step === "names" && (
           <div className="space-y-4">
             <div>
-              <h4 className="mb-2 text-xs font-semibold text-slate-500">Progres Rencana per Shop</h4>
+              <h4 className="mb-2 text-xs font-semibold text-slate-500">
+                Progres Rencana per Shop — klik untuk isi baris ini
+              </h4>
               <div className="flex flex-wrap gap-2">
                 {planRows
                   .filter((r) => r.division && r.dept && r.qty > 0)
                   .map((row) => {
                     const done = progressFor(row);
+                    const active = activePlanRowId === row.id;
                     return (
-                      <span
+                      <button
                         key={row.id}
-                        className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs dark:border-slate-700 dark:bg-slate-800"
+                        type="button"
+                        onClick={() => focusPlanRow(row)}
+                        className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors ${
+                          active
+                            ? "border-blue-400 bg-blue-50 text-blue-700 dark:border-blue-500 dark:bg-blue-500/10 dark:text-blue-300"
+                            : "border-slate-200 bg-slate-50 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700"
+                        }`}
                       >
                         {row.division} · {row.dept} · {row.status_mp}
                         <Badge tone={done >= row.qty ? "green" : "amber"}>
                           {done}/{row.qty}
                         </Badge>
-                      </span>
+                      </button>
                     );
                   })}
               </div>

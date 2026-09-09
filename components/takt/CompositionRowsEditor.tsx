@@ -2,17 +2,18 @@
 import { X } from "lucide-react";
 import { Select, Input } from "@/components/ui/Form";
 import { getActiveSnapshot } from "@/lib/repo";
-import type { MpStatusKategori } from "@/lib/types";
+import type { MpRole, MpStatusKategori } from "@/lib/types";
 
-/** Shared shape for a Takt Up need-row or a Takt Down plan-row while
- * they're being composed — each modal converts to/from its own specific
- * row type (ProjectMpNeedRow / TaktDownPlanRow) around this editor. No MP
- * Role field: that distinction is Project-only. */
+/** Shared shape for a Takt Up need-row, a Takt Down plan-row, or a Project
+ * need-row while they're being composed — each modal converts to/from its
+ * own specific row type around this editor. mp_role only renders when the
+ * caller passes `withRole` (Project only — Takt never asks for it). */
 export interface CompositionRow {
   id: string;
   division: string;
   dept: string;
   status_mp: MpStatusKategori;
+  mp_role?: MpRole;
   qty: number;
   date: string;
 }
@@ -23,6 +24,7 @@ export function emptyCompositionRow(patch: Partial<CompositionRow> = {}): Compos
     division: "",
     dept: "",
     status_mp: "PKWT",
+    mp_role: "Proses",
     qty: 1,
     date: "",
     ...patch,
@@ -74,12 +76,30 @@ export function CompositionRowsEditor({
   rows,
   onChange,
   dateLabel,
+  laborTypeFilter,
+  withRole = false,
+  isRowLocked,
+  minQtyFor,
 }: {
   rows: CompositionRow[];
   onChange: (rows: CompositionRow[]) => void;
   dateLabel: string;
+  /** Restricts Divisi/Department options to only those with at least one
+   * active employee of this ZPAR labor_type code — used for Takt Down,
+   * where a shop only shows up as a release option if it actually has
+   * Labor Type A headcount to release. */
+  laborTypeFilter?: string;
+  /** Shows the MP Role (Proses/Backup) select — Project only. */
+  withRole?: boolean;
+  /** A locked row (Project: already expanded into real Demand records) can
+   * only have its qty increased — every other field is disabled and it
+   * can't be removed, so already-fulfilled demand history never gets
+   * silently reshuffled by a composition edit. */
+  isRowLocked?: (row: CompositionRow) => boolean;
+  minQtyFor?: (row: CompositionRow) => number;
 }) {
-  const employees = getActiveSnapshot()?.employees ?? [];
+  const allEmployees = getActiveSnapshot()?.employees ?? [];
+  const employees = laborTypeFilter ? allEmployees.filter((e) => e.labor_type === laborTypeFilter) : allEmployees;
   const divOptions = Array.from(new Set(employees.map((e) => e.division).filter(Boolean))).sort();
   const deptOptionsFor = (division: string) =>
     Array.from(new Set(employees.filter((e) => e.division === division).map((e) => e.dept).filter(Boolean))).sort();
@@ -97,7 +117,7 @@ export function CompositionRowsEditor({
   }
 
   const groups = groupRows(rows);
-  const canRemove = rows.length > 1;
+  const removableCount = rows.filter((r) => !isRowLocked?.(r)).length;
 
   return (
     <div className="space-y-3">
@@ -115,75 +135,102 @@ export function CompositionRowsEditor({
                   <div className="mb-1.5 text-xs font-medium text-slate-500 dark:text-slate-400">{deptG.dept}</div>
                 )}
                 <div className="space-y-1.5">
-                  {deptG.rows.map((row) => (
-                    <div key={row.id} className="flex flex-wrap items-end gap-1.5">
-                      <div className="w-36">
-                        <span className="mb-0.5 block text-[10px] font-medium text-slate-400">Divisi</span>
-                        <Select
-                          value={row.division}
-                          onChange={(e) => update(row.id, { division: e.target.value, dept: "" })}
-                        >
-                          <option value="">- pilih -</option>
-                          {divOptions.map((d) => (
-                            <option key={d} value={d}>
-                              {d}
-                            </option>
-                          ))}
-                        </Select>
+                  {deptG.rows.map((row) => {
+                    const locked = isRowLocked?.(row) ?? false;
+                    return (
+                      <div key={row.id} className="flex flex-wrap items-end gap-1.5">
+                        <div className="w-36">
+                          <span className="mb-0.5 block text-[10px] font-medium text-slate-400">Divisi</span>
+                          <Select
+                            value={row.division}
+                            disabled={locked}
+                            onChange={(e) => update(row.id, { division: e.target.value, dept: "" })}
+                          >
+                            <option value="">- pilih -</option>
+                            {divOptions.map((d) => (
+                              <option key={d} value={d}>
+                                {d}
+                              </option>
+                            ))}
+                          </Select>
+                        </div>
+                        <div className="w-36">
+                          <span className="mb-0.5 block text-[10px] font-medium text-slate-400">Department</span>
+                          <Select
+                            value={row.dept}
+                            onChange={(e) => update(row.id, { dept: e.target.value })}
+                            disabled={locked || !row.division}
+                          >
+                            <option value="">{row.division ? "- pilih -" : "Pilih Divisi dulu"}</option>
+                            {deptOptionsFor(row.division).map((d) => (
+                              <option key={d} value={d}>
+                                {d}
+                              </option>
+                            ))}
+                          </Select>
+                        </div>
+                        <div className="w-28">
+                          <span className="mb-0.5 block text-[10px] font-medium text-slate-400">Status MP</span>
+                          <Select
+                            value={row.status_mp}
+                            disabled={locked}
+                            onChange={(e) => update(row.id, { status_mp: e.target.value as MpStatusKategori })}
+                          >
+                            <option value="Vokasi">Vokasi</option>
+                            <option value="PKWT">PKWT</option>
+                            <option value="Permanen">Permanen</option>
+                            <option value="AKTI">AKTI</option>
+                          </Select>
+                        </div>
+                        {withRole && (
+                          <div className="w-28">
+                            <span className="mb-0.5 block text-[10px] font-medium text-slate-400">MP Role</span>
+                            <Select
+                              value={row.mp_role}
+                              disabled={locked}
+                              onChange={(e) => update(row.id, { mp_role: e.target.value as MpRole })}
+                            >
+                              <option value="Proses">Proses</option>
+                              <option value="Backup">Backup</option>
+                            </Select>
+                          </div>
+                        )}
+                        <div className="w-20">
+                          <span className="mb-0.5 block text-[10px] font-medium text-slate-400">Qty</span>
+                          <Input
+                            type="number"
+                            min={minQtyFor?.(row) ?? 1}
+                            className="text-center text-sm font-semibold"
+                            value={row.qty}
+                            onChange={(e) => update(row.id, { qty: Number(e.target.value) })}
+                          />
+                        </div>
+                        <div className="min-w-[150px]">
+                          <span className="mb-0.5 block text-[10px] font-medium text-slate-400">{dateLabel}</span>
+                          <Input
+                            type="date"
+                            disabled={locked}
+                            value={row.date}
+                            onChange={(e) => update(row.id, { date: e.target.value })}
+                          />
+                        </div>
+                        {locked ? (
+                          <span className="mb-1.5 text-[10px] text-slate-400">qty awal: {minQtyFor?.(row)}</span>
+                        ) : (
+                          removableCount > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => remove(row.id)}
+                              className="mb-0.5 rounded-md p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950"
+                              aria-label="Hapus baris"
+                            >
+                              <X size={14} />
+                            </button>
+                          )
+                        )}
                       </div>
-                      <div className="w-36">
-                        <span className="mb-0.5 block text-[10px] font-medium text-slate-400">Department</span>
-                        <Select
-                          value={row.dept}
-                          onChange={(e) => update(row.id, { dept: e.target.value })}
-                          disabled={!row.division}
-                        >
-                          <option value="">{row.division ? "- pilih -" : "Pilih Divisi dulu"}</option>
-                          {deptOptionsFor(row.division).map((d) => (
-                            <option key={d} value={d}>
-                              {d}
-                            </option>
-                          ))}
-                        </Select>
-                      </div>
-                      <div className="w-28">
-                        <span className="mb-0.5 block text-[10px] font-medium text-slate-400">Status MP</span>
-                        <Select
-                          value={row.status_mp}
-                          onChange={(e) => update(row.id, { status_mp: e.target.value as MpStatusKategori })}
-                        >
-                          <option value="Vokasi">Vokasi</option>
-                          <option value="PKWT">PKWT</option>
-                          <option value="Permanen">Permanen</option>
-                          <option value="AKTI">AKTI</option>
-                        </Select>
-                      </div>
-                      <div className="w-20">
-                        <span className="mb-0.5 block text-[10px] font-medium text-slate-400">Qty</span>
-                        <Input
-                          type="number"
-                          min={1}
-                          className="text-center text-sm font-semibold"
-                          value={row.qty}
-                          onChange={(e) => update(row.id, { qty: Number(e.target.value) })}
-                        />
-                      </div>
-                      <div className="min-w-[150px]">
-                        <span className="mb-0.5 block text-[10px] font-medium text-slate-400">{dateLabel}</span>
-                        <Input type="date" value={row.date} onChange={(e) => update(row.id, { date: e.target.value })} />
-                      </div>
-                      {canRemove && (
-                        <button
-                          type="button"
-                          onClick={() => remove(row.id)}
-                          className="mb-0.5 rounded-md p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950"
-                          aria-label="Hapus baris"
-                        >
-                          <X size={14} />
-                        </button>
-                      )}
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
                 <button
                   type="button"

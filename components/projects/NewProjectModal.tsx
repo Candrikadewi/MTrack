@@ -1,38 +1,37 @@
 "use client";
 import { useState } from "react";
 import { Modal } from "@/components/ui/Modal";
-import { Field, Input, Select } from "@/components/ui/Form";
+import { Field, Input } from "@/components/ui/Form";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { TableWrap, Th, Td } from "@/components/ui/Table";
-import { X } from "lucide-react";
+import { CompositionRowsEditor, emptyCompositionRow, type CompositionRow } from "@/components/takt/CompositionRowsEditor";
 import { addProjectRow, createProject, increaseProjectRowQty, updateProjectDetails } from "@/lib/engine/actions";
-import { zparStore } from "@/lib/repo";
-import { useStoreList } from "@/lib/useStore";
-import { divisionsOfAny, deptsOfAny } from "@/lib/engine/dashboard";
 import { fmtDate } from "@/lib/engine/compute";
-import type { MpRole, MpStatusKategori, Project } from "@/lib/types";
+import type { Project, ProjectMpNeedRow } from "@/lib/types";
 
-interface EditableRow {
-  id: string; // "" for a not-yet-saved new row
-  division: string;
-  dept: string;
-  status_mp: MpStatusKategori;
-  mp_role: MpRole;
-  qty: number;
-  fulfill_date: string;
-  originalQty?: number; // set only for rows that already existed on the project
+function toNeedRow(row: CompositionRow): Omit<ProjectMpNeedRow, "id"> {
+  return {
+    division: row.division,
+    dept: row.dept,
+    status_mp: row.status_mp,
+    mp_role: row.mp_role ?? "Proses",
+    qty: row.qty,
+    fulfill_date: row.date,
+  };
 }
 
-const emptyRow = (): EditableRow => ({
-  id: "",
-  division: "",
-  dept: "",
-  status_mp: "Vokasi",
-  mp_role: "Proses",
-  qty: 1,
-  fulfill_date: "",
-});
+function fromNeedRow(row: ProjectMpNeedRow): CompositionRow {
+  return {
+    id: row.id,
+    division: row.division,
+    dept: row.dept,
+    status_mp: row.status_mp,
+    mp_role: row.mp_role,
+    qty: row.qty,
+    date: row.fulfill_date,
+  };
+}
 
 /**
  * Note: this component is expected to be conditionally *mounted* by its
@@ -42,28 +41,21 @@ const emptyRow = (): EditableRow => ({
  */
 export function NewProjectModal({ open, onClose, project }: { open: boolean; onClose: () => void; project?: Project }) {
   const isEdit = !!project;
-  const snapshots = useStoreList(zparStore);
-  const employees = snapshots.find((s) => s.is_active)?.employees ?? [];
-  // ZPAR data hydrates async on the client; while it's still loading (or if
-  // no snapshot has ever been uploaded) the Divisi/Department selects would
-  // otherwise silently show no options — surface that explicitly instead.
-  const employeesLoading = !zparStore.ready();
 
   const [name, setName] = useState(project?.name ?? "");
   const [startDate, setStartDate] = useState(project?.start_date ?? "");
   const [endDate, setEndDate] = useState(project?.end_date ?? "");
-  const [rows, setRows] = useState<EditableRow[]>(
-    project ? project.rows.map((r) => ({ ...r, originalQty: r.qty })) : [emptyRow()]
+  const [rows, setRows] = useState<CompositionRow[]>(
+    project ? project.rows.map(fromNeedRow) : [emptyCompositionRow()]
   );
   const [step, setStep] = useState<"form" | "preview">("form");
 
-  function updateRow(idx: number, patch: Partial<EditableRow>) {
-    setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
-  }
-
-  function removeRow(idx: number) {
-    setRows((prev) => prev.filter((_, i) => i !== idx));
-  }
+  // Rows that already existed when the project loaded can only have their
+  // qty increased — every other field is locked (see CompositionRowsEditor)
+  // so demand records that may already be Fulfilled never get reshuffled.
+  const originalQtyById = new Map((project?.rows ?? []).map((r) => [r.id, r.qty]));
+  const isRowLocked = (row: CompositionRow) => originalQtyById.has(row.id);
+  const minQtyFor = (row: CompositionRow) => originalQtyById.get(row.id) ?? 1;
 
   function validRows() {
     return rows.filter((r) => r.division && r.dept && r.qty > 0);
@@ -76,7 +68,7 @@ export function NewProjectModal({ open, onClose, project }: { open: boolean; onC
   }
 
   function register() {
-    createProject({ name, start_date: startDate, end_date: endDate, rows: validRows() });
+    createProject({ name, start_date: startDate, end_date: endDate, rows: validRows().map(toNeedRow) });
     onClose();
   }
 
@@ -84,18 +76,10 @@ export function NewProjectModal({ open, onClose, project }: { open: boolean; onC
     if (!project) return;
     updateProjectDetails(project.id, { name, start_date: startDate, end_date: endDate });
     for (const row of rows) {
-      if (row.originalQty === undefined) {
-        if (row.division && row.dept && row.qty > 0) {
-          addProjectRow(project.id, {
-            division: row.division,
-            dept: row.dept,
-            status_mp: row.status_mp,
-            mp_role: row.mp_role,
-            qty: row.qty,
-            fulfill_date: row.fulfill_date,
-          });
-        }
-      } else if (row.qty > row.originalQty) {
+      const originalQty = originalQtyById.get(row.id);
+      if (originalQty === undefined) {
+        if (row.division && row.dept && row.qty > 0) addProjectRow(project.id, toNeedRow(row));
+      } else if (row.qty > originalQty) {
         increaseProjectRowQty(project.id, row.id, row.qty);
       }
     }
@@ -121,112 +105,15 @@ export function NewProjectModal({ open, onClose, project }: { open: boolean; onC
           </div>
 
           <div>
-            <div className="mb-2 flex items-center justify-between">
-              <h4 className="text-xs font-semibold text-slate-500">Kebutuhan MP</h4>
-              <Button size="sm" onClick={() => setRows((prev) => [...prev, emptyRow()])}>
-                + Baris
-              </Button>
-            </div>
-            <div className="space-y-2">
-              {rows.map((row, idx) => {
-                const locked = row.originalQty !== undefined; // existing row in edit mode
-                const divisionOptions = divisionsOfAny(employees, []);
-                const deptOptions = deptsOfAny(employees, row.division ? [row.division] : []);
-                return (
-                  <div
-                    key={idx}
-                    className="flex flex-wrap items-end gap-2 rounded-lg border border-slate-100 p-2 dark:border-slate-800"
-                  >
-                    <div className="min-w-[150px] flex-1">
-                      <span className="mb-1 block text-[11px] font-medium text-slate-500">Divisi</span>
-                      <Select
-                        value={row.division}
-                        disabled={locked || employeesLoading}
-                        onChange={(e) => updateRow(idx, { division: e.target.value, dept: "" })}
-                      >
-                        <option value="">{employeesLoading ? "Memuat data..." : "Pilih Divisi"}</option>
-                        {divisionOptions.map((d) => (
-                          <option key={d} value={d}>
-                            {d}
-                          </option>
-                        ))}
-                      </Select>
-                    </div>
-                    <div className="min-w-[150px] flex-1">
-                      <span className="mb-1 block text-[11px] font-medium text-slate-500">Department</span>
-                      <Select
-                        value={row.dept}
-                        disabled={locked || !row.division}
-                        onChange={(e) => updateRow(idx, { dept: e.target.value })}
-                      >
-                        <option value="">Pilih Department</option>
-                        {deptOptions.map((d) => (
-                          <option key={d} value={d}>
-                            {d}
-                          </option>
-                        ))}
-                      </Select>
-                    </div>
-                    <div className="w-32">
-                      <span className="mb-1 block text-[11px] font-medium text-slate-500">Status MP</span>
-                      <Select
-                        value={row.status_mp}
-                        disabled={locked}
-                        onChange={(e) => updateRow(idx, { status_mp: e.target.value as MpStatusKategori })}
-                      >
-                        <option value="Vokasi">Vokasi</option>
-                        <option value="PKWT">PKWT</option>
-                        <option value="Permanen">Permanen</option>
-                        <option value="AKTI">AKTI</option>
-                      </Select>
-                    </div>
-                    <div className="w-28">
-                      <span className="mb-1 block text-[11px] font-medium text-slate-500">MP Role</span>
-                      <Select
-                        value={row.mp_role}
-                        disabled={locked}
-                        onChange={(e) => updateRow(idx, { mp_role: e.target.value as MpRole })}
-                      >
-                        <option value="Proses">Proses</option>
-                        <option value="Backup">Backup</option>
-                      </Select>
-                    </div>
-                    <div className="w-24">
-                      <span className="mb-1 block text-[11px] font-medium text-slate-500">Qty</span>
-                      <Input
-                        type="number"
-                        min={row.originalQty ?? 1}
-                        className="text-center text-base font-semibold"
-                        value={row.qty}
-                        onChange={(e) => updateRow(idx, { qty: Number(e.target.value) })}
-                      />
-                    </div>
-                    <div className="min-w-[160px]">
-                      <span className="mb-1 block text-[11px] font-medium text-slate-500">Tanggal Pemenuhan</span>
-                      <Input
-                        type="date"
-                        disabled={locked}
-                        value={row.fulfill_date}
-                        onChange={(e) => updateRow(idx, { fulfill_date: e.target.value })}
-                      />
-                    </div>
-                    {!locked && rows.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={() => removeRow(idx)}
-                        className="mb-1.5 rounded-md p-2 text-slate-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950"
-                        aria-label="Hapus baris"
-                      >
-                        <X size={16} />
-                      </button>
-                    )}
-                    {locked && (
-                      <span className="mb-2 text-[11px] text-slate-400">qty awal: {row.originalQty}</span>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+            <h4 className="mb-2 text-xs font-semibold text-slate-500">Kebutuhan MP</h4>
+            <CompositionRowsEditor
+              rows={rows}
+              onChange={setRows}
+              dateLabel="Tanggal Pemenuhan"
+              withRole
+              isRowLocked={isRowLocked}
+              minQtyFor={minQtyFor}
+            />
             {isEdit && (
               <p className="mt-2 text-xs text-slate-400">
                 Baris yang sudah terdaftar hanya bisa ditambah qty-nya (tidak bisa dikurangi/dihapus) agar data demand yang sudah fulfilled tidak hilang.
@@ -274,7 +161,7 @@ export function NewProjectModal({ open, onClose, project }: { open: boolean; onC
                   <Td>{r.status_mp}</Td>
                   <Td>{r.mp_role}</Td>
                   <Td>{r.qty}</Td>
-                  <Td>{fmtDate(r.fulfill_date)}</Td>
+                  <Td>{fmtDate(r.date)}</Td>
                 </tr>
               ))}
             </tbody>
