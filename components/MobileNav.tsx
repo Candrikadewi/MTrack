@@ -6,11 +6,11 @@ import { BrandMark } from "@/components/ui/BrandMark";
 const NAV = [
   { href: "/upload", label: "Upload Center" },
   { href: "/dashboard", label: "Dashboard" },
-  { href: "/enrollment", label: "Enrollment Monitoring" },
-  { href: "/projects", label: "Project Monitoring" },
-  { href: "/takt", label: "Takt Time Monitoring" },
-  { href: "/supply-demand", label: "Demand Pool" },
-  { href: "/util-pool", label: "Supply Pool" },
+  { href: "/demand", label: "Demand" },
+  { href: "/supply", label: "Supply" },
+  { href: "/history", label: "History" },
+  { href: "/projects", label: "Kelola Project" },
+  { href: "/takt", label: "Kelola Takt Time" },
   { href: "/handover", label: "Handover Form" },
 ];
 

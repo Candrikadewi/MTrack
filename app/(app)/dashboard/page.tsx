@@ -31,6 +31,7 @@ import { AgeMovementChart } from "@/components/ui/AgeMovementChart";
 import { Badge, type Tone as BadgeTone } from "@/components/ui/Badge";
 import { EmptyState, TableWrap, Td, Th } from "@/components/ui/Table";
 import { CardSkeleton } from "@/components/ui/Skeleton";
+import { RatioWidget } from "@/components/ui/RatioWidget";
 import { useStoreList, useStoreReady } from "@/lib/useStore";
 import { demandStore, pkwtReviewStore, projectStore, taktStore, utilPoolStore, vokasiStore, zparStore } from "@/lib/repo";
 import {
@@ -277,6 +278,13 @@ export default function DashboardPage() {
               />
             </div>
           </Card>
+
+          {/* 1b. Rasio Permanen:Kontrak:Vokasi — follows the same org filter as
+              everything else on this page; unfiltered = whole plant. */}
+          <RatioWidget
+            counts={{ permanen: permanenCount.length, kontrak: kontrakCount.length, vokasi: vokasiActive.length }}
+            scopeLabel={activeOrgFilterCount > 0 ? `${activeOrgFilterCount} filter aktif` : "Seluruh plant"}
+          />
 
           {/* 2. Manpower Movement */}
           <ManpowerMovementBlock

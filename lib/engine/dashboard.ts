@@ -466,6 +466,7 @@ const ORIGIN_LABELS: Record<DemandOriginType, string> = {
   TaktUp: "Takt Time",
   Resign: "Resign",
   Pension: "Pension",
+  PensionDini: "Pension Dini",
   GST: "GST",
   Unfit: "Unfit",
   Others: "Others",
@@ -550,7 +551,7 @@ export function reviewBatchesNeedingAction(reviews: PkwtReview[]): ActionBatch[]
     const visibleRemaining = group.filter((r) => r.review_result === "" && sisaHari(reviewReminderDate(r.tgl_review)) <= 0);
     if (visibleRemaining.length === 0) continue;
     const dueDate = mostUrgent(visibleRemaining, (r) => reviewFillDeadline(r.tgl_review));
-    batches.push({ month, monthLabel: monthLabelOf(month), done, total, dueDate, daysRemaining: sisaHari(dueDate), href: "/enrollment" });
+    batches.push({ month, monthLabel: monthLabelOf(month), done, total, dueDate, daysRemaining: sisaHari(dueDate), href: "/demand" });
   }
   return batches.sort((a, b) => a.month.localeCompare(b.month));
 }
@@ -579,7 +580,7 @@ export function candidateBatchesNeedingAction(demands: Demand[], category: Deman
     );
     if (visibleRemaining.length === 0) continue;
     const dueDate = mostUrgent(visibleRemaining, (d) => fulfillmentDeadline(demandTargetDate(d), d.fs_status));
-    batches.push({ month, monthLabel: monthLabelOf(month), done, total, dueDate, daysRemaining: sisaHari(dueDate), href: "/supply-demand" });
+    batches.push({ month, monthLabel: monthLabelOf(month), done, total, dueDate, daysRemaining: sisaHari(dueDate), href: "/demand" });
   }
   return batches.sort((a, b) => a.month.localeCompare(b.month));
 }
@@ -603,7 +604,7 @@ export function shopConfirmBatchesNeedingAction(demands: Demand[], category: Dem
     if (done >= total) continue;
     const remaining = group.filter((d) => !d.shop_confirmed_date);
     const dueDate = mostUrgent(remaining, (d) => demandTargetDate(d));
-    batches.push({ month, monthLabel: monthLabelOf(month), done, total, dueDate, daysRemaining: sisaHari(dueDate), href: "/supply-demand" });
+    batches.push({ month, monthLabel: monthLabelOf(month), done, total, dueDate, daysRemaining: sisaHari(dueDate), href: "/demand" });
   }
   return batches.sort((a, b) => a.month.localeCompare(b.month));
 }

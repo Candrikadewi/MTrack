@@ -115,6 +115,7 @@ export type DemandOriginType =
   | "TaktUp"
   | "Resign"
   | "Pension"
+  | "PensionDini"
   | "GST"
   | "Unfit"
   | "Others"

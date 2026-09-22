@@ -49,6 +49,7 @@ export function demandStatusLabel(d: Demand): string {
     TaktUp: "Takt Up",
     Resign: "Resign",
     Pension: "Pensiun",
+    PensionDini: "Pensiun Dini",
     GST: "GST",
     Unfit: "Unfit",
     Others: d.origin_label || "Others",

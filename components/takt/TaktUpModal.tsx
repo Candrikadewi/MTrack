@@ -4,6 +4,7 @@ import { Modal } from "@/components/ui/Modal";
 import { Field, Input, Select } from "@/components/ui/Form";
 import { Button } from "@/components/ui/Button";
 import { CompositionRowsEditor, emptyCompositionRow, type CompositionRow } from "@/components/takt/CompositionRowsEditor";
+import { TaktSecondsField } from "@/components/takt/TaktSecondsField";
 import { createTaktUp } from "@/lib/engine/actions";
 import type { Plant, ProjectMpNeedRow } from "@/lib/types";
 
@@ -50,22 +51,8 @@ export function TaktUpModal({ open, onClose }: { open: boolean; onClose: () => v
           <Field label="Tanggal">
             <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
           </Field>
-          <Field label="Takt Before (menit)">
-            <Input
-              type="number"
-              step="0.01"
-              value={taktBefore}
-              onChange={(e) => setTaktBefore(Number(e.target.value))}
-            />
-          </Field>
-          <Field label="Takt After (menit)">
-            <Input
-              type="number"
-              step="0.01"
-              value={taktAfter}
-              onChange={(e) => setTaktAfter(Number(e.target.value))}
-            />
-          </Field>
+          <TaktSecondsField label="Takt Before (detik)" valueMinutes={taktBefore} onChange={setTaktBefore} />
+          <TaktSecondsField label="Takt After (detik)" valueMinutes={taktAfter} onChange={setTaktAfter} />
         </div>
 
         <div>

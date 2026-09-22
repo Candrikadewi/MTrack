@@ -6,13 +6,23 @@ import { Button } from "@/components/ui/Button";
 import { createManualDemand, getActiveEmployeeByNoreg } from "@/lib/engine/actions";
 import type { DemandCategory, DemandOriginType } from "@/lib/types";
 
-const ORIGINS: Extract<DemandOriginType, "Resign" | "Pension" | "Unfit" | "GST" | "Others">[] = [
+const ORIGINS: Extract<DemandOriginType, "Resign" | "Pension" | "PensionDini" | "Unfit" | "GST" | "Others">[] = [
+  "GST",
+  "Unfit",
   "Resign",
   "Pension",
-  "Unfit",
-  "GST",
+  "PensionDini",
   "Others",
 ];
+
+const ORIGIN_LABEL: Record<(typeof ORIGINS)[number], string> = {
+  GST: "GST",
+  Unfit: "Unfit",
+  Resign: "Resign",
+  Pension: "Pension",
+  PensionDini: "Pension Dini",
+  Others: "Other",
+};
 
 const CATEGORY_LABEL: Record<DemandCategory, string> = { Vokasi: "Vokasi", PKWT: "Kontrak (PKWT)" };
 
@@ -23,8 +33,13 @@ export function ManualDemandModal({
 }: {
   open: boolean;
   onClose: () => void;
-  defaultCategory: DemandCategory;
+  /** Fixed category when opened from a PKWT/Vokasi-scoped context (old
+   * Enrollment page). Omit to let the user pick it in-modal — the
+   * consolidated Demand page's Manual tab isn't scoped to either tab. */
+  defaultCategory?: DemandCategory;
 }) {
+  const [pickedCategory, setPickedCategory] = useState<DemandCategory>(defaultCategory ?? "PKWT");
+  const category = defaultCategory ?? pickedCategory;
   const [originType, setOriginType] = useState<(typeof ORIGINS)[number]>("Resign");
   const [othersReason, setOthersReason] = useState("");
   const [outgoingNoreg, setOutgoingNoreg] = useState("");
@@ -64,7 +79,7 @@ export function ManualDemandModal({
   function submit() {
     if (!outgoingNoreg || !dept) return;
     createManualDemand({
-      category: defaultCategory,
+      category,
       origin_type: originType,
       origin_label: originType === "Others" ? othersReason : undefined,
       outgoing_noreg: outgoingNoreg,
@@ -81,23 +96,30 @@ export function ManualDemandModal({
     <Modal open={open} onClose={onClose} title="+ Manual Demand">
       <div className="space-y-4">
         <div className="grid grid-cols-2 gap-4">
-          <Field label="Kategori">
-            <div className="flex h-[38px] items-center rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300">
-              {CATEGORY_LABEL[defaultCategory]}
-            </div>
+          <Field label="Rencana Pemenuhan (Status MP)">
+            {defaultCategory ? (
+              <div className="flex h-[38px] items-center rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300">
+                {CATEGORY_LABEL[defaultCategory]}
+              </div>
+            ) : (
+              <Select value={pickedCategory} onChange={(e) => setPickedCategory(e.target.value as DemandCategory)}>
+                <option value="PKWT">{CATEGORY_LABEL.PKWT}</option>
+                <option value="Vokasi">{CATEGORY_LABEL.Vokasi}</option>
+              </Select>
+            )}
           </Field>
-          <Field label="Alasan (Origin)">
+          <Field label="Kategori">
             <Select value={originType} onChange={(e) => setOriginType(e.target.value as (typeof ORIGINS)[number])}>
               {ORIGINS.map((o) => (
                 <option key={o} value={o}>
-                  {o}
+                  {ORIGIN_LABEL[o]}
                 </option>
               ))}
             </Select>
           </Field>
         </div>
         {originType === "Others" && (
-          <Field label="Sebutkan Alasan">
+          <Field label="Sebutkan Alasan (catatan satu kali, bukan opsi baru permanen)">
             <Input value={othersReason} onChange={(e) => setOthersReason(e.target.value)} placeholder="Alasan lainnya..." />
           </Field>
         )}

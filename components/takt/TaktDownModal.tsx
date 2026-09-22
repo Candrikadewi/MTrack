@@ -9,6 +9,7 @@ import { FullWidthTabs } from "@/components/ui/Tabs";
 import { MultiSelect } from "@/components/ui/MultiSelect";
 import { TableWrap, Th, Td, EmptyState } from "@/components/ui/Table";
 import { CompositionRowsEditor, emptyCompositionRow, type CompositionRow } from "@/components/takt/CompositionRowsEditor";
+import { TaktSecondsField } from "@/components/takt/TaktSecondsField";
 import { getActiveSnapshot, vokasiStore } from "@/lib/repo";
 import { createTaktDown, updateTaktDown } from "@/lib/engine/actions";
 import type { MpStatusKategori, Plant, TaktCase, TaktDownPerson, TaktDownPlanRow, UtilPoolEntry } from "@/lib/types";
@@ -247,12 +248,8 @@ export function TaktDownModal({
           <Field label="Tanggal">
             <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
           </Field>
-          <Field label="Takt Before (menit)">
-            <Input type="number" step="0.01" value={taktBefore} onChange={(e) => setTaktBefore(Number(e.target.value))} />
-          </Field>
-          <Field label="Takt After (menit)">
-            <Input type="number" step="0.01" value={taktAfter} onChange={(e) => setTaktAfter(Number(e.target.value))} />
-          </Field>
+          <TaktSecondsField label="Takt Before (detik)" valueMinutes={taktBefore} onChange={setTaktBefore} />
+          <TaktSecondsField label="Takt After (detik)" valueMinutes={taktAfter} onChange={setTaktAfter} />
         </div>
 
         <div className="flex items-center gap-2">

@@ -4,11 +4,11 @@ import { usePathname } from "next/navigation";
 import {
   Upload,
   LayoutDashboard,
-  ClipboardList,
   ArrowLeftRight,
+  Boxes,
+  History,
   FolderKanban,
   Gauge,
-  Users2,
   FileStack,
   LogOut,
 } from "lucide-react";
@@ -20,23 +20,21 @@ import { BrandMark } from "@/components/ui/BrandMark";
 const NAV_TOP = [
   { href: "/upload", label: "Upload Center", icon: Upload },
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/demand", label: "Demand", icon: ArrowLeftRight },
+  { href: "/supply", label: "Supply", icon: Boxes },
+  { href: "/history", label: "History", icon: History },
 ];
 
-/** These three menus are where demand actually gets entered/generated (PKWT
- * terminate reviews, project MP needs, takt-driven needs) — grouped visually
- * so it's clear they feed the Demand Pool page below, not the other way
- * around. */
-const NAV_DEMAND_SOURCES = [
-  { href: "/enrollment", label: "Enrollment Monitoring", icon: ClipboardList },
-  { href: "/projects", label: "Project Monitoring", icon: FolderKanban },
-  { href: "/takt", label: "Takt Time Monitoring", icon: Gauge },
+/** Project/Takt Time still own the batch-level Edit/Hapus/detail management
+ * views (registering rows after the fact, deleting a whole case) that the
+ * Demand/Supply "Ringkasan per Batch" tiles don't replicate — kept as a
+ * secondary "Kelola" group rather than promoted to the primary nav. */
+const NAV_MANAGE = [
+  { href: "/projects", label: "Kelola Project", icon: FolderKanban },
+  { href: "/takt", label: "Kelola Takt Time", icon: Gauge },
 ];
 
-const NAV_BOTTOM = [
-  { href: "/supply-demand", label: "Demand Pool", icon: ArrowLeftRight },
-  { href: "/util-pool", label: "Supply Pool", icon: Users2 },
-  { href: "/handover", label: "Handover Form", icon: FileStack },
-];
+const NAV_BOTTOM = [{ href: "/handover", label: "Handover Form", icon: FileStack }];
 
 const ROLE_LABEL: Record<Role, string> = { admin: "Admin", shop: "Shop", hr: "HR", guest: "Guest" };
 const ROLE_TONE: Record<Role, string> = {
@@ -73,7 +71,7 @@ export function Sidebar({ role, email }: { role: Role; email: string }) {
   const pathname = usePathname();
   const isActive = (href: string) => pathname === href || pathname?.startsWith(href + "/");
   const navTop = NAV_TOP.filter((item) => canAccessModule(role, item.href));
-  const navDemandSources = NAV_DEMAND_SOURCES.filter((item) => canAccessModule(role, item.href));
+  const navManage = NAV_MANAGE.filter((item) => canAccessModule(role, item.href));
   const navBottom = NAV_BOTTOM.filter((item) => canAccessModule(role, item.href));
 
   return (
@@ -92,13 +90,13 @@ export function Sidebar({ role, email }: { role: Role; email: string }) {
           <NavLink key={item.href} item={item} isActive={isActive(item.href)} />
         ))}
 
-        {navDemandSources.length > 0 && (
+        {navManage.length > 0 && (
           <div className="my-1.5 rounded-xl border border-dashed border-slate-200 p-1.5 dark:border-slate-700">
             <div className="px-2 pb-1.5 pt-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-              Input &amp; Monitoring Demand
+              Kelola
             </div>
             <div className="space-y-1">
-              {navDemandSources.map((item) => (
+              {navManage.map((item) => (
                 <NavLink key={item.href} item={item} isActive={isActive(item.href)} />
               ))}
             </div>

@@ -20,6 +20,7 @@ interface Candidate {
 }
 
 export function KaizenModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [activity, setActivity] = useState("");
   const [releaseDate, setReleaseDate] = useState(new Date().toISOString().slice(0, 10));
   const [mode, setMode] = useState<"checklist" | "cari" | "bulk">("checklist");
   const [selected, setSelected] = useState<Candidate[]>([]);
@@ -146,6 +147,7 @@ export function KaizenModal({ open, onClose }: { open: boolean; onClose: () => v
   function reset() {
     setSelected([]);
     setQuery("");
+    setActivity("");
     setReleaseDate(new Date().toISOString().slice(0, 10));
     setBulkText("");
     setBulkResult(null);
@@ -158,6 +160,7 @@ export function KaizenModal({ open, onClose }: { open: boolean; onClose: () => v
     if (selected.length === 0) return;
     createKaizenSupply({
       releaseDate,
+      activity: activity.trim() || undefined,
       persons: selected.map((s) => ({ noreg: s.noreg, nama: s.nama, type: s.type, div: s.div, dept: s.dept })),
     });
     reset();
@@ -168,7 +171,10 @@ export function KaizenModal({ open, onClose }: { open: boolean; onClose: () => v
     <Modal open={open} onClose={onClose} title="Kaizen: Tambah Supply dari Hasil Improvement" width="max-w-5xl">
       <div className="space-y-4">
         <div className="grid grid-cols-4 gap-4">
-          <Field label="Tanggal Release">
+          <Field label="Activity">
+            <Input value={activity} onChange={(e) => setActivity(e.target.value)} placeholder="Nama improvement/aktivitas Kaizen" />
+          </Field>
+          <Field label="Tanggal Rilis">
             <Input type="date" value={releaseDate} onChange={(e) => setReleaseDate(e.target.value)} />
           </Field>
         </div>

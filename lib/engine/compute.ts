@@ -168,3 +168,22 @@ export function contractRemainingLabel(contractEnd: string | null): string {
 export function poolLeadTimeDays(enteredPoolDate: string): number {
   return -sisaHari(enteredPoolDate);
 }
+
+/** Takt time is stored as decimal minutes (TaktCase.takt_before/after), but
+ * shop floor thinks in seconds — these convert for the input UI, which shows
+ * a seconds field with a live "mm.ss menit" (clock notation, not decimal)
+ * preview alongside it. */
+export function decimalMinutesToSeconds(decimalMinutes: number): number {
+  return Math.round((decimalMinutes || 0) * 60);
+}
+
+export function secondsToDecimalMinutes(seconds: number): number {
+  return (seconds || 0) / 60;
+}
+
+export function formatMinutesSecondsClock(seconds: number): string {
+  const total = Math.max(0, Math.round(seconds || 0));
+  const mins = Math.floor(total / 60);
+  const secs = total % 60;
+  return `${mins}.${String(secs).padStart(2, "0")}`;
+}

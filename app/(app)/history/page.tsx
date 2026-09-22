@@ -1,9 +1,9 @@
 import { redirect } from "next/navigation";
 import { getCurrentProfile } from "@/lib/auth";
-import { UtilPoolPageClient } from "./UtilPoolPageClient";
+import { HistoryPageClient } from "./HistoryPageClient";
 
-export default async function UtilPoolPage() {
+export default async function HistoryPage() {
   const profile = await getCurrentProfile();
   if (!profile || profile.role === "guest") redirect("/dashboard");
-  return <UtilPoolPageClient />;
+  return <HistoryPageClient />;
 }

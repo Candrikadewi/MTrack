@@ -198,7 +198,7 @@ export function ensureVokasiEndedDemands(): void {
 
 export function createManualDemand(input: {
   category: DemandCategory;
-  origin_type: Extract<DemandOriginType, "Resign" | "Pension" | "GST" | "Unfit" | "Others" | "Manual">;
+  origin_type: Extract<DemandOriginType, "Resign" | "Pension" | "PensionDini" | "GST" | "Unfit" | "Others" | "Manual">;
   origin_label?: string; // free-text reason when origin_type = "Others"
   outgoing_noreg: string;
   outgoing_nama: string;
@@ -844,9 +844,11 @@ export function pushToUtilPool(input: {
  * every other Supply Pool source (see estimateContractEnd). */
 export function createKaizenSupply(input: {
   releaseDate: string;
+  activity?: string;
   persons: { noreg: string; nama: string; type: MpStatusKategori; div: string; dept: string }[];
 }): UtilPoolEntry[] {
   const year = input.releaseDate.slice(0, 4);
+  const activitySuffix = input.activity ? ` (${input.activity})` : "";
   return input.persons.map((p) => {
     const contractEnd = estimateContractEnd(p.noreg, p.type);
     return pushToUtilPool({
@@ -854,7 +856,7 @@ export function createKaizenSupply(input: {
       nama: p.nama,
       type: p.type,
       source: "Kaizen",
-      source_label: `Kaizen ${year} - ${p.div}`,
+      source_label: `Kaizen ${year} - ${p.div}${activitySuffix}`,
       prev_div: p.div,
       prev_dept: p.dept,
       contract_end: contractEnd,
