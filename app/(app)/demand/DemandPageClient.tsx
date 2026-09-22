@@ -372,7 +372,6 @@ export function DemandPageClient() {
               onDeptsChange={setVokasiDepts}
             />
           )}
-          <ManualDemandModal open={manualOpen} onClose={() => setManualOpen(false)} />
         </CollapsibleSection>
       )}
 
@@ -426,10 +425,11 @@ export function DemandPageClient() {
               </div>
             )}
           </div>
-          <NewProjectModal open={projectModalOpen} onClose={() => setProjectModalOpen(false)} />
-          <TaktUpModal open={taktUpOpen} onClose={() => setTaktUpOpen(false)} />
+          {projectModalOpen && <NewProjectModal open onClose={() => setProjectModalOpen(false)} />}
+          {taktUpOpen && <TaktUpModal open onClose={() => setTaktUpOpen(false)} />}
         </Card>
       )}
+      {role === "admin" && manualOpen && <ManualDemandModal open onClose={() => setManualOpen(false)} />}
 
       {/* 4. Detail dan Mapping Demand — bulan berjalan */}
       <SectionHeading
