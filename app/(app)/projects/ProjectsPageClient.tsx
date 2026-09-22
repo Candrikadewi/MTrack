@@ -25,7 +25,9 @@ export function ProjectsPageClient() {
     if (role === "admin") autoProjectFinishCheck();
   }, [role]);
 
-  const projects = useStoreList(projectStore).sort((a, b) => b.start_date.localeCompare(a.start_date));
+  // Copy before sort — list() returns the store's live cache array, and
+  // sorting it in place would mutate that shared reference during render.
+  const projects = [...useStoreList(projectStore)].sort((a, b) => b.start_date.localeCompare(a.start_date));
 
   return (
     <div className="space-y-6">

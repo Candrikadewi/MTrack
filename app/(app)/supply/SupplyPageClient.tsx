@@ -97,7 +97,11 @@ export function SupplyPageClient() {
   const role = useRole();
   const [kaizenOpen, setKaizenOpen] = useState(false);
   const [taktDownOpen, setTaktDownOpen] = useState(false);
-  const entries = useStoreList(utilPoolStore).sort((a, b) => b.entered_pool_date.localeCompare(a.entered_pool_date));
+  // `.sort()` on the array useStoreList returns would mutate the store's
+  // own cache in place (list() hands back the live reference, not a copy)
+  // — copy first, or every other reader of utilPoolStore sees its order
+  // silently reshuffled mid-render.
+  const entries = [...useStoreList(utilPoolStore)].sort((a, b) => b.entered_pool_date.localeCompare(a.entered_pool_date));
   const taktCases = useStoreList(taktStore);
 
   const batchCategories = useMemo(() => buildSupplyBatchCategories(entries, taktCases), [entries, taktCases]);

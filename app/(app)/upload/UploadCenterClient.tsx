@@ -37,7 +37,9 @@ function zparPeriodOptions(): string[] {
 }
 
 export function UploadCenterClient() {
-  const snapshots = useStoreList(zparStore).sort((a, b) => b.upload_date.localeCompare(a.upload_date));
+  // Copy before sort — list() returns the store's live cache array, and
+  // sorting it in place would mutate that shared reference during render.
+  const snapshots = [...useStoreList(zparStore)].sort((a, b) => b.upload_date.localeCompare(a.upload_date));
   const vokasiRecords = useStoreList(vokasiStore);
 
   const takenPeriods = new Set(snapshots.map((s) => s.period));

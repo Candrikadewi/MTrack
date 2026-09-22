@@ -30,7 +30,9 @@ export function TaktPageClient() {
   const [editingDown, setEditingDown] = useState<TaktCase | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
-  const cases = useStoreList(taktStore).sort((a, b) => b.date.localeCompare(a.date));
+  // Copy before sort — list() returns the store's live cache array, and
+  // sorting it in place would mutate that shared reference during render.
+  const cases = [...useStoreList(taktStore)].sort((a, b) => b.date.localeCompare(a.date));
   const demands = useStoreList(demandStore);
   const utilPool = useStoreList(utilPoolStore);
 

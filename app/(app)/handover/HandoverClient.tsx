@@ -15,7 +15,9 @@ import { useSessionState } from "@/lib/useSessionState";
 
 export function HandoverClient() {
   const snapshots = useStoreList(zparStore);
-  const forms = useStoreList(handoverStore).sort((a, b) => b.created_at.localeCompare(a.created_at));
+  // Copy before sort — list() returns the store's live cache array, and
+  // sorting it in place would mutate that shared reference during render.
+  const forms = [...useStoreList(handoverStore)].sort((a, b) => b.created_at.localeCompare(a.created_at));
   const activeSnapshot = snapshots.find((s) => s.is_active);
   const depts = deptsOf(activeSnapshot?.employees ?? []);
 
