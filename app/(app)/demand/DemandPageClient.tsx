@@ -117,7 +117,13 @@ function buildDemandBatchCategories(
   const projectGroups = groupBy(projectDemands, (d) => d.origin_ref);
   const projectBatches = Array.from(projectGroups.entries()).map(([ref, items]) => {
     const p = projects.find((x) => x.id === ref);
-    return { id: ref, label: p?.name ?? "Project", meta: p ? `${fmtDate(p.start_date)} — ${fmtDate(p.end_date)}` : undefined, count: items.length };
+    return {
+      id: ref,
+      label: p?.name ?? "Project",
+      meta: p ? `${fmtDate(p.start_date)} — ${fmtDate(p.end_date)}` : undefined,
+      count: items.length,
+      href: "/projects",
+    };
   });
 
   const taktUpDemands = open.filter((d) => d.origin_type === "TaktUp");

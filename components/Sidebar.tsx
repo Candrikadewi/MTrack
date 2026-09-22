@@ -7,8 +7,6 @@ import {
   ArrowLeftRight,
   Boxes,
   History,
-  FolderKanban,
-  Gauge,
   FileStack,
   LogOut,
 } from "lucide-react";
@@ -25,15 +23,10 @@ const NAV_TOP = [
   { href: "/history", label: "History", icon: History },
 ];
 
-/** Project/Takt Time still own the batch-level Edit/Hapus/detail management
- * views (registering rows after the fact, deleting a whole case) that the
- * Demand/Supply "Ringkasan per Batch" tiles don't replicate — kept as a
- * secondary "Kelola" group rather than promoted to the primary nav. */
-const NAV_MANAGE = [
-  { href: "/projects", label: "Kelola Project", icon: FolderKanban },
-  { href: "/takt", label: "Kelola Takt Time", icon: Gauge },
-];
-
+// Project/Takt Time's own Edit/Hapus is now reached from the "Kelola →"
+// link on their batch rows in Demand/Supply's Ringkasan per Batch tiles
+// (see components/ui/BatchTileRow.tsx) instead of a separate menu — the
+// /projects and /takt routes still exist, just not in this nav.
 const NAV_BOTTOM = [{ href: "/handover", label: "Handover Form", icon: FileStack }];
 
 const ROLE_LABEL: Record<Role, string> = { admin: "Admin", shop: "Shop", hr: "HR", guest: "Guest" };
@@ -71,7 +64,6 @@ export function Sidebar({ role, email }: { role: Role; email: string }) {
   const pathname = usePathname();
   const isActive = (href: string) => pathname === href || pathname?.startsWith(href + "/");
   const navTop = NAV_TOP.filter((item) => canAccessModule(role, item.href));
-  const navManage = NAV_MANAGE.filter((item) => canAccessModule(role, item.href));
   const navBottom = NAV_BOTTOM.filter((item) => canAccessModule(role, item.href));
 
   return (
@@ -89,19 +81,6 @@ export function Sidebar({ role, email }: { role: Role; email: string }) {
         {navTop.map((item) => (
           <NavLink key={item.href} item={item} isActive={isActive(item.href)} />
         ))}
-
-        {navManage.length > 0 && (
-          <div className="my-1.5 rounded-xl border border-dashed border-slate-200 p-1.5 dark:border-slate-700">
-            <div className="px-2 pb-1.5 pt-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-              Kelola
-            </div>
-            <div className="space-y-1">
-              {navManage.map((item) => (
-                <NavLink key={item.href} item={item} isActive={isActive(item.href)} />
-              ))}
-            </div>
-          </div>
-        )}
 
         {navBottom.map((item) => (
           <NavLink key={item.href} item={item} isActive={isActive(item.href)} />

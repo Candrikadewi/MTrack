@@ -11,12 +11,12 @@ import { BatchTileRow, type BatchTileCategory } from "@/components/ui/BatchTileR
 import { KaizenModal } from "@/components/util-pool/KaizenModal";
 import { TaktDownModal } from "@/components/takt/TaktDownModal";
 import { useStoreList } from "@/lib/useStore";
-import { utilPoolStore } from "@/lib/repo";
+import { taktStore, utilPoolStore } from "@/lib/repo";
 import { contractRemainingLabel, contractUrgency, fmtDate, poolLeadTimeDays } from "@/lib/engine/compute";
 import { getActiveEmployeeByNoreg, naturalRelease } from "@/lib/engine/actions";
 import { useRole } from "@/lib/RoleContext";
 import { useSessionState } from "@/lib/useSessionState";
-import type { UtilPoolEntry, UtilPoolSource } from "@/lib/types";
+import type { TaktCase, UtilPoolEntry, UtilPoolSource } from "@/lib/types";
 
 const urgencyClass: Record<string, string> = {
   red: "text-red-600 font-semibold",
@@ -40,31 +40,55 @@ function posisiFor(noreg: string): string {
   return getActiveEmployeeByNoreg(noreg)?.posisi_struktural || "-";
 }
 
-function buildSupplyBatchCategories(entries: UtilPoolEntry[]): BatchTileCategory[] {
-  function tileFor(source: UtilPoolSource, tone: BatchTileCategory["tone"]): BatchTileCategory {
-    const sourceEntries = entries.filter((e) => e.source === source);
-    const openEntries = sourceEntries.filter((e) => e.status === "Open");
-    const groups = new Map<string, UtilPoolEntry[]>();
-    for (const e of sourceEntries) {
-      const list = groups.get(e.source_label) ?? [];
-      list.push(e);
-      groups.set(e.source_label, list);
-    }
-    const batches = Array.from(groups.entries())
-      .map(([label, list]) => ({
-        id: label,
-        label,
-        meta: `${list.filter((e) => e.status === "Assigned").length} diutilize dari ${list.length}`,
-        count: list.filter((e) => e.status === "Open").length,
-      }))
-      .sort((a, b) => b.count - a.count);
-    return { key: source, label: SOURCE_TYPE_LABELS[source], count: openEntries.length, tone, batches };
+/** ProjectFinish/Kaizen entries have no single owning record to group by —
+ * source_label (e.g. "Kaizen 2026 - Assembly (activity)") is the closest
+ * thing to a batch id, and there's no dedicated Edit/Hapus page for either,
+ * so no href. Takt Down does have an owning TaktCase (and a real Edit/Hapus
+ * page at /takt) — grouped by case id instead, since several Takt Down
+ * cases at the same plant would otherwise collide on the same source_label
+ * ("Takt Down Plant 1"). */
+function tileBySourceLabel(entries: UtilPoolEntry[], source: UtilPoolSource, tone: BatchTileCategory["tone"]): BatchTileCategory {
+  const sourceEntries = entries.filter((e) => e.source === source);
+  const openEntries = sourceEntries.filter((e) => e.status === "Open");
+  const groups = new Map<string, UtilPoolEntry[]>();
+  for (const e of sourceEntries) {
+    const list = groups.get(e.source_label) ?? [];
+    list.push(e);
+    groups.set(e.source_label, list);
   }
-  return [
-    tileFor("TaktDown", "blue"),
-    tileFor("ProjectFinish", "violet"),
-    tileFor("Kaizen", "green"),
-  ];
+  const batches = Array.from(groups.entries())
+    .map(([label, list]) => ({
+      id: label,
+      label,
+      meta: `${list.filter((e) => e.status === "Assigned").length} diutilize dari ${list.length}`,
+      count: list.filter((e) => e.status === "Open").length,
+    }))
+    .sort((a, b) => b.count - a.count);
+  return { key: source, label: SOURCE_TYPE_LABELS[source], count: openEntries.length, tone, batches };
+}
+
+function tileForTaktDown(entries: UtilPoolEntry[], taktCases: TaktCase[]): BatchTileCategory {
+  const downCases = taktCases.filter((c) => c.category === "down");
+  const entryById = new Map(entries.map((e) => [e.id, e]));
+  const batches = downCases
+    .map((c) => {
+      const linked = c.released_pool_ids.map((id) => entryById.get(id)).filter((e): e is UtilPoolEntry => Boolean(e));
+      return {
+        id: c.id,
+        label: `Takt Down — ${c.plant}`,
+        meta: fmtDate(c.date),
+        count: linked.filter((e) => e.status === "Open").length,
+        href: "/takt",
+      };
+    })
+    .filter((b) => b.count > 0)
+    .sort((a, b) => b.count - a.count);
+  const totalOpen = batches.reduce((sum, b) => sum + b.count, 0);
+  return { key: "TaktDown", label: SOURCE_TYPE_LABELS.TaktDown, count: totalOpen, tone: "blue", batches };
+}
+
+function buildSupplyBatchCategories(entries: UtilPoolEntry[], taktCases: TaktCase[]): BatchTileCategory[] {
+  return [tileForTaktDown(entries, taktCases), tileBySourceLabel(entries, "ProjectFinish", "violet"), tileBySourceLabel(entries, "Kaizen", "green")];
 }
 
 export function SupplyPageClient() {
@@ -72,8 +96,9 @@ export function SupplyPageClient() {
   const [kaizenOpen, setKaizenOpen] = useState(false);
   const [taktDownOpen, setTaktDownOpen] = useState(false);
   const entries = useStoreList(utilPoolStore).sort((a, b) => b.entered_pool_date.localeCompare(a.entered_pool_date));
+  const taktCases = useStoreList(taktStore);
 
-  const batchCategories = useMemo(() => buildSupplyBatchCategories(entries), [entries]);
+  const batchCategories = useMemo(() => buildSupplyBatchCategories(entries, taktCases), [entries, taktCases]);
 
   const [inputTab, setInputTab] = useSessionState<"taktdown" | "kaizen">("supply.input.tab", "taktdown");
 

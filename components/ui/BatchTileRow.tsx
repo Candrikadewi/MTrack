@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import Link from "next/link";
 import { ChevronDown } from "lucide-react";
 import { Badge, type Tone } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/Table";
@@ -10,6 +11,10 @@ export interface BatchSummary {
   meta?: string;
   count: number;
   tone?: Tone;
+  /** Where to edit/delete this batch — the list page that still owns that
+   * capability (e.g. /projects, /takt) now that there's no separate "Kelola"
+   * menu entry pointing at it. Omit when the batch has no such page. */
+  href?: string;
 }
 
 export interface BatchTileCategory {
@@ -93,7 +98,17 @@ function BatchBreakdown({ category }: { category: BatchTileCategory }) {
             <div className="font-medium text-slate-700 dark:text-slate-200">{b.label}</div>
             {b.meta && <div className="text-xs text-slate-400">{b.meta}</div>}
           </div>
-          <Badge tone={b.tone ?? category.tone}>{b.count}</Badge>
+          <div className="flex items-center gap-2">
+            {b.href && (
+              <Link
+                href={b.href}
+                className="text-xs font-medium text-blue-600 hover:underline dark:text-blue-400"
+              >
+                Kelola →
+              </Link>
+            )}
+            <Badge tone={b.tone ?? category.tone}>{b.count}</Badge>
+          </div>
         </div>
       ))}
       {hiddenCount > 0 && (

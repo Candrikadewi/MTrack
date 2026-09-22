@@ -9,8 +9,6 @@ const NAV = [
   { href: "/demand", label: "Demand" },
   { href: "/supply", label: "Supply" },
   { href: "/history", label: "History" },
-  { href: "/projects", label: "Kelola Project" },
-  { href: "/takt", label: "Kelola Takt Time" },
   { href: "/handover", label: "Handover Form" },
 ];
 
