@@ -8,6 +8,8 @@ import { MultiSelect } from "@/components/ui/MultiSelect";
 import { Select } from "@/components/ui/Form";
 import { EmptyState, TableWrap, Td, Th } from "@/components/ui/Table";
 import { BatchTileRow, type BatchTileCategory } from "@/components/ui/BatchTileRow";
+import { SectionHeading, NumberBadge } from "@/components/ui/SectionHeading";
+import { SegmentedSwitch } from "@/components/ui/SegmentedSwitch";
 import { KaizenModal } from "@/components/util-pool/KaizenModal";
 import { TaktDownModal } from "@/components/takt/TaktDownModal";
 import { useStoreList } from "@/lib/useStore";
@@ -195,11 +197,18 @@ export function SupplyPageClient() {
       </div>
 
       {/* 1. Ringkasan per Batch */}
+      <SectionHeading n={1} title="Ringkasan per Batch" subtitle="Klik tile untuk lihat rincian batch." />
       <BatchTileRow categories={batchCategories} />
 
       {/* 2. Input Supply Baru */}
       {role === "admin" && (
-        <Card title="Input Supply Baru">
+        <Card
+          title={
+            <span className="flex items-center gap-2.5">
+              <NumberBadge n={2} /> Input Supply Baru
+            </span>
+          }
+        >
           <div className="space-y-4">
             <FullWidthTabs
               tabs={[
@@ -234,20 +243,26 @@ export function SupplyPageClient() {
         </Card>
       )}
 
-      {/* 3. Detail — bulan berjalan */}
+      {/* 3. Detail Supply — bulan berjalan */}
+      <SectionHeading
+        n={3}
+        title="Detail Supply"
+        subtitle="Bulan berjalan — pilih Kontrak/Vokasi untuk menyaring."
+        action={
+          <SegmentedSwitch
+            options={[
+              { value: "kontrak", label: "Kontrak" },
+              { value: "vokasi", label: "Vokasi" },
+            ]}
+            value={kontrapVokasi}
+            onChange={setKontrapVokasi}
+          />
+        }
+      />
       {entries.length === 0 ? (
         <EmptyState text="Supply Pool kosong." />
       ) : (
         <>
-          <FullWidthTabs
-            tabs={[
-              { key: "kontrak", label: "Kontrak" },
-              { key: "vokasi", label: "Vokasi" },
-            ]}
-            active={kontrapVokasi}
-            onChange={(k) => setKontrapVokasi(k as typeof kontrapVokasi)}
-          />
-
           <FullWidthTabs
             tabs={[
               { key: "open", label: `Open Supply (${openAllEntries.length})` },

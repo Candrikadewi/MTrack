@@ -12,6 +12,8 @@ import { MultiSelect } from "@/components/ui/MultiSelect";
 import { BatchTileRow, type BatchTileCategory } from "@/components/ui/BatchTileRow";
 import { RatioWidget, RatioScenarioCompare } from "@/components/ui/RatioWidget";
 import { CollapsibleSection } from "@/components/ui/Collapsible";
+import { SectionHeading, NumberBadge } from "@/components/ui/SectionHeading";
+import { SegmentedSwitch } from "@/components/ui/SegmentedSwitch";
 import { NoregInput, DateInput } from "@/components/enrollment/NoregInput";
 import { ReviewSection, VokasiEndedSection } from "@/components/enrollment/ReviewSections";
 import { ManualDemandModal } from "@/components/enrollment/ManualDemandModal";
@@ -307,12 +309,17 @@ export function DemandPageClient() {
       </div>
 
       {/* 1. Ringkasan per Batch */}
+      <SectionHeading n={1} title="Ringkasan per Batch" subtitle="Klik tile untuk lihat rincian batch." />
       <BatchTileRow categories={batchCategories} />
 
       {/* 2. Enrollment Review — admin-only, folded by default */}
       {role === "admin" && (
         <CollapsibleSection
-          title="Enrollment Review"
+          title={
+            <span className="flex items-center gap-2.5">
+              <NumberBadge n={2} /> Enrollment Review
+            </span>
+          }
           subtitle="Review PKWT (Continue/Terminate) dan Vokasi auto-Ended. Candidate mapping ada di Detail Demand di bawah."
         >
           <RatioWidget
@@ -371,7 +378,13 @@ export function DemandPageClient() {
 
       {/* 3. Input Demand Baru */}
       {role === "admin" && (
-        <Card title="Input Demand Baru">
+        <Card
+          title={
+            <span className="flex items-center gap-2.5">
+              <NumberBadge n={3} /> Input Demand Baru
+            </span>
+          }
+        >
           <div className="space-y-4">
             <FullWidthTabs
               tabs={[
@@ -418,18 +431,25 @@ export function DemandPageClient() {
         </Card>
       )}
 
-      {/* 4. Detail Demand — bulan berjalan */}
-      <FullWidthTabs
-        tabs={[
-          { key: "PKWT", label: "Kontrak (PKWT)" },
-          { key: "Vokasi", label: "Vokasi" },
-        ]}
-        active={tab}
-        onChange={(k) => {
-          setTab(k as DemandCategory);
-          setDivs([]);
-          setDepts([]);
-        }}
+      {/* 4. Detail dan Mapping Demand — bulan berjalan */}
+      <SectionHeading
+        n={4}
+        title="Detail dan Mapping Demand"
+        subtitle="Bulan berjalan — pilih Kontrak/Vokasi untuk mapping kandidat."
+        action={
+          <SegmentedSwitch
+            options={[
+              { value: "PKWT", label: "Kontrak" },
+              { value: "Vokasi", label: "Vokasi" },
+            ]}
+            value={tab}
+            onChange={(v) => {
+              setTab(v);
+              setDivs([]);
+              setDepts([]);
+            }}
+          />
+        }
       />
 
       <RatioScenarioCompare
