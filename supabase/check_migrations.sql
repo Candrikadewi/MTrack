@@ -64,4 +64,9 @@ union all
 select
   'migration_13 (column decisions + vokasi extra)',
   exists (select 1 from information_schema.tables where table_name = 'column_decisions')
-  and exists (select 1 from information_schema.columns where table_name = 'vokasi_records' and column_name = 'extra');
+  and exists (select 1 from information_schema.columns where table_name = 'vokasi_records' and column_name = 'extra')
+union all
+select
+  'migration_14 (vokasi shop mappings)',
+  exists (select 1 from information_schema.tables where table_name = 'value_mappings')
+  and exists (select 1 from information_schema.columns where table_name = 'vokasi_records' and column_name = 'shop');

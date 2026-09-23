@@ -141,6 +141,7 @@ export function seedSampleData(): void {
             batch: batch.batch,
             div: div.division,
             dept,
+            shop: "",
             lokasi: div.lokasi,
             plant: div.plantUnit,
             tgl_masuk: iso(subMonths(now(), batch.monthsAgo)),

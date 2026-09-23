@@ -125,7 +125,11 @@ export interface VokasiRecord {
   nama: string;
   batch: string;
   div: string;
-  dept: string; // shop/dept
+  dept: string;
+  /** Vokasi Reguler placement area (ASSEMBLY, TOSO, ...), standardized —
+   * Div/Dept derive from Shop + Lokasi. "" for records uploaded before
+   * migration_14. */
+  shop: string;
   lokasi: string;
   plant: PlantUnit | ""; // derived from Vokasi's "Pers Area" — see mapPersAreaToPlant; "" if Pers Area is empty
   tgl_masuk: string; // tanggal masuk vokasi
@@ -137,6 +141,19 @@ export interface VokasiRecord {
   upload_date: string; // metadata: when this batch record was uploaded
   /** Values of non-schema columns the admin marked "Pakai" in Upload Center. */
   extra?: Record<string, string>;
+}
+
+/** A confirmed correction for a non-standard raw value (e.g. Vokasi SHOP
+ * "ASSEMMBLY" → "ASSEMBLY"), asked once then reused (migration_14).
+ * mapped_value "" = not a valid value, skip those rows. */
+export interface ValueMapping {
+  id: string;
+  dataset: "zpar" | "vokasi";
+  field: string;
+  raw_value: string;
+  normalized_raw: string;
+  mapped_value: string;
+  decided_at: string;
 }
 
 /** An admin's standing decision about a column outside the known upload

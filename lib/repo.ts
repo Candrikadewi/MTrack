@@ -9,6 +9,7 @@ import type {
   UtilPoolEntry,
   HandoverForm,
   ColumnDecision,
+  ValueMapping,
 } from "./types";
 
 export const zparStore = createStore<ZparSnapshot>("zpar_snapshots");
@@ -20,6 +21,7 @@ export const taktStore = createStore<TaktCase>("takt_cases");
 export const utilPoolStore = createStore<UtilPoolEntry>("util_pool");
 export const handoverStore = createStore<HandoverForm>("handover_forms");
 export const columnDecisionStore = createStore<ColumnDecision>("column_decisions");
+export const valueMappingStore = createStore<ValueMapping>("value_mappings");
 
 export function getActiveSnapshot(): ZparSnapshot | undefined {
   return zparStore.list().find((s) => s.is_active);

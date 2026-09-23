@@ -10,15 +10,18 @@ import { MultiSelect } from "@/components/ui/MultiSelect";
 import { EmptyState, TableWrap, Td, Th } from "@/components/ui/Table";
 import { SegmentedSwitch } from "@/components/ui/SegmentedSwitch";
 import { useStoreList } from "@/lib/useStore";
-import { zparStore, vokasiStore, columnDecisionStore, activateSnapshot, clearAllData } from "@/lib/repo";
+import { zparStore, vokasiStore, columnDecisionStore, valueMappingStore, activateSnapshot, clearAllData } from "@/lib/repo";
 import { genId } from "@/lib/storage";
 import {
+  VOKASI_SHOPS,
+  finalizeVokasiRecord,
   keepUsedExtra,
   parseVokasiFile,
   parseZparFile,
   type ColumnCheck,
   type ExtraColumn,
   type SkipBreakdown,
+  type VokasiShopValue,
 } from "@/lib/parseFile";
 import {
   autoMatchVokasiBatch,
@@ -31,7 +34,7 @@ import { fmtDate } from "@/lib/engine/compute";
 import { createClient } from "@/lib/supabase/client";
 import { pushToast } from "@/lib/toast";
 import { useSessionState } from "@/lib/useSessionState";
-import type { ColumnDecision, VokasiRecord } from "@/lib/types";
+import type { ColumnDecision, ValueMapping, VokasiRecord } from "@/lib/types";
 
 function ColumnChips({ items, tone }: { items: string[]; tone: "red" | "amber" | "slate" }) {
   return (
@@ -222,6 +225,99 @@ function ColumnDecisionPanel({
   );
 }
 
+/** Standard shop for a raw value: itself when already standard, else the
+ * confirmed mapping ("" = skip those rows), else undefined (unconfirmed). */
+function resolveShop(v: VokasiShopValue, mappings: ValueMapping[]): string | undefined {
+  if (v.standard) return v.standard;
+  return mappings.find((m) => m.dataset === "vokasi" && m.field === "shop" && m.normalized_raw === v.key)?.mapped_value;
+}
+
+function saveShopMapping(v: VokasiShopValue, mapped: string, mappings: ValueMapping[]) {
+  const existing = mappings.find((m) => m.dataset === "vokasi" && m.field === "shop" && m.normalized_raw === v.key);
+  const decided_at = new Date().toISOString();
+  if (existing) valueMappingStore.update(existing.id, { mapped_value: mapped, decided_at });
+  else
+    valueMappingStore.insert({
+      id: genId("valmap"),
+      dataset: "vokasi",
+      field: "shop",
+      raw_value: v.raw,
+      normalized_raw: v.key,
+      mapped_value: mapped,
+      decided_at,
+    });
+}
+
+/** Non-standard SHOP spellings (e.g. "ASSEMMBLY") are never corrected
+ * silently: each is shown with the closest standard shop and saved only
+ * once confirmed, then reused on every later upload. */
+function ShopMappingPanel({ values, mappings }: { values: VokasiShopValue[]; mappings: ValueMapping[] }) {
+  const nonStandard = values.filter((v) => !v.standard);
+  const [draft, setDraft] = useState<Record<string, string>>({});
+  if (nonStandard.length === 0) return null;
+  const pending = nonStandard.filter((v) => resolveShop(v, mappings) === undefined).length;
+  return (
+    <div className="mt-3 space-y-3 rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h4 className="text-sm font-semibold text-slate-800 dark:text-slate-100">Shop tidak standar ({nonStandard.length})</h4>
+        {pending > 0 ? (
+          <span className="text-xs font-semibold text-amber-700 dark:text-amber-300">{pending} perlu dikonfirmasi sebelum upload</span>
+        ) : (
+          <span className="text-xs text-emerald-700 dark:text-emerald-400">Semua sudah dikonfirmasi</span>
+        )}
+      </div>
+      <p className="text-xs text-slate-600 dark:text-slate-400">
+        Kemungkinan typo. Pilih Shop standar yang benar lalu konfirmasi — dipakai untuk menentukan Div/Dept dan disimpan untuk upload berikutnya.
+      </p>
+      <ul className="divide-y divide-slate-100 dark:divide-slate-800">
+        {nonStandard.map((v) => {
+          const confirmed = resolveShop(v, mappings);
+          const value = draft[v.key] ?? confirmed ?? v.suggestion;
+          return (
+            <li key={v.key} className="flex flex-wrap items-center justify-between gap-3 py-2">
+              <div className="min-w-0">
+                <div className="text-sm font-medium text-slate-800 dark:text-slate-100">
+                  &ldquo;{v.raw}&rdquo; <span className="text-xs font-normal text-slate-500 dark:text-slate-400">· {v.count} baris</span>
+                </div>
+                <div className="text-xs text-slate-500 dark:text-slate-400">
+                  {confirmed === undefined
+                    ? `Dugaan: ${v.suggestion}`
+                    : confirmed === ""
+                      ? "Dikonfirmasi: bukan shop valid, baris dilewati"
+                      : `Dikonfirmasi: ${confirmed}`}
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <Select
+                  value={value}
+                  aria-label={`Shop standar untuk ${v.raw}`}
+                  onChange={(e) => setDraft((d) => ({ ...d, [v.key]: e.target.value }))}
+                  className="w-48"
+                >
+                  {VOKASI_SHOPS.map((sh) => (
+                    <option key={sh} value={sh}>
+                      {sh}
+                    </option>
+                  ))}
+                  <option value="">— bukan shop, lewati baris —</option>
+                </Select>
+                <Button
+                  size="sm"
+                  variant={confirmed === undefined ? "primary" : "secondary"}
+                  disabled={confirmed === value}
+                  onClick={() => saveShopMapping(v, value, mappings)}
+                >
+                  {confirmed === undefined ? "Konfirmasi" : "Simpan"}
+                </Button>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
 function currentMonthKey(): string {
   return new Date().toISOString().slice(0, 7);
 }
@@ -251,6 +347,7 @@ export function UploadCenterClient() {
   const snapshots = [...useStoreList(zparStore)].sort((a, b) => b.upload_date.localeCompare(a.upload_date));
   const vokasiRecords = useStoreList(vokasiStore);
   const decisions = useStoreList(columnDecisionStore);
+  const valueMappings = useStoreList(valueMappingStore);
 
   const takenPeriods = new Set(snapshots.map((s) => s.period));
 
@@ -395,9 +492,17 @@ export function UploadCenterClient() {
   /** Vokasi is cumulative: resolve each row's batch (file column, else the
    * batch typed above), then drop anything already in the database or
    * repeated within the file. */
+  const vokasiShopByKey = new Map((vokasiPreview?.shopValues ?? []).map((v) => [v.key, resolveShop(v, valueMappings)]));
+  const vokasiPendingShops = Array.from(vokasiShopByKey.values()).filter((v) => v === undefined).length;
+  const vokasiSkippedShop = vokasiPreview
+    ? vokasiPreview.records.filter((r) => vokasiShopByKey.get(r.shop) === "").length
+    : 0;
   const vokasiResolved = vokasiPreview
-    ? vokasiPreview.records.map((r) => ({ ...r, batch: r.batch || vokasiBatch.trim() }))
+    ? vokasiPreview.records
+        .filter((r) => vokasiShopByKey.get(r.shop))
+        .map((r) => finalizeVokasiRecord({ ...r, batch: r.batch || vokasiBatch.trim() }, vokasiShopByKey.get(r.shop) as string))
     : [];
+  const vokasiNoDept = vokasiResolved.filter((r) => !r.dept).length;
   const vokasiMissingBatch = vokasiResolved.filter((r) => !r.batch).length;
   const vokasiNew: typeof vokasiResolved = [];
   let vokasiDuplicates = 0;
@@ -416,8 +521,10 @@ export function UploadCenterClient() {
   const vokasiPendingColumns = vokasiPreview ? vokasiPreview.columns.extra.filter((c) => !decisionFor("vokasi", c, decisions)).length : 0;
   const vokasiNewBatches = new Set(vokasiNew.map((r) => r.batch));
 
+  const vokasiBlocked = vokasiNew.length === 0 || vokasiMissingBatch > 0 || vokasiPendingColumns > 0 || vokasiPendingShops > 0;
+
   function handleVokasiUpload() {
-    if (!vokasiFile || !vokasiPreview || vokasiNew.length === 0 || vokasiMissingBatch > 0 || vokasiPendingColumns > 0) return;
+    if (!vokasiFile || !vokasiPreview || vokasiBlocked) return;
     const used = usedColumns("vokasi", vokasiPreview.columns.extra, decisions);
     const upload_date = new Date().toISOString();
     const full: VokasiRecord[] = vokasiNew.map(({ extra, ...r }) => {
@@ -611,14 +718,14 @@ export function UploadCenterClient() {
 
       <Card
         title="Upload Vokasi (Database Kumulatif)"
-        subtitle="Data kumulatif: setiap upload menambah, tidak menimpa. Upload awal boleh satu file berisi semua batch (kolom Batch); selanjutnya satu file per batch. Noreg + batch yang sudah ada dilewati."
+        subtitle="Vokasi Reguler, data kumulatif: setiap upload menambah, tidak menimpa. Upload awal: Voc_Starting_System (semua batch). Selanjutnya file bulanan mentah Voc_<Bulan>_System — batch & tanggal diambil dari judul file. Hanya Lokasi Karawang #1/#2; noreg + batch yang sudah ada dilewati."
       >
         <div className="grid gap-4 sm:grid-cols-4">
-          <Field label={vokasiPreview?.hasBatchColumn ? "Batch (untuk baris tanpa Batch)" : "Batch (nama/nomor)"}>
+          <Field label={vokasiPreview?.batchFromFile ? "Batch (untuk baris tanpa Batch)" : "Batch (jika tidak ada di file)"}>
             <Input
               value={vokasiBatch}
               onChange={(e) => setVokasiBatch(e.target.value)}
-              placeholder={vokasiPreview?.hasBatchColumn ? "Opsional — diambil dari file" : "Batch 2026-A"}
+              placeholder={vokasiPreview?.batchFromFile ? "Opsional — diambil dari file" : "mis. 126"}
             />
           </Field>
           <Field label="Tanggal Masuk (jika tidak ada di file)">
@@ -642,7 +749,7 @@ export function UploadCenterClient() {
             {vokasiPreview ? (
               <Button
                 variant="primary"
-                disabled={vokasiBusy || vokasiNew.length === 0 || vokasiMissingBatch > 0 || vokasiPendingColumns > 0}
+                disabled={vokasiBusy || vokasiBlocked}
                 onClick={handleVokasiUpload}
                 className="w-full"
               >
@@ -658,7 +765,16 @@ export function UploadCenterClient() {
         {vokasiPreview && (
           <>
             <div role="status" className="mt-3 space-y-1.5 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-100">
-              {vokasiPreview.hasBatchColumn ? (
+              <p>
+                Format:{" "}
+                <b>
+                  {vokasiPreview.format === "raw"
+                    ? `File bulanan mentah${vokasiPreview.title?.start ? ` — mulai ${fmtDate(vokasiPreview.title.start)}` : ""}${vokasiPreview.title?.end ? ` s/d ${fmtDate(vokasiPreview.title.end)}` : ""}`
+                    : "Starting (sudah bersih)"}
+                </b>
+                {vokasiPreview.format === "raw" && " · kolom data pribadi (NIK, NPWP, alamat, no. HP, rekening, BPJS, dll.) dibuang, tidak disimpan"}
+              </p>
+              {vokasiPreview.batchFromFile ? (
                 <>
                   <p className="font-semibold">Batch diambil dari file ({vokasiPreview.batches.length} batch):</p>
                   <div className="flex flex-wrap gap-1.5">
@@ -676,8 +792,15 @@ export function UploadCenterClient() {
               <p>
                 <b>{vokasiNew.length}</b> record baru akan ditambahkan
                 {vokasiDuplicates > 0 && <> · {vokasiDuplicates} dilewati karena sudah ada (noreg + batch sama)</>}
+                {vokasiSkippedShop > 0 && <> · {vokasiSkippedShop} dilewati karena Shop bukan shop valid</>}
                 {vokasiMissingBatch > 0 && (
                   <span className="font-semibold text-amber-800 dark:text-amber-200"> · {vokasiMissingBatch} baris belum punya batch — isi kolom Batch di atas</span>
+                )}
+                {vokasiNoDept > 0 && (
+                  <span className="font-semibold text-amber-800 dark:text-amber-200">
+                    {" "}
+                    · {vokasiNoDept} baris Shop + Lokasi-nya tidak ada di tabel lookup Div/Dept (tetap diupload tanpa Div/Dept)
+                  </span>
                 )}
                 .
               </p>
@@ -688,6 +811,7 @@ export function UploadCenterClient() {
               skipBreakdown={vokasiPreview.skipBreakdown}
               columns={vokasiPreview.columns}
             />
+            <ShopMappingPanel values={vokasiPreview.shopValues} mappings={valueMappings} />
             <ColumnDecisionPanel dataset="vokasi" columns={vokasiPreview.columns.extra} decisions={decisions} />
           </>
         )}

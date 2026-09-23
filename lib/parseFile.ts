@@ -86,9 +86,12 @@ function normalizeStatusKontrak(raw: string): StatusKontrak | null {
   return null;
 }
 
+/** ZPAR uses Male/Female, Vokasi uses PRIA/PEREMPUAN — "PRIA" starts with
+ * "p", so matching on the first letter alone would read every man as
+ * female. */
 function normalizeGender(raw: string): Gender {
   const s = raw.toLowerCase().trim();
-  if (s.startsWith("p") || s.startsWith("f")) return "P";
+  if (s === "p" || s.startsWith("perempuan") || s.startsWith("wanita") || s.startsWith("female") || s.startsWith("f")) return "P";
   return "L";
 }
 
@@ -104,7 +107,8 @@ const PERS_AREA_ALIASES = ["pers area", "personnel area", "pers. area", "area ke
  * etc. resolve the same way. Null only when Pers Area is empty. A tag for
  * the Demand ratio widgets' default scope — never excludes a row. */
 export function mapPersAreaToPlant(persArea: string): PlantUnit | null {
-  const s = persArea.toLowerCase().replace(/\s+/g, " ").trim();
+  // "#"/"." stripped so Vokasi's "KARAWANG #1" reads like ZPAR's "Karawang 1".
+  const s = persArea.toLowerCase().replace(/[#.]/g, " ").replace(/\s+/g, " ").trim();
   if (!s) return null;
   const has = (...needles: string[]) => needles.some((n) => s.includes(n));
   if (has("karawang 1", "karawang1", "krw 1", "krw1")) return "Vehicle Plant";
@@ -342,60 +346,210 @@ export async function parseZparFile(file: File): Promise<ZparParseResult> {
   return { employees, totalRows: rows.length, skipped, skipBreakdown, columns, periods, employeesByPeriod };
 }
 
+// ---------------------------------------------------------------------------
+// Vokasi Reguler (docs/data-schema-vokasi-reguler.md)
+// Two file shapes: the clean Voc_Starting_System.csv (Batch;Noreg;Nama;Div;
+// Shop;Lokasi;Dept;Gender;Tgl Masuk) and the raw monthly
+// Voc_<Bulan>_System.csv, whose real header sits under two title rows and
+// whose batch and start date only exist in the title text.
+// ---------------------------------------------------------------------------
+
 const VOKASI_ALIASES = {
-  noreg: ["noreg", "no reg", "nik", "id"],
-  nama: ["nama", "name"],
+  noreg: ["noreg", "no reg", "nik peserta", "id"],
+  nama: ["nama", "nama lengkap", "name"],
   div: ["div", "division", "divisi"],
-  dept: ["dept", "shop", "department", "departemen"],
+  dept: ["dept", "department", "departemen"],
+  shop: ["shop"],
   lokasi: ["lokasi", "location"],
   tglMasuk: ["tgl masuk", "tanggal masuk"],
   utilisasi: ["utilisasi", "utilization"],
-  gender: ["gender", "jk", "jenis kelamin", "sex"],
+  gender: ["gender", "jenis kelamin", "jk", "sex"],
   laborType: ["labor type", "labor_type", "tipe tenaga kerja"],
   batch: ["batch", "angkatan", "gelombang"],
 };
 
-/** Vokasi's own schema is still pending (docs/data-schema.md) — until then
- * every column the parser reads, plus a row number, counts as known and
- * anything else goes to the Pakai/Abaikan decision. */
+/** Raw-file columns the schema drops on purpose — personal data (NIK, NPWP,
+ * address, phone, bank, BPJS) and non-system operational fields. Treated
+ * as known so they're never offered as "Pakai" and never stored. */
+const VOKASI_DROPPED = [
+  "No.", "No", "Tempat Lahir", "Tanggal Lahir", "Alamat", "RT/RW", "Kelurahan/Desa", "Kecamatan", "Kota", "Kode Pos",
+  "Provinsi", "Nomor HP", "NIK", "NPWP", "Status BPJS Kesehatan", "Nomor BPJS Kesehatan", "Nama Bank", "No. Rekening",
+  "Nama Sekolah dan Kota Sekolah", "Jurusan Sekolah", "Model Baju", "Ukuran Baju", "Ukuran Sepatu", "Alamat Email", "Nama BKK",
+];
+
 const VOKASI_KNOWN = new Set(
-  [...Object.values(VOKASI_ALIASES).flat(), ...PERS_AREA_ALIASES, "no"].map(normalizeHeader)
+  [...Object.values(VOKASI_ALIASES).flat(), ...PERS_AREA_ALIASES, ...VOKASI_DROPPED].map(normalizeHeader)
 );
 
+export const VOKASI_SHOPS = ["ASSEMBLY", "TOSO", "QUALITY INSP.", "WELDING BODY", "FRAME", "PRESS", "LOGISTIC", "PPIC"] as const;
+
+/** Shop + Lokasi → Dept + Div. PPIC's Lokasi isn't decided yet, so PPIC
+ * resolves regardless of Lokasi. */
+const VOKASI_DEPT_LOOKUP: Record<string, { dept: string; div: string }> = {
+  "ASSEMBLY|KARAWANG #1": { dept: "Assy Production #1 & PIO Dept", div: "Assy & Painting Production Div" },
+  "ASSEMBLY|KARAWANG #2": { dept: "Assy Production #2 Dept", div: "Assy & Painting Production Div" },
+  "TOSO|KARAWANG #1": { dept: "Painting Production #1 Dept", div: "Assy & Painting Production Div" },
+  "TOSO|KARAWANG #2": { dept: "Painting Production #2 Dept", div: "Assy & Painting Production Div" },
+  "QUALITY INSP.|KARAWANG #1": { dept: "Quality Inspection 1 Dept", div: "Assy & Painting Production Div" },
+  "QUALITY INSP.|KARAWANG #2": { dept: "Quality Inspection 2 Dept", div: "Assy & Painting Production Div" },
+  "WELDING BODY|KARAWANG #1": { dept: "Body Production & Insp P#1 Dept", div: "Press & Welding Production Div" },
+  "WELDING BODY|KARAWANG #2": { dept: "Body Production & Insp P#2 Dept", div: "Press & Welding Production Div" },
+  "FRAME|KARAWANG #1": { dept: "Frame Production Dept", div: "Press & Welding Production Div" },
+  "PRESS|KARAWANG #1": { dept: "Press Production Karawang Dept", div: "Press & Welding Production Div" },
+  "LOGISTIC|KARAWANG #1": { dept: "Logistic Operation Vehicle Plant #1 Dept", div: "Plant Administration Div" },
+  "LOGISTIC|KARAWANG #2": { dept: "Logistic Operation Vehicle Plant #2 Dept", div: "Plant Administration Div" },
+};
+const PPIC_DEPT = { dept: "PPIC & Warehouse Dept", div: "Plant Administration Div" };
+
+export function lookupVokasiDivDept(shop: string, lokasi: string): { dept: string; div: string } | undefined {
+  if (shop === "PPIC") return PPIC_DEPT;
+  return VOKASI_DEPT_LOOKUP[`${shop}|${lokasi}`];
+}
+
+/** "KARAWANG #1" / "Karawang 1" / "KRW1" → "KARAWANG #1"; "" when empty;
+ * null for any other location (those rows are out of scope for now). */
+function normalizeVokasiLokasi(raw: string): "KARAWANG #1" | "KARAWANG #2" | "" | null {
+  const s = raw.toUpperCase().replace(/[#.]/g, " ").replace(/\s+/g, " ").trim();
+  if (!s) return "";
+  if (/^(KARAWANG|KRW) ?1$/.test(s)) return "KARAWANG #1";
+  if (/^(KARAWANG|KRW) ?2$/.test(s)) return "KARAWANG #2";
+  return null;
+}
+
+/** Comparison key for a raw SHOP value (case/space-insensitive). */
+export function shopKey(raw: string): string {
+  return raw.trim().toUpperCase().replace(/\s+/g, " ");
+}
+
+function levenshtein(a: string, b: string): number {
+  const dp = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    let prev = dp[0];
+    dp[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const tmp = dp[j];
+      dp[j] = Math.min(dp[j] + 1, dp[j - 1] + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1));
+      prev = tmp;
+    }
+  }
+  return dp[b.length];
+}
+
+/** Closest standard shop for a non-standard value — only a suggestion; the
+ * admin confirms it before it's used. */
+export function suggestShop(raw: string): string {
+  const k = shopKey(raw).replace(/[^A-Z]/g, "");
+  let best: string = VOKASI_SHOPS[0];
+  let bestDist = Infinity;
+  for (const shop of VOKASI_SHOPS) {
+    const d = levenshtein(k, shop.replace(/[^A-Z]/g, ""));
+    if (d < bestDist) {
+      best = shop;
+      bestDist = d;
+    }
+  }
+  return best;
+}
+
+const MONTHS: Record<string, number> = {
+  JAN: 1, FEB: 2, MAR: 3, APR: 4, MAY: 5, MEI: 5, JUN: 6, JUL: 7, AUG: 8, AGU: 8, AGS: 8, SEP: 9, OCT: 10, OKT: 10, NOV: 11, DEC: 12, DES: 12,
+};
+
+/** "28 MAY 2026" / "28 MEI 2026" → "2026-05-28". */
+function parseWordDate(day: string, month: string, year: string): string {
+  const m = MONTHS[month.toUpperCase().slice(0, 3)];
+  return m ? isoFromParts(Number(year), m, Number(day)) : "";
+}
+
+/** Batch number and placement dates from the raw file's title row, e.g.
+ * "PLACEMENT VOKASI 28 MAY 2026 - 27 NOVEMBER 2026 (6 BULAN ) BATCH #125". */
+function parseVokasiTitle(text: string): { batch: string; start: string; end: string } {
+  const batch = text.match(/BATCH\s*#?\s*(\d+)/i)?.[1] ?? "";
+  const dates = Array.from(text.matchAll(/(\d{1,2})\s+([A-Za-z]{3,})\s+(\d{4})/g)).map((m) => parseWordDate(m[1], m[2], m[3]));
+  return { batch, start: dates[0] ?? "", end: dates[1] ?? "" };
+}
+
+/** Reads the first sheet as a grid, finds the real header row (the first
+ * row with a "Noreg" cell — row 1 in the starting file, row 3 in the raw
+ * file) and turns everything below it into objects. Rows above the header
+ * are returned as title text. */
+async function readVokasiSheet(file: File): Promise<{ rows: Record<string, unknown>[]; headers: string[]; title: string }> {
+  const buf = await file.arrayBuffer();
+  const wb = XLSX.read(buf, { type: "array", cellDates: true, raw: true });
+  const sheet = wb.Sheets[wb.SheetNames[0]];
+  const grid = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "", blankrows: false }) as unknown[][];
+  const headerIdx = grid.findIndex((r, i) => i < 15 && r.some((c) => normalizeHeader(String(c ?? "")) === "noreg"));
+  if (headerIdx < 0) return { rows: [], headers: [], title: "" };
+  const headerCells = grid[headerIdx].map((c) => String(c ?? "").trim());
+  const title = grid
+    .slice(0, headerIdx)
+    .map((r) => r.map((c) => String(c ?? "").trim()).filter(Boolean).join(" "))
+    .join(" ");
+  const rows: Record<string, unknown>[] = [];
+  for (const r of grid.slice(headerIdx + 1)) {
+    if (!r.some((c) => String(c ?? "").trim() !== "")) continue;
+    const obj: Record<string, unknown> = {};
+    headerCells.forEach((h, i) => {
+      if (h) obj[h] = r[i] ?? "";
+    });
+    rows.push(obj);
+  }
+  return { rows, headers: headerCells.filter(Boolean), title };
+}
+
+/** Parsed but not yet final: `shop` holds the raw SHOP key until the
+ * uploader confirms its standard value (see finalizeVokasiRecord). */
 export type VokasiParsedRecord = Omit<VokasiRecord, "id" | "upload_date">;
 
+export interface VokasiShopValue {
+  /** Raw value as it appears in the file (first spelling seen). */
+  raw: string;
+  key: string;
+  count: number;
+  /** Set when the value already is one of VOKASI_SHOPS. */
+  standard?: string;
+  suggestion: string;
+}
+
 export interface VokasiParseResult {
-  /** `batch` is filled from the file's Batch column when it has one
-   * (starting file with every batch), otherwise "" until the uploader
-   * names the batch. */
   records: VokasiParsedRecord[];
   totalRows: number;
   skipped: number;
   skipBreakdown: SkipBreakdown;
   columns: ColumnCheck;
-  hasBatchColumn: boolean;
+  format: "starting" | "raw";
+  /** Batch comes from the file (Batch column or raw title) rather than the
+   * uploader's Batch field. */
+  batchFromFile: boolean;
   batches: { batch: string; count: number }[];
+  title?: { batch: string; start: string; end: string };
+  shopValues: VokasiShopValue[];
 }
 
 export async function parseVokasiFile(file: File, defaultTglMasuk: string): Promise<VokasiParseResult> {
-  const { rows, headers } = await readSheet(file);
+  const { rows, headers, title: titleText } = await readVokasiSheet(file);
   const present = new Set(headers.map(normalizeHeader));
-  const hasBatchColumn = VOKASI_ALIASES.batch.some((a) => present.has(normalizeHeader(a)));
+  const has = (aliases: string[]) => aliases.some((a) => present.has(normalizeHeader(a)));
+  const title = titleText ? parseVokasiTitle(titleText) : undefined;
+  const format: VokasiParseResult["format"] = title ? "raw" : "starting";
+  const hasBatchColumn = has(VOKASI_ALIASES.batch);
+  const batchFromFile = hasBatchColumn || Boolean(title?.batch);
   const columns: ColumnCheck = {
     missingRequired: [
       { label: "Noreg", aliases: VOKASI_ALIASES.noreg },
       { label: "Nama", aliases: VOKASI_ALIASES.nama },
-      { label: "Divisi", aliases: VOKASI_ALIASES.div },
-      { label: "Department", aliases: VOKASI_ALIASES.dept },
+      { label: "Shop", aliases: VOKASI_ALIASES.shop },
+      { label: "Lokasi", aliases: VOKASI_ALIASES.lokasi },
+      { label: "Gender / Jenis Kelamin", aliases: VOKASI_ALIASES.gender },
     ]
-      .filter((r) => !r.aliases.some((a) => present.has(normalizeHeader(a))))
+      .filter((r) => !has(r.aliases))
       .map((r) => r.label),
     missingBaseline: [],
     extra: extraColumnsOf(headers, (n) => VOKASI_KNOWN.has(n), new Set()),
   };
-  const records: VokasiParsedRecord[] = [];
   const skipBreakdown = emptySkipBreakdown();
-  const batchCounts = new Map<string, number>();
+  const kept: { record: VokasiParsedRecord; tglFromFile: string }[] = [];
+  const shopCounts = new Map<string, VokasiShopValue>();
 
   for (const row of rows) {
     const noreg = findValue(row, VOKASI_ALIASES.noreg).trim();
@@ -403,39 +557,114 @@ export async function parseVokasiFile(file: File, defaultTglMasuk: string): Prom
       addReason(skipBreakdown, "Noreg kosong");
       continue;
     }
-    const persAreaRaw = findValue(row, PERS_AREA_ALIASES);
-    const plant = mapPersAreaToPlant(persAreaRaw);
-    if (!plant) skipBreakdown.unmatchedPersAreaCount++;
-    const plantLabel = plant ?? "(Pers Area kosong)";
+    const shopRaw = findValue(row, VOKASI_ALIASES.shop);
+    const key = shopKey(shopRaw);
+    const lokasi = normalizeVokasiLokasi(findValue(row, VOKASI_ALIASES.lokasi));
+    // Only Karawang #1/#2 are in scope for now; PPIC may have no Lokasi yet.
+    if (lokasi === null) {
+      addReason(skipBreakdown, "Lokasi di luar Karawang #1/#2");
+      continue;
+    }
+    if (lokasi === "" && key !== "PPIC") {
+      addReason(skipBreakdown, "Lokasi kosong");
+      continue;
+    }
+    if (!key) {
+      addReason(skipBreakdown, "Shop kosong");
+      continue;
+    }
+    const standard = VOKASI_SHOPS.find((sh) => sh === key);
+    const sv = shopCounts.get(key) ?? { raw: shopRaw.trim(), key, count: 0, standard, suggestion: standard ?? suggestShop(key) };
+    sv.count++;
+    shopCounts.set(key, sv);
+
+    const plant = mapPersAreaToPlant(findValue(row, PERS_AREA_ALIASES) || lokasi);
+    const plantLabel = plant ?? "(Lokasi kosong)";
     skipBreakdown.plantCounts[plantLabel] = (skipBreakdown.plantCounts[plantLabel] ?? 0) + 1;
-    const tglMasukRaw = findValue(row, VOKASI_ALIASES.tglMasuk);
-    const tglMasukFromFile = toIsoDate(tglMasukRaw);
-    if (tglMasukRaw && !tglMasukFromFile) addWarning(skipBreakdown, "Tgl Masuk tidak terbaca (pakai tanggal default)");
-    const tglMasuk = tglMasukFromFile || defaultTglMasuk;
-    const batch = hasBatchColumn ? findValue(row, VOKASI_ALIASES.batch).trim() : "";
-    if (hasBatchColumn && !batch) addWarning(skipBreakdown, "Batch kosong di file");
-    if (batch) batchCounts.set(batch, (batchCounts.get(batch) ?? 0) + 1);
+
+    const tglRaw = findValue(row, VOKASI_ALIASES.tglMasuk);
+    const tglFromFile = toIsoDate(tglRaw);
+    if (tglRaw && !tglFromFile) addWarning(skipBreakdown, "Tgl Masuk tidak terbaca");
+    const batch = (hasBatchColumn ? findValue(row, VOKASI_ALIASES.batch).trim() : "") || title?.batch || "";
+    const laborType = normalizeLaborType(findValue(row, VOKASI_ALIASES.laborType));
     const record: VokasiParsedRecord = {
       noreg,
       nama: findValue(row, VOKASI_ALIASES.nama).trim(),
       batch,
-      div: findValue(row, VOKASI_ALIASES.div),
-      dept: findValue(row, VOKASI_ALIASES.dept),
-      lokasi: findValue(row, VOKASI_ALIASES.lokasi),
+      div: findValue(row, VOKASI_ALIASES.div).trim(),
+      dept: findValue(row, VOKASI_ALIASES.dept).trim(),
+      shop: key,
+      lokasi,
       plant: plant ?? "",
-      tgl_masuk: tglMasuk,
-      // Business rule: Vokasi selalu 6 bulan − 1 hari dari tgl_masuk, bukan dari file upload.
-      tgl_ended: computeVokasiEndedDate(tglMasuk),
+      tgl_masuk: "",
+      tgl_ended: "",
       utilisasi: findValue(row, VOKASI_ALIASES.utilisasi),
       status_saat_ini: "Active" as const,
       gender: normalizeGender(findValue(row, VOKASI_ALIASES.gender)),
-      labor_type: normalizeLaborType(findValue(row, VOKASI_ALIASES.laborType)),
+      // Vokasi Reguler places into production lines; the file carries no
+      // Labor Type, so it counts as Labor A (user decision).
+      labor_type: laborType || "A",
     };
     const extra = extraValues(row, columns.extra);
     if (Object.keys(extra).length) record.extra = extra;
-    records.push(record);
+    kept.push({ record, tglFromFile });
   }
-  skipBreakdown.unmatchedPersAreaValues = skipBreakdown.unmatchedPersAreaCount ? ["(kosong)"] : [];
-  const batches = Array.from(batchCounts, ([batch, count]) => ({ batch, count })).sort((a, b) => a.batch.localeCompare(b.batch));
-  return { records, totalRows: rows.length, skipped: rows.length - records.length, skipBreakdown, columns, hasBatchColumn, batches };
+
+  // Tgl Masuk is one date per batch: a blank cell takes its batch's date
+  // (most common in the file), then the raw title's start date, then the
+  // uploader's default.
+  const batchDates = new Map<string, Map<string, number>>();
+  for (const { record, tglFromFile } of kept) {
+    if (!tglFromFile) continue;
+    const m = batchDates.get(record.batch) ?? new Map<string, number>();
+    m.set(tglFromFile, (m.get(tglFromFile) ?? 0) + 1);
+    batchDates.set(record.batch, m);
+  }
+  const batchDate = (batch: string) => {
+    const m = batchDates.get(batch);
+    return m ? Array.from(m).sort((a, b) => b[1] - a[1])[0][0] : "";
+  };
+  const batchCounts = new Map<string, number>();
+  for (const { record, tglFromFile } of kept) {
+    let tgl = tglFromFile;
+    if (!tgl) {
+      tgl = batchDate(record.batch) || title?.start || "";
+      // The raw monthly file has no date column by design — its title is
+      // the source, so only flag blanks in a file that has the column.
+      if (tgl && has(VOKASI_ALIASES.tglMasuk)) addWarning(skipBreakdown, "Tgl Masuk kosong, diisi dari tanggal batch-nya");
+      else tgl = defaultTglMasuk;
+    }
+    record.tgl_masuk = tgl;
+    // Business rule: Vokasi selalu 6 bulan − 1 hari dari tgl_masuk.
+    record.tgl_ended = computeVokasiEndedDate(tgl);
+    if (record.batch) batchCounts.set(record.batch, (batchCounts.get(record.batch) ?? 0) + 1);
+  }
+  if (title?.end && kept[0] && kept[0].record.tgl_ended !== title.end) {
+    addWarning(skipBreakdown, `Tgl selesai di judul (${title.end}) beda dengan hitungan 6 bulan (${kept[0].record.tgl_ended})`);
+  }
+
+  const records = kept.map((k) => k.record);
+  const batches = Array.from(batchCounts, ([batch, count]) => ({ batch, count })).sort((a, b) =>
+    a.batch.localeCompare(b.batch, undefined, { numeric: true })
+  );
+  const shopValues = Array.from(shopCounts.values()).sort((a, b) => Number(Boolean(a.standard)) - Number(Boolean(b.standard)) || b.count - a.count);
+  return {
+    records,
+    totalRows: rows.length,
+    skipped: rows.length - records.length,
+    skipBreakdown,
+    columns,
+    format,
+    batchFromFile,
+    batches,
+    title,
+    shopValues,
+  };
+}
+
+/** Applies the confirmed standard Shop and, when the file didn't carry
+ * them (raw monthly file), Div/Dept from the Shop + Lokasi lookup. */
+export function finalizeVokasiRecord(r: VokasiParsedRecord, standardShop: string): VokasiParsedRecord {
+  const lookup = !r.div || !r.dept ? lookupVokasiDivDept(standardShop, r.lokasi) : undefined;
+  return { ...r, shop: standardShop, div: r.div || lookup?.div || "", dept: r.dept || lookup?.dept || "" };
 }
