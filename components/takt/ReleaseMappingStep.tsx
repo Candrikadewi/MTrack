@@ -36,6 +36,16 @@ function loadCandidates(matchesLabor?: (laborType: string) => boolean): TaktDown
   return [...fromEmployees, ...fromVokasi];
 }
 
+function matchesRow(p: TaktDownPerson, row: CompositionRow): boolean {
+  return p.div === row.division && p.dept === row.dept && p.type === row.status_mp;
+}
+
+/** The plan row a picked person counts toward: the row they were picked
+ * for, else the first row with the same division/dept/status MP. */
+export function resolvePlanRow(p: TaktDownPerson, rows: CompositionRow[]): CompositionRow | undefined {
+  return (p.plan_row_id ? rows.find((r) => r.id === p.plan_row_id) : undefined) ?? rows.find((r) => matchesRow(p, r));
+}
+
 /** Two-step release flow header shared by Takt Down and Kaizen: step 1 plans
  * the release per shop and status MP, step 2 picks the actual people. */
 export function StepNav({
@@ -119,13 +129,21 @@ export function ReleaseMappingStep({
   }
 
   function progressFor(row: CompositionRow): number {
-    return selected.filter((s) => s.div === row.division && s.dept === row.dept && s.type === row.status_mp).length;
+    return selected.filter((s) => resolvePlanRow(s, validPlanRows)?.id === row.id).length;
   }
 
+  const activeRow = validPlanRows.find((r) => r.id === activePlanRowId);
+  const hasAmbiguousRows = validPlanRows.some((r, i) => validPlanRows.findIndex((o) => o.division === r.division && o.dept === r.dept && o.status_mp === r.status_mp) !== i);
+
+  /** Picks made while a plan row is focused are pinned to that row, so two
+   * rows with the same shop and status MP (different activities) stay apart. */
   function addCandidates(cands: TaktDownPerson[]) {
     onChange((prev) => {
       const existing = new Set(prev.map((s) => s.noreg));
-      return [...prev, ...cands.filter((c) => !existing.has(c.noreg))];
+      const fresh = cands
+        .filter((c) => !existing.has(c.noreg))
+        .map((c) => (activeRow && matchesRow(c, activeRow) ? { ...c, plan_row_id: activeRow.id } : c));
+      return [...prev, ...fresh];
     });
   }
 
@@ -197,6 +215,12 @@ export function ReleaseMappingStep({
       {validPlanRows.length > 0 && (
         <div>
           <h4 className="mb-2 text-xs font-semibold text-slate-600 dark:text-slate-400">Progres rencana per shop — klik untuk isi baris ini</h4>
+          {hasAmbiguousRows && (
+            <p className="mb-2 text-xs text-amber-700 dark:text-amber-300">
+              Ada baris dengan divisi, department dan status MP yang sama. Klik barisnya dulu sebelum memilih orang supaya masuk ke baris
+              (aktivitas) yang benar.
+            </p>
+          )}
           <div className="flex flex-wrap gap-2">
             {validPlanRows.map((row) => {
               const done = progressFor(row);
@@ -214,6 +238,7 @@ export function ReleaseMappingStep({
                   }`}
                 >
                   {row.division} · {row.dept} · {row.status_mp}
+                  {row.activity ? ` · ${row.activity}` : ""}
                   <Badge tone={done >= row.qty ? "green" : "amber"}>
                     {done}/{row.qty}
                   </Badge>
@@ -389,28 +414,35 @@ export function ReleaseMappingStep({
           <p className="text-sm text-slate-500 dark:text-slate-400">Belum ada personil dipilih.</p>
         ) : (
           <ul className="max-h-48 space-y-1 overflow-y-auto">
-            {selected.map((s) => (
-              <li
-                key={s.noreg}
-                className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-1.5 text-sm dark:border-slate-800"
-              >
-                <span>
-                  {s.noreg} - {s.nama} ({s.type}, {s.div} · {s.dept})
-                </span>
-                {isRemovable(s.noreg) ? (
-                  <button
-                    type="button"
-                    onClick={() => removeCandidate(s.noreg)}
-                    aria-label={`Hapus ${s.nama} dari daftar`}
-                    className="rounded px-1.5 text-red-700 hover:text-red-900 dark:text-red-400 dark:hover:text-red-300"
-                  >
-                    Hapus
-                  </button>
-                ) : (
-                  <span className="text-xs text-slate-500 dark:text-slate-400">{lockedLabel}</span>
-                )}
-              </li>
-            ))}
+            {selected.map((s) => {
+              const row = validPlanRows.length ? resolvePlanRow(s, validPlanRows) : undefined;
+              return (
+                <li
+                  key={s.noreg}
+                  className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-1.5 text-sm dark:border-slate-800"
+                >
+                  <span>
+                    {s.noreg} - {s.nama} ({s.type}, {s.div} · {s.dept})
+                    {row?.activity && <span className="text-slate-500 dark:text-slate-400"> · {row.activity}</span>}
+                    {validPlanRows.length > 0 && !row && (
+                      <span className="ml-1.5 text-xs font-medium text-amber-700 dark:text-amber-300">tidak ada di rencana</span>
+                    )}
+                  </span>
+                  {isRemovable(s.noreg) ? (
+                    <button
+                      type="button"
+                      onClick={() => removeCandidate(s.noreg)}
+                      aria-label={`Hapus ${s.nama} dari daftar`}
+                      className="rounded px-1.5 text-red-700 hover:text-red-900 dark:text-red-400 dark:hover:text-red-300"
+                    >
+                      Hapus
+                    </button>
+                  ) : (
+                    <span className="text-xs text-slate-500 dark:text-slate-400">{lockedLabel}</span>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>

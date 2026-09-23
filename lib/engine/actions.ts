@@ -837,32 +837,39 @@ export function pushToUtilPool(input: {
   return entry;
 }
 
-/** Kaizen-driven headcount release: each year, a shop/department is
- * challenged to improve its process and free up MP — this records who came
- * out of that effort and pushes them straight into Supply Pool (like
- * Takt Down), grouped per Divisi so each shop's yearly result gets its own
- * Source Summary card. Contract due date is auto-estimated the same way as
- * every other Supply Pool source (see estimateContractEnd). */
+/** Kaizen-driven headcount release: a shop/department is challenged to
+ * improve its process and free up MP — this records who came out of that
+ * effort and pushes them straight into Supply Pool (like Takt Down). Each
+ * person carries the activity and release date of the plan row they were
+ * picked for, and the whole release is declared under one labor group
+ * (A/F or B/C). source_label groups them per year, labor group, division
+ * and activity so each result gets its own Source Summary batch. Contract
+ * due date is auto-estimated like every other Supply Pool source. */
 export function createKaizenSupply(input: {
-  releaseDate: string;
-  activity: string;
   laborGroup: KaizenLaborGroup;
-  persons: { noreg: string; nama: string; type: MpStatusKategori; div: string; dept: string }[];
+  persons: {
+    noreg: string;
+    nama: string;
+    type: MpStatusKategori;
+    div: string;
+    dept: string;
+    activity: string;
+    releaseDate: string;
+  }[];
 }): UtilPoolEntry[] {
-  const year = input.releaseDate.slice(0, 4);
-  const activitySuffix = input.activity ? ` (${input.activity})` : "";
   return input.persons.map((p) => {
     const contractEnd = estimateContractEnd(p.noreg, p.type);
+    const year = p.releaseDate.slice(0, 4);
     return pushToUtilPool({
       noreg: p.noreg,
       nama: p.nama,
       type: p.type,
       source: "Kaizen",
-      source_label: `Kaizen ${year} Labor ${input.laborGroup} - ${p.div}${activitySuffix}`,
+      source_label: `Kaizen ${year} Labor ${input.laborGroup} - ${p.div} (${p.activity})`,
       prev_div: p.div,
       prev_dept: p.dept,
       contract_end: contractEnd,
-      entered_pool_date: input.releaseDate,
+      entered_pool_date: p.releaseDate,
     });
   });
 }

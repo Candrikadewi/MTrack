@@ -16,6 +16,8 @@ export interface CompositionRow {
   mp_role?: MpRole;
   qty: number;
   date: string;
+  /** Kaizen only — which improvement activity released this row. */
+  activity?: string;
 }
 
 export function emptyCompositionRow(patch: Partial<CompositionRow> = {}): CompositionRow {
@@ -78,6 +80,7 @@ export function CompositionRowsEditor({
   dateLabel,
   laborTypeFilter,
   withRole = false,
+  withActivity = false,
   isRowLocked,
   minQtyFor,
 }: {
@@ -92,6 +95,9 @@ export function CompositionRowsEditor({
   laborTypeFilter?: string | ((laborType: string) => boolean);
   /** Shows the MP Role (Proses/Backup) select — Project only. */
   withRole?: boolean;
+  /** Shows a per-row Activity field — Kaizen only. New rows copy the
+   * activity and date of the row they're added next to. */
+  withActivity?: boolean;
   /** A locked row (Project: already expanded into real Demand records) can
    * only have its qty increased — every other field is disabled and it
    * can't be removed, so already-fulfilled demand history never gets
@@ -115,8 +121,9 @@ export function CompositionRowsEditor({
     onChange(rows.filter((r) => r.id !== id));
   }
 
-  function addRow(patch: Partial<CompositionRow>) {
-    onChange([...rows, emptyCompositionRow(patch)]);
+  function addRow(patch: Partial<CompositionRow>, from?: CompositionRow) {
+    const carried = withActivity && from ? { activity: from.activity ?? "", date: from.date } : {};
+    onChange([...rows, emptyCompositionRow({ ...carried, ...patch })]);
   }
 
   const groups = groupRows(rows);
@@ -143,7 +150,7 @@ export function CompositionRowsEditor({
                     return (
                       <div key={row.id} className="flex flex-wrap items-end gap-1.5">
                         <div className="w-36">
-                          <span className="mb-0.5 block text-[10px] font-medium text-slate-400">Divisi</span>
+                          <span className="mb-0.5 block text-[10px] font-medium text-slate-500 dark:text-slate-400">Divisi</span>
                           <Select
                             value={row.division}
                             disabled={locked}
@@ -158,7 +165,7 @@ export function CompositionRowsEditor({
                           </Select>
                         </div>
                         <div className="w-36">
-                          <span className="mb-0.5 block text-[10px] font-medium text-slate-400">Department</span>
+                          <span className="mb-0.5 block text-[10px] font-medium text-slate-500 dark:text-slate-400">Department</span>
                           <Select
                             value={row.dept}
                             onChange={(e) => update(row.id, { dept: e.target.value })}
@@ -173,7 +180,7 @@ export function CompositionRowsEditor({
                           </Select>
                         </div>
                         <div className="w-28">
-                          <span className="mb-0.5 block text-[10px] font-medium text-slate-400">Status MP</span>
+                          <span className="mb-0.5 block text-[10px] font-medium text-slate-500 dark:text-slate-400">Status MP</span>
                           <Select
                             value={row.status_mp}
                             disabled={locked}
@@ -187,7 +194,7 @@ export function CompositionRowsEditor({
                         </div>
                         {withRole && (
                           <div className="w-28">
-                            <span className="mb-0.5 block text-[10px] font-medium text-slate-400">MP Role</span>
+                            <span className="mb-0.5 block text-[10px] font-medium text-slate-500 dark:text-slate-400">MP Role</span>
                             <Select
                               value={row.mp_role}
                               disabled={locked}
@@ -199,7 +206,7 @@ export function CompositionRowsEditor({
                           </div>
                         )}
                         <div className="w-20">
-                          <span className="mb-0.5 block text-[10px] font-medium text-slate-400">Qty</span>
+                          <span className="mb-0.5 block text-[10px] font-medium text-slate-500 dark:text-slate-400">Qty</span>
                           <Input
                             type="number"
                             min={minQtyFor?.(row) ?? 1}
@@ -208,9 +215,21 @@ export function CompositionRowsEditor({
                             onChange={(e) => update(row.id, { qty: Number(e.target.value) })}
                           />
                         </div>
+                        {withActivity && (
+                          <div className="min-w-[180px] flex-1">
+                            <span className="mb-0.5 block text-[10px] font-medium text-slate-500 dark:text-slate-400">Activity</span>
+                            <Input
+                              value={row.activity ?? ""}
+                              disabled={locked}
+                              placeholder="Nama aktivitas Kaizen"
+                              aria-label="Activity"
+                              onChange={(e) => update(row.id, { activity: e.target.value })}
+                            />
+                          </div>
+                        )}
                         {dateLabel && (
                           <div className="min-w-[150px]">
-                            <span className="mb-0.5 block text-[10px] font-medium text-slate-400">{dateLabel}</span>
+                            <span className="mb-0.5 block text-[10px] font-medium text-slate-500 dark:text-slate-400">{dateLabel}</span>
                             <Input
                               type="date"
                               disabled={locked}
@@ -239,7 +258,7 @@ export function CompositionRowsEditor({
                 </div>
                 <button
                   type="button"
-                  onClick={() => addRow({ division: dg.division, dept: deptG.dept })}
+                  onClick={() => addRow({ division: dg.division, dept: deptG.dept }, deptG.rows[deptG.rows.length - 1])}
                   className="mt-1.5 text-[11px] font-medium text-blue-600 hover:underline dark:text-blue-400"
                 >
                   + Status MP
@@ -249,7 +268,7 @@ export function CompositionRowsEditor({
           </div>
           <button
             type="button"
-            onClick={() => addRow({ division: dg.division })}
+            onClick={() => addRow({ division: dg.division }, dg.deptGroups.at(-1)?.rows.at(-1))}
             className="mt-2 text-[11px] font-medium text-blue-600 hover:underline dark:text-blue-400"
           >
             + Department
@@ -258,7 +277,7 @@ export function CompositionRowsEditor({
       ))}
       <button
         type="button"
-        onClick={() => addRow({})}
+        onClick={() => addRow({}, rows[rows.length - 1])}
         className="rounded-lg border border-dashed border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
       >
         + Divisi

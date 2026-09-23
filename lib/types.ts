@@ -273,6 +273,10 @@ export interface TaktDownPerson {
   type: MpStatusKategori;
   div: string;
   dept: string;
+  /** Plan row this person was picked for, when picked from a specific row
+   * (needed when two rows share division/dept/status — e.g. two Kaizen
+   * activities in one department). */
+  plan_row_id?: string;
 }
 
 export interface TaktCase {
