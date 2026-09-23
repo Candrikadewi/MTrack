@@ -12,7 +12,7 @@ import { MultiSelect } from "@/components/ui/MultiSelect";
 import { BatchTileRow, type BatchTileCategory } from "@/components/ui/BatchTileRow";
 import { RatioWidget, RatioScenarioCompare } from "@/components/ui/RatioWidget";
 import { CollapsibleSection } from "@/components/ui/Collapsible";
-import { SectionHeading, NumberBadge } from "@/components/ui/SectionHeading";
+import { SectionHeading } from "@/components/ui/SectionHeading";
 import { SegmentedSwitch } from "@/components/ui/SegmentedSwitch";
 import { NoregInput, DateInput } from "@/components/enrollment/NoregInput";
 import { ReviewSection, VokasiEndedSection } from "@/components/enrollment/ReviewSections";
@@ -36,6 +36,8 @@ import {
   assignPoolEntryToDemand,
   confirmDemandFulfillment,
   confirmShopReceipt,
+  getActiveEmployeeByNoreg,
+  getVokasiByNoreg,
   setDemandFulfillDate,
   setDemandNoReplace,
   setDemandReplacementByNoreg,
@@ -91,6 +93,39 @@ function confirmLabel(d: Demand): string {
   if (d.replacement_status === "PKWT New Hire" || d.replacement_status === "Vokasi New Hire") return "Tgl Sign Kontrak";
   if (d.replacement_status === "MP Excess" || d.replacement_status === "MP Back Up") return "Tgl Assigned";
   return "Tgl Konfirmasi";
+}
+
+type RatioDelta = { permanen: number; kontrak: number; vokasi: number };
+
+/** Which bucket the outgoing person is actually leaving from. Project/Takt
+ * Up demands don't have an outgoing person at all (they're pure additions,
+ * not a replacement of someone departing) — origin_ref there is a
+ * project/case id, not a person, so this deliberately doesn't try to
+ * resolve one for them. */
+function outgoingBucket(d: Demand): keyof RatioDelta | null {
+  if (d.origin_type === "Project" || d.origin_type === "TaktUp") return null;
+  if (d.origin_type === "PkwtTerminate") return "kontrak";
+  if (d.origin_type === "VokasiEnded") return "vokasi";
+  const emp = getActiveEmployeeByNoreg(d.outgoing_noreg);
+  if (emp) return emp.status_kontrak === "Permanen" ? "permanen" : "kontrak";
+  if (getVokasiByNoreg(d.outgoing_noreg)) return "vokasi";
+  return null;
+}
+
+/** Projection delta for one demand, following what its actual mapping
+ * decides — a Permanen replaced by a new Kontrak hire nets permanen -1,
+ * kontrak +1. MP Excess/MP Back Up are transfers of someone already
+ * counted in the current headcount, so they net zero. Undecided demands
+ * (no Source picked yet) contribute nothing — there's nothing to project
+ * until a mapping choice is actually made. */
+function demandRatioDelta(d: Demand): RatioDelta {
+  const delta: RatioDelta = { permanen: 0, kontrak: 0, vokasi: 0 };
+  if (!d.replacement_status) return delta;
+  const out = outgoingBucket(d);
+  if (out) delta[out] -= 1;
+  if (d.replacement_status === "PKWT New Hire") delta.kontrak += 1;
+  else if (d.replacement_status === "Vokasi New Hire") delta.vokasi += 1;
+  return delta;
 }
 
 // ---------------------------------------------------------------------------
@@ -249,12 +284,35 @@ export function DemandPageClient() {
 
   const totalCount = monthDemands.length;
   const fulfilledCount = monthDemands.filter((d) => demandGranularStatus(d).startsWith("Fulfilled")).length;
-  const openInView = filteredDemands.filter((d) => d.status !== "Fulfilled").length;
 
+  // Ratio scope follows the same Divisi/Dept filter as the table below —
+  // unfiltered = whole plant (Karawang 1 & 2).
+  const ratioScopedEmployees4 = divs.length ? employees.filter((e) => divs.includes(e.division)) : employees;
+  const ratioScopedEmployeesFinal4 = depts.length ? ratioScopedEmployees4.filter((e) => depts.includes(e.dept)) : ratioScopedEmployees4;
+  const ratioScopedVokasi4 = divs.length ? vokasi.filter((v) => divs.includes(v.div)) : vokasi;
+  const ratioScopedVokasiFinal4 = depts.length ? ratioScopedVokasi4.filter((v) => depts.includes(v.dept)) : ratioScopedVokasi4;
+  const ratioVokasiActive4 = ratioScopedVokasiFinal4.filter((v) => computeVokasiStatus(v.tgl_ended, fulfilledVokasiIds.has(v.id)) !== "Ended");
   const scenarioBase = {
-    permanen: employees.filter((e) => e.status_kontrak === "Permanen").length,
-    kontrak: employees.filter((e) => e.status_kontrak !== "Permanen").length,
-    vokasi: vokasi.filter((v) => computeVokasiStatus(v.tgl_ended, fulfilledVokasiIds.has(v.id)) !== "Ended").length,
+    permanen: ratioScopedEmployeesFinal4.filter((e) => e.status_kontrak === "Permanen").length,
+    kontrak: ratioScopedEmployeesFinal4.filter((e) => e.status_kontrak !== "Permanen").length,
+    vokasi: ratioVokasiActive4.length,
+  };
+
+  // Projection follows the actual mapping decided per demand (any category,
+  // any month — not just what's currently visible in the table), scoped to
+  // the same Divisi/Dept filter.
+  const decidedDemands = filterByDivDept(demands, divs, depts).filter((d) => d.replacement_status !== "");
+  const projectionDelta = decidedDemands.reduce<RatioDelta>(
+    (acc, d) => {
+      const delta = demandRatioDelta(d);
+      return { permanen: acc.permanen + delta.permanen, kontrak: acc.kontrak + delta.kontrak, vokasi: acc.vokasi + delta.vokasi };
+    },
+    { permanen: 0, kontrak: 0, vokasi: 0 }
+  );
+  const projectionCounts = {
+    permanen: Math.max(0, scenarioBase.permanen + projectionDelta.permanen),
+    kontrak: Math.max(0, scenarioBase.kontrak + projectionDelta.kontrak),
+    vokasi: Math.max(0, scenarioBase.vokasi + projectionDelta.vokasi),
   };
 
   function exportReport() {
@@ -267,14 +325,7 @@ export function DemandPageClient() {
         ["Open", totalCount - fulfilledCount],
         [],
         ["Rasio Sekarang", `${scenarioBase.permanen} : ${scenarioBase.kontrak} : ${scenarioBase.vokasi}`],
-        [
-          "Rasio bila diganti Kontrak baru",
-          `${scenarioBase.permanen} : ${scenarioBase.kontrak + openInView} : ${scenarioBase.vokasi}`,
-        ],
-        [
-          "Rasio bila diganti MP Excess Permanen",
-          `${scenarioBase.permanen + openInView} : ${scenarioBase.kontrak} : ${scenarioBase.vokasi}`,
-        ],
+        ["Rasio Proyeksi", `${projectionCounts.permanen} : ${projectionCounts.kontrak} : ${projectionCounts.vokasi}`],
       ]);
       const detailRows = filteredDemands.map((d) => ({
         "Replacement Need": demandStatusLabel(d),
@@ -309,17 +360,14 @@ export function DemandPageClient() {
       </div>
 
       {/* 1. Ringkasan per Batch */}
-      <SectionHeading n={1} title="Ringkasan per Batch" subtitle="Klik tile untuk lihat rincian batch." />
+      <SectionHeading n={1} title="Ringkasan per Batch" subtitle="Klik tile untuk lihat rincian batch." divider={false} />
       <BatchTileRow categories={batchCategories} />
 
       {/* 2. Enrollment Review — admin-only, folded by default */}
       {role === "admin" && (
         <CollapsibleSection
-          title={
-            <span className="flex items-center gap-2.5">
-              <NumberBadge n={2} /> Enrollment Review
-            </span>
-          }
+          n={2}
+          title="Enrollment Review"
           subtitle="Review PKWT (Continue/Terminate) dan Vokasi auto-Ended. Candidate mapping ada di Detail Demand di bawah."
         >
           <RatioWidget
@@ -377,14 +425,10 @@ export function DemandPageClient() {
 
       {/* 3. Input Demand Baru */}
       {role === "admin" && (
-        <Card
-          title={
-            <span className="flex items-center gap-2.5">
-              <NumberBadge n={3} /> Input Demand Baru
-            </span>
-          }
-        >
-          <div className="space-y-4">
+        <div className="space-y-4 border-t border-slate-200 pt-6 dark:border-slate-800">
+          <SectionHeading n={3} title="Input Demand Baru" divider={false} />
+          <Card>
+            <div className="space-y-4">
             <FullWidthTabs
               tabs={[
                 { key: "project", label: "Project Baru" },
@@ -424,10 +468,11 @@ export function DemandPageClient() {
                 </Button>
               </div>
             )}
-          </div>
+            </div>
+          </Card>
           {projectModalOpen && <NewProjectModal open onClose={() => setProjectModalOpen(false)} />}
           {taktUpOpen && <TaktUpModal open onClose={() => setTaktUpOpen(false)} />}
-        </Card>
+        </div>
       )}
       {role === "admin" && manualOpen && <ManualDemandModal open onClose={() => setManualOpen(false)} />}
 
@@ -453,11 +498,14 @@ export function DemandPageClient() {
       />
 
       <RatioScenarioCompare
-        scopeLabel={`${openInView} demand open di tampilan ini`}
+        scopeLabel={divs.length || depts.length ? "Sesuai filter" : "Seluruh plant"}
         scenarios={[
           { label: "Sekarang", counts: scenarioBase },
-          { label: "Bila diganti Kontrak baru", counts: { ...scenarioBase, kontrak: scenarioBase.kontrak + openInView } },
-          { label: "Bila diganti MP Excess Permanen", counts: { ...scenarioBase, permanen: scenarioBase.permanen + openInView } },
+          {
+            label: "Proyeksi",
+            counts: projectionCounts,
+            hint: `Mengikuti ${decidedDemands.length} demand yang sudah punya Source dipilih`,
+          },
         ]}
       />
 

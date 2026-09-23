@@ -2,13 +2,12 @@
 import { useMemo, useState } from "react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
-import { Badge, statusTone } from "@/components/ui/Badge";
 import { FullWidthTabs } from "@/components/ui/Tabs";
 import { MultiSelect } from "@/components/ui/MultiSelect";
 import { Select } from "@/components/ui/Form";
 import { EmptyState, TableWrap, Td, Th } from "@/components/ui/Table";
 import { BatchTileRow, type BatchTileCategory } from "@/components/ui/BatchTileRow";
-import { SectionHeading, NumberBadge } from "@/components/ui/SectionHeading";
+import { SectionHeading } from "@/components/ui/SectionHeading";
 import { SegmentedSwitch } from "@/components/ui/SegmentedSwitch";
 import { KaizenModal } from "@/components/util-pool/KaizenModal";
 import { TaktDownModal } from "@/components/takt/TaktDownModal";
@@ -114,9 +113,7 @@ export function SupplyPageClient() {
     [entries, kontrapVokasi]
   );
 
-  const [tab, setTab] = useSessionState<"open" | "history">("utilpool.tab", "open");
   const openAllEntries = useMemo(() => switchScoped.filter((e) => e.status === "Open"), [switchScoped]);
-  const historyAllEntries = useMemo(() => switchScoped.filter((e) => e.status !== "Open"), [switchScoped]);
 
   const [selOpenSources, setSelOpenSources] = useSessionState<string[]>("utilpool.open.sources", []);
   const [selOpenDivs, setSelOpenDivs] = useSessionState<string[]>("utilpool.open.divs", []);
@@ -155,37 +152,6 @@ export function SupplyPageClient() {
     [openAllEntries, selOpenSources, selOpenDivs, selOpenDepts, selOpenStatus, selOpenPosisi, selOpenMonth]
   );
 
-  const [selDivs, setSelDivs] = useSessionState<string[]>("utilpool.history.divs", []);
-  const [selDepts, setSelDepts] = useSessionState<string[]>("utilpool.history.depts", []);
-  const [selMonth, setSelMonth] = useSessionState<string>("utilpool.history.month", "");
-  const [selHistorySources, setSelHistorySources] = useSessionState<string[]>("utilpool.history.sources", []);
-  const [selHistoryStatus, setSelHistoryStatus] = useSessionState<string[]>("utilpool.history.status", []);
-
-  const divOptions = useMemo(() => Array.from(new Set(historyAllEntries.map((e) => e.prev_div).filter(Boolean))).sort(), [historyAllEntries]);
-  const deptOptions = useMemo(
-    () =>
-      Array.from(
-        new Set(historyAllEntries.filter((e) => selDivs.length === 0 || selDivs.includes(e.prev_div)).map((e) => e.prev_dept).filter(Boolean))
-      ).sort(),
-    [historyAllEntries, selDivs]
-  );
-  const monthOptions = useMemo(() => Array.from(new Set(historyAllEntries.map((e) => e.entered_pool_date.slice(0, 7)))).sort().reverse(), [historyAllEntries]);
-  const historySourceOptions = useMemo(() => Array.from(new Set(historyAllEntries.map((e) => SOURCE_TYPE_LABELS[e.source]))).sort(), [historyAllEntries]);
-  const historyStatusOptions = useMemo(() => Array.from(new Set(historyAllEntries.map((e) => e.status))).sort(), [historyAllEntries]);
-
-  const filteredHistory = useMemo(
-    () =>
-      historyAllEntries.filter(
-        (e) =>
-          (selDivs.length === 0 || selDivs.includes(e.prev_div)) &&
-          (selDepts.length === 0 || selDepts.includes(e.prev_dept)) &&
-          (selMonth === "" || e.entered_pool_date.slice(0, 7) === selMonth) &&
-          (selHistorySources.length === 0 || selHistorySources.includes(SOURCE_TYPE_LABELS[e.source])) &&
-          (selHistoryStatus.length === 0 || selHistoryStatus.includes(e.status))
-      ),
-    [historyAllEntries, selDivs, selDepts, selMonth, selHistorySources, selHistoryStatus]
-  );
-
   function handleNaturalRelease(e: UtilPoolEntry) {
     if (!confirm(`Natural Release ${e.nama} (${e.noreg})? Tindakan ini tidak bisa dibatalkan.`)) return;
     naturalRelease(e.id);
@@ -201,19 +167,15 @@ export function SupplyPageClient() {
       </div>
 
       {/* 1. Ringkasan per Batch */}
-      <SectionHeading n={1} title="Ringkasan per Batch" subtitle="Klik tile untuk lihat rincian batch." />
+      <SectionHeading n={1} title="Ringkasan per Batch" subtitle="Klik tile untuk lihat rincian batch." divider={false} />
       <BatchTileRow categories={batchCategories} />
 
       {/* 2. Input Supply Baru */}
       {role === "admin" && (
-        <Card
-          title={
-            <span className="flex items-center gap-2.5">
-              <NumberBadge n={2} /> Input Supply Baru
-            </span>
-          }
-        >
-          <div className="space-y-4">
+        <div className="space-y-4 border-t border-slate-200 pt-6 dark:border-slate-800">
+          <SectionHeading n={2} title="Input Supply Baru" divider={false} />
+          <Card>
+            <div className="space-y-4">
             <FullWidthTabs
               tabs={[
                 { key: "taktdown", label: "Takt Down" },
@@ -241,10 +203,11 @@ export function SupplyPageClient() {
                 </Button>
               </div>
             )}
-          </div>
+            </div>
+          </Card>
           {kaizenOpen && <KaizenModal open onClose={() => setKaizenOpen(false)} />}
           {taktDownOpen && <TaktDownModal onClose={() => setTaktDownOpen(false)} poolEntries={entries} />}
-        </Card>
+        </div>
       )}
 
       {/* 3. Detail Supply — bulan berjalan */}
@@ -266,160 +229,81 @@ export function SupplyPageClient() {
       {entries.length === 0 ? (
         <EmptyState text="Supply Pool kosong." />
       ) : (
-        <>
-          <FullWidthTabs
-            tabs={[
-              { key: "open", label: `Open Supply (${openAllEntries.length})` },
-              { key: "history", label: `History (${historyAllEntries.length})` },
-            ]}
-            active={tab}
-            onChange={(k) => setTab(k as "open" | "history")}
-          />
-
-          {tab === "open" ? (
-            <Card>
-              <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
-                <MultiSelect label="Jenis" options={openSourceOptions} selected={selOpenSources} onChange={setSelOpenSources} />
-                <MultiSelect
-                  label="Divisi"
-                  options={openDivOptions}
-                  selected={selOpenDivs}
-                  onChange={(v) => {
-                    setSelOpenDivs(v);
-                    setSelOpenDepts([]);
-                  }}
-                />
-                <MultiSelect label="Department" options={openDeptOptions} selected={selOpenDepts} onChange={setSelOpenDepts} />
-                <MultiSelect label="Status MP" options={openStatusOptions} selected={selOpenStatus} onChange={setSelOpenStatus} />
-                <MultiSelect label="Posisi" options={openPosisiOptions} selected={selOpenPosisi} onChange={setSelOpenPosisi} />
-                <div>
-                  <span className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">Bulan Masuk</span>
-                  <Select value={selOpenMonth} onChange={(e) => setSelOpenMonth(e.target.value)}>
-                    <option value="">Semua Bulan</option>
-                    {openMonthOptions.map((m) => (
-                      <option key={m} value={m}>
-                        {m}
-                      </option>
-                    ))}
-                  </Select>
-                </div>
-              </div>
-              {openEntries.length === 0 ? (
-                <EmptyState text="Tidak ada supply yang masih Open sesuai filter." />
-              ) : (
-                <TableWrap>
-                  <thead>
-                    <tr>
-                      <Th>Noreg</Th>
-                      <Th>Nama</Th>
-                      <Th>Status MP</Th>
-                      <Th>Posisi</Th>
-                      <Th>Sumber</Th>
-                      <Th>Divisi</Th>
-                      <Th>Prev Dept</Th>
-                      <Th>Tanggal Masuk Pool</Th>
-                      <Th>Lead Time in Pool</Th>
-                      <Th>Sisa Kontrak</Th>
-                      <Th>Aksi</Th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {openEntries.map((e) => {
-                      const urgency = contractUrgency(e.contract_end);
-                      return (
-                        <tr key={e.id}>
-                          <Td>{e.noreg}</Td>
-                          <Td>{e.nama}</Td>
-                          <Td>{e.type}</Td>
-                          <Td>{posisiFor(e.noreg)}</Td>
-                          <Td>{e.source_label}</Td>
-                          <Td>{e.prev_div}</Td>
-                          <Td>{e.prev_dept}</Td>
-                          <Td>{fmtDate(e.entered_pool_date)}</Td>
-                          <Td>{poolLeadTimeDays(e.entered_pool_date)} hari</Td>
-                          <Td className={urgencyClass[urgency]}>{contractRemainingLabel(e.contract_end)}</Td>
-                          <Td>
-                            {role === "admin" && (
-                              <Button size="sm" variant="danger" onClick={() => handleNaturalRelease(e)}>
-                                Natural Release
-                              </Button>
-                            )}
-                          </Td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </TableWrap>
-              )}
-            </Card>
+        <Card>
+          <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+            <MultiSelect label="Jenis" options={openSourceOptions} selected={selOpenSources} onChange={setSelOpenSources} />
+            <MultiSelect
+              label="Divisi"
+              options={openDivOptions}
+              selected={selOpenDivs}
+              onChange={(v) => {
+                setSelOpenDivs(v);
+                setSelOpenDepts([]);
+              }}
+            />
+            <MultiSelect label="Department" options={openDeptOptions} selected={selOpenDepts} onChange={setSelOpenDepts} />
+            <MultiSelect label="Status MP" options={openStatusOptions} selected={selOpenStatus} onChange={setSelOpenStatus} />
+            <MultiSelect label="Posisi" options={openPosisiOptions} selected={selOpenPosisi} onChange={setSelOpenPosisi} />
+            <div>
+              <span className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">Bulan Masuk</span>
+              <Select value={selOpenMonth} onChange={(e) => setSelOpenMonth(e.target.value)}>
+                <option value="">Semua Bulan</option>
+                {openMonthOptions.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          </div>
+          {openEntries.length === 0 ? (
+            <EmptyState text="Tidak ada supply yang masih Open sesuai filter." />
           ) : (
-            <Card>
-              <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-                <MultiSelect label="Jenis" options={historySourceOptions} selected={selHistorySources} onChange={setSelHistorySources} />
-                <MultiSelect
-                  label="Divisi"
-                  options={divOptions}
-                  selected={selDivs}
-                  onChange={(v) => {
-                    setSelDivs(v);
-                    setSelDepts([]);
-                  }}
-                />
-                <MultiSelect label="Department" options={deptOptions} selected={selDepts} onChange={setSelDepts} />
-                <MultiSelect label="Status" options={historyStatusOptions} selected={selHistoryStatus} onChange={setSelHistoryStatus} />
-                <div>
-                  <span className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">Bulan Masuk</span>
-                  <Select value={selMonth} onChange={(e) => setSelMonth(e.target.value)}>
-                    <option value="">Semua Bulan</option>
-                    {monthOptions.map((m) => (
-                      <option key={m} value={m}>
-                        {m}
-                      </option>
-                    ))}
-                  </Select>
-                </div>
-              </div>
-              {filteredHistory.length === 0 ? (
-                <EmptyState text="Tidak ada riwayat sesuai filter." />
-              ) : (
-                <TableWrap>
-                  <thead>
-                    <tr>
-                      <Th>Noreg</Th>
-                      <Th>Nama</Th>
-                      <Th>Status MP</Th>
-                      <Th>Posisi</Th>
-                      <Th>Sumber</Th>
-                      <Th>Divisi</Th>
-                      <Th>Prev Dept</Th>
-                      <Th>Tanggal Masuk Pool</Th>
-                      <Th>Lead Time in Pool</Th>
-                      <Th>Status</Th>
+            <TableWrap>
+              <thead>
+                <tr>
+                  <Th>Noreg</Th>
+                  <Th>Nama</Th>
+                  <Th>Status MP</Th>
+                  <Th>Posisi</Th>
+                  <Th>Sumber</Th>
+                  <Th>Divisi</Th>
+                  <Th>Prev Dept</Th>
+                  <Th>Tanggal Masuk Pool</Th>
+                  <Th>Lead Time in Pool</Th>
+                  <Th>Sisa Kontrak</Th>
+                  <Th>Aksi</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {openEntries.map((e) => {
+                  const urgency = contractUrgency(e.contract_end);
+                  return (
+                    <tr key={e.id}>
+                      <Td>{e.noreg}</Td>
+                      <Td>{e.nama}</Td>
+                      <Td>{e.type}</Td>
+                      <Td>{posisiFor(e.noreg)}</Td>
+                      <Td>{e.source_label}</Td>
+                      <Td>{e.prev_div}</Td>
+                      <Td>{e.prev_dept}</Td>
+                      <Td>{fmtDate(e.entered_pool_date)}</Td>
+                      <Td>{poolLeadTimeDays(e.entered_pool_date)} hari</Td>
+                      <Td className={urgencyClass[urgency]}>{contractRemainingLabel(e.contract_end)}</Td>
+                      <Td>
+                        {role === "admin" && (
+                          <Button size="sm" variant="danger" onClick={() => handleNaturalRelease(e)}>
+                            Natural Release
+                          </Button>
+                        )}
+                      </Td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {filteredHistory.map((e) => (
-                      <tr key={e.id}>
-                        <Td>{e.noreg}</Td>
-                        <Td>{e.nama}</Td>
-                        <Td>{e.type}</Td>
-                        <Td>{posisiFor(e.noreg)}</Td>
-                        <Td>{e.source_label}</Td>
-                        <Td>{e.prev_div}</Td>
-                        <Td>{e.prev_dept}</Td>
-                        <Td>{fmtDate(e.entered_pool_date)}</Td>
-                        <Td>{poolLeadTimeDays(e.entered_pool_date)} hari</Td>
-                        <Td>
-                          <Badge tone={statusTone(e.status)}>{e.status}</Badge>
-                        </Td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </TableWrap>
-              )}
-            </Card>
+                  );
+                })}
+              </tbody>
+            </TableWrap>
           )}
-        </>
+        </Card>
       )}
     </div>
   );

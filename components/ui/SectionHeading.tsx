@@ -16,22 +16,29 @@ export function SectionHeading({
   title,
   subtitle,
   action,
+  divider = true,
 }: {
   n: number | string;
   title: ReactNode;
   subtitle?: ReactNode;
   action?: ReactNode;
+  /** Thin rule above the heading, separating this section from the one
+   * before it. Off for a page's first section (nothing to separate from
+   * yet, right under the page's own H1). */
+  divider?: boolean;
 }) {
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3">
-      <div className="flex items-start gap-2.5">
-        <NumberBadge n={n} />
-        <div>
-          <h2 className="text-base font-bold text-slate-800 dark:text-slate-100">{title}</h2>
-          {subtitle && <p className="text-xs text-slate-500 dark:text-slate-400">{subtitle}</p>}
+    <div className={divider ? "border-t border-slate-200 pt-6 dark:border-slate-800" : ""}>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-start gap-2.5">
+          <NumberBadge n={n} />
+          <div>
+            <h2 className="text-base font-bold text-slate-800 dark:text-slate-100">{title}</h2>
+            {subtitle && <p className="text-xs text-slate-500 dark:text-slate-400">{subtitle}</p>}
+          </div>
         </div>
+        {action}
       </div>
-      {action}
     </div>
   );
 }
