@@ -678,8 +678,8 @@ export function DemandPageClient() {
             <TableWrap maxHeightClass="max-h-[70vh]">
               <thead>
                 <tr>
+                  <Th freeze="only">Kebutuhan</Th>
                   <Th>Status</Th>
-                  <Th>Kebutuhan</Th>
                   <Th>Department</Th>
                   <Th>Tiba di Shop</Th>
                   <Th>Source</Th>
@@ -812,18 +812,18 @@ function DemandRow({
 
   return (
     <tr className="align-top">
+      <Td freeze="only" className="min-w-[180px] max-w-[15rem] whitespace-normal">
+        <div className="font-medium text-slate-800 dark:text-slate-100">
+          {isLabelRow ? d.outgoing_label : d.outgoing_nama || d.outgoing_noreg}
+        </div>
+        <div className="text-xs text-slate-500 dark:text-slate-400">
+          {isLabelRow ? demandStatusLabel(d) : `${d.outgoing_noreg} · ${demandStatusLabel(d)}`}
+          {crossSourced && " (dari Kontrak)"}
+        </div>
+      </Td>
       <Td>
         <Badge tone={statusTone(status)}>{status}</Badge>
         <DeadlineNote deadline={deadline} fulfilled={status.startsWith("Fulfilled") || verified} />
-      </Td>
-      <Td className="min-w-[180px] whitespace-normal">
-        <div className="font-medium text-slate-800 dark:text-slate-100">
-          {demandStatusLabel(d)}
-          {crossSourced && <span className="ml-1.5 text-xs font-normal text-slate-500 dark:text-slate-400">(dari Kontrak)</span>}
-        </div>
-        <div className="text-xs text-slate-500 dark:text-slate-400">
-          {isLabelRow ? d.outgoing_label : `${d.outgoing_nama} · ${d.outgoing_noreg}`}
-        </div>
       </Td>
       <Td>
         <div>{d.dept}</div>

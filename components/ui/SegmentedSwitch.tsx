@@ -39,6 +39,7 @@ export function SegmentedSwitch<T extends string>({
     >
       {options.map((opt, i) => {
         const checked = value === opt.value;
+        const focusable = checked || (i === 0 && !options.some((o) => o.value === value));
         return (
           <button
             key={opt.value}
@@ -48,7 +49,7 @@ export function SegmentedSwitch<T extends string>({
             type="button"
             role="radio"
             aria-checked={checked}
-            tabIndex={checked ? 0 : -1}
+            tabIndex={focusable ? 0 : -1}
             onClick={() => onChange(opt.value)}
             onKeyDown={(e) => onKeyDown(e, i)}
             className={`min-h-9 rounded-full px-4 text-xs font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 ${

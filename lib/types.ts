@@ -21,6 +21,25 @@ export type PlantUnit = (typeof PLANT_UNITS)[number];
 export const LABOR_TYPES = ["A", "B1", "B2", "B3", "B4", "C1", "C2", "D", "E1", "E2", "F", "T"] as const;
 export type LaborType = (typeof LABOR_TYPES)[number];
 
+/** Kaizen supply is declared per labor group: "A/F" covers codes A and F,
+ * "B/C" covers B1–B4 and C1–C2. Matched on the code's leading letter so a
+ * free-text value like "b3" still lands in the right group. */
+export const KAIZEN_LABOR_GROUPS = ["A/F", "B/C"] as const;
+export type KaizenLaborGroup = (typeof KAIZEN_LABOR_GROUPS)[number];
+
+export function inKaizenLaborGroup(group: KaizenLaborGroup, laborType: string): boolean {
+  const letter = laborType.trim().charAt(0).toUpperCase();
+  return group === "A/F" ? letter === "A" || letter === "F" : letter === "B" || letter === "C";
+}
+
+/** Which labor group a Kaizen Supply Pool entry was released under — read
+ * back from its source_label (see createKaizenSupply). Null for entries
+ * recorded before the labor group existed. */
+export function kaizenLaborGroupOf(sourceLabel: string): KaizenLaborGroup | null {
+  const m = sourceLabel.match(/Labor (A\/F|B\/C)/);
+  return m ? (m[1] as KaizenLaborGroup) : null;
+}
+
 // ---------------------------------------------------------------------------
 // 3.1 / 3.2 — ZPAR Snapshot & Employee Record
 // ---------------------------------------------------------------------------

@@ -3,6 +3,13 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  /* Data table rows are opaque so frozen (sticky) columns can inherit the
+     exact row color and never show content scrolling underneath. */
+  --row-bg: #ffffff;
+  --row-alt: #f8fafc;
+  --row-hover: #f1f5f9;
+  --table-divider: #e2e8f0;
+  --freeze-shadow: rgba(15, 23, 42, 0.12);
 }
 
 @theme inline {
@@ -16,7 +23,22 @@
   :root {
     --background: #0a0a0a;
     --foreground: #ededed;
+    --row-bg: #0f172a;
+    --row-alt: #131c30;
+    --row-hover: #1a2438;
+    --table-divider: #1e293b;
+    --freeze-shadow: rgba(0, 0, 0, 0.45);
   }
+}
+
+.data-table tbody tr {
+  background-color: var(--row-bg);
+}
+.data-table tbody tr:nth-child(even) {
+  background-color: var(--row-alt);
+}
+.data-table tbody tr:hover {
+  background-color: var(--row-hover);
 }
 
 html {

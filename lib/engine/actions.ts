@@ -21,6 +21,7 @@ import type {
   DemandOriginType,
   EmployeeRecord,
   EmploymentStatus,
+  KaizenLaborGroup,
   MpStatusKategori,
   PkwtReview,
   Project,
@@ -844,7 +845,8 @@ export function pushToUtilPool(input: {
  * every other Supply Pool source (see estimateContractEnd). */
 export function createKaizenSupply(input: {
   releaseDate: string;
-  activity?: string;
+  activity: string;
+  laborGroup: KaizenLaborGroup;
   persons: { noreg: string; nama: string; type: MpStatusKategori; div: string; dept: string }[];
 }): UtilPoolEntry[] {
   const year = input.releaseDate.slice(0, 4);
@@ -856,7 +858,7 @@ export function createKaizenSupply(input: {
       nama: p.nama,
       type: p.type,
       source: "Kaizen",
-      source_label: `Kaizen ${year} - ${p.div}${activitySuffix}`,
+      source_label: `Kaizen ${year} Labor ${input.laborGroup} - ${p.div}${activitySuffix}`,
       prev_div: p.div,
       prev_dept: p.dept,
       contract_end: contractEnd,

@@ -66,8 +66,8 @@ export function ReviewSection({
         <TableWrap maxHeightClass="max-h-[600px]">
           <thead>
             <tr>
-              <Th>Noreg</Th>
-              <Th>Nama Lengkap</Th>
+              <Th freeze="noreg">Noreg</Th>
+              <Th freeze="nama">Nama Lengkap</Th>
               <Th>Status</Th>
               <Th>Divisi</Th>
               <Th>Department</Th>
@@ -82,8 +82,10 @@ export function ReviewSection({
               const days = sisaHari(r.tgl_review);
               return (
                 <tr key={r.id}>
-                  <Td>{r.noreg}</Td>
-                  <Td>{r.nama}</Td>
+                  <Td freeze="noreg">{r.noreg}</Td>
+                  <Td freeze="nama" className="font-medium text-slate-800 dark:text-slate-100">
+                    {r.nama}
+                  </Td>
                   <Td>
                     <Badge tone={r.status_kontrak === "Permanen" ? "green" : "amber"}>{r.status_kontrak}</Badge>
                   </Td>
@@ -199,8 +201,8 @@ export function VokasiEndedSection({
         <TableWrap>
           <thead>
             <tr>
-              <Th>Noreg</Th>
-              <Th>Nama Lengkap</Th>
+              <Th freeze="noreg">Noreg</Th>
+              <Th freeze="nama">Nama Lengkap</Th>
               <Th>Divisi</Th>
               <Th>Department</Th>
               <Th>Tanggal Masuk</Th>
@@ -214,8 +216,10 @@ export function VokasiEndedSection({
               const days = sisaHari(v.tgl_ended);
               return (
                 <tr key={v.id}>
-                  <Td>{v.noreg}</Td>
-                  <Td>{v.nama}</Td>
+                  <Td freeze="noreg">{v.noreg}</Td>
+                  <Td freeze="nama" className="font-medium text-slate-800 dark:text-slate-100">
+                    {v.nama}
+                  </Td>
                   <Td>{v.div}</Td>
                   <Td>{v.dept}</Td>
                   <Td>{fmtDate(v.tgl_masuk)}</Td>

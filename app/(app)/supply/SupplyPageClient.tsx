@@ -20,7 +20,7 @@ import { contractRemainingLabel, contractUrgency, fmtDate, poolLeadTimeDays } fr
 import { naturalRelease } from "@/lib/engine/actions";
 import { useRole } from "@/lib/RoleContext";
 import { useSessionState } from "@/lib/useSessionState";
-import type { TaktCase, UtilPoolEntry, UtilPoolSource } from "@/lib/types";
+import { kaizenLaborGroupOf, type TaktCase, type UtilPoolEntry, type UtilPoolSource } from "@/lib/types";
 
 const urgencyClass: Record<string, string> = {
   red: "font-semibold text-red-700 dark:text-red-300",
@@ -35,16 +35,25 @@ const SOURCE_TYPE_LABELS: Record<UtilPoolSource, string> = {
   Kaizen: "Kaizen",
 };
 
+/** Jenis as shown to people: Kaizen splits by the labor group it was
+ * declared under (A/F vs B/C); entries recorded before that existed stay
+ * plain "Kaizen". */
+function jenisOf(e: UtilPoolEntry): string {
+  if (e.source !== "Kaizen") return SOURCE_TYPE_LABELS[e.source];
+  const group = kaizenLaborGroupOf(e.source_label);
+  return group ? `Kaizen Labor ${group}` : "Kaizen";
+}
+
 
 /** ProjectFinish/Kaizen entries have no single owning record to group by —
- * source_label (e.g. "Kaizen 2026 - Assembly (activity)") is the closest
+ * source_label (e.g. "Kaizen 2026 Labor A/F - Assembly (activity)") is the closest
  * thing to a batch id, and there's no dedicated Edit/Hapus page for either,
  * so no href. Takt Down does have an owning TaktCase (and a real Edit/Hapus
  * page at /takt) — grouped by case id instead, since several Takt Down
  * cases at the same plant would otherwise collide on the same source_label
  * ("Takt Down Plant 1"). */
-function tileBySourceLabel(entries: UtilPoolEntry[], source: UtilPoolSource, tone: BatchTileCategory["tone"]): BatchTileCategory {
-  const sourceEntries = entries.filter((e) => e.source === source);
+function tileByJenis(entries: UtilPoolEntry[], jenis: string, tone: BatchTileCategory["tone"]): BatchTileCategory {
+  const sourceEntries = entries.filter((e) => jenisOf(e) === jenis);
   const openEntries = sourceEntries.filter((e) => e.status === "Open");
   const groups = new Map<string, UtilPoolEntry[]>();
   for (const e of sourceEntries) {
@@ -60,7 +69,7 @@ function tileBySourceLabel(entries: UtilPoolEntry[], source: UtilPoolSource, ton
       count: list.filter((e) => e.status === "Open").length,
     }))
     .sort((a, b) => b.count - a.count);
-  return { key: source, label: SOURCE_TYPE_LABELS[source], count: openEntries.length, tone, batches };
+  return { key: jenis, label: jenis, count: openEntries.length, tone, batches };
 }
 
 function tileForTaktDown(entries: UtilPoolEntry[], taktCases: TaktCase[]): BatchTileCategory {
@@ -84,7 +93,15 @@ function tileForTaktDown(entries: UtilPoolEntry[], taktCases: TaktCase[]): Batch
 }
 
 function buildSupplyBatchCategories(entries: UtilPoolEntry[], taktCases: TaktCase[]): BatchTileCategory[] {
-  return [tileForTaktDown(entries, taktCases), tileBySourceLabel(entries, "ProjectFinish", "violet"), tileBySourceLabel(entries, "Kaizen", "green")];
+  const tiles = [
+    tileForTaktDown(entries, taktCases),
+    tileByJenis(entries, SOURCE_TYPE_LABELS.ProjectFinish, "violet"),
+    tileByJenis(entries, "Kaizen Labor A/F", "green"),
+    tileByJenis(entries, "Kaizen Labor B/C", "green"),
+  ];
+  // Pre-labor-group Kaizen entries only get a tile while any still exist.
+  const legacyKaizen = tileByJenis(entries, "Kaizen", "green");
+  return legacyKaizen.batches.length > 0 ? [...tiles, legacyKaizen] : tiles;
 }
 
 export function SupplyPageClient() {
@@ -131,7 +148,7 @@ export function SupplyPageClient() {
   const [selOpenPosisi, setSelOpenPosisi] = useSessionState<string[]>("utilpool.open.posisi", []);
   const [selOpenMonth, setSelOpenMonth] = useSessionState<string>("utilpool.open.month", "");
 
-  const openSourceOptions = useMemo(() => Array.from(new Set(openAllEntries.map((e) => SOURCE_TYPE_LABELS[e.source]))).sort(), [openAllEntries]);
+  const openSourceOptions = useMemo(() => Array.from(new Set(openAllEntries.map(jenisOf))).sort(), [openAllEntries]);
   const openDivOptions = useMemo(() => Array.from(new Set(openAllEntries.map((e) => e.prev_div).filter(Boolean))).sort(), [openAllEntries]);
   const openDeptOptions = useMemo(
     () =>
@@ -151,7 +168,7 @@ export function SupplyPageClient() {
     () =>
       openAllEntries.filter(
         (e) =>
-          (selOpenSources.length === 0 || selOpenSources.includes(SOURCE_TYPE_LABELS[e.source])) &&
+          (selOpenSources.length === 0 || selOpenSources.includes(jenisOf(e))) &&
           (selOpenDivs.length === 0 || selOpenDivs.includes(e.prev_div)) &&
           (selOpenDepts.length === 0 || selOpenDepts.includes(e.prev_dept)) &&
           (selOpenStatus.length === 0 || selOpenStatus.includes(e.type)) &&
@@ -285,8 +302,8 @@ export function SupplyPageClient() {
             <TableWrap>
               <thead>
                 <tr>
-                  <Th>Noreg</Th>
-                  <Th>Nama</Th>
+                  <Th freeze="noreg">Noreg</Th>
+                  <Th freeze="nama">Nama</Th>
                   <Th>Status MP</Th>
                   <Th>Posisi</Th>
                   <Th>Sumber</Th>
@@ -303,8 +320,10 @@ export function SupplyPageClient() {
                   const urgency = contractUrgency(e.contract_end);
                   return (
                     <tr key={e.id}>
-                      <Td>{e.noreg}</Td>
-                      <Td>{e.nama}</Td>
+                      <Td freeze="noreg">{e.noreg}</Td>
+                      <Td freeze="nama" className="font-medium text-slate-800 dark:text-slate-100">
+                        {e.nama}
+                      </Td>
                       <Td>{e.type}</Td>
                       <Td>{posisiFor(e.noreg)}</Td>
                       <Td>{e.source_label}</Td>

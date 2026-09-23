@@ -83,12 +83,13 @@ export function CompositionRowsEditor({
 }: {
   rows: CompositionRow[];
   onChange: (rows: CompositionRow[]) => void;
-  dateLabel: string;
-  /** Restricts Divisi/Department options to only those with at least one
-   * active employee of this ZPAR labor_type code — used for Takt Down,
-   * where a shop only shows up as a release option if it actually has
-   * Labor Type A headcount to release. */
-  laborTypeFilter?: string;
+  /** Label for the per-row date column; omit to hide the column when the
+   * date belongs to the whole case instead (Kaizen). */
+  dateLabel?: string;
+  /** Restricts Divisi/Department options to shops with at least one active
+   * employee of a matching ZPAR labor_type — a single code (Takt Down: "A")
+   * or a predicate (Kaizen: its labor group). */
+  laborTypeFilter?: string | ((laborType: string) => boolean);
   /** Shows the MP Role (Proses/Backup) select — Project only. */
   withRole?: boolean;
   /** A locked row (Project: already expanded into real Demand records) can
@@ -99,7 +100,9 @@ export function CompositionRowsEditor({
   minQtyFor?: (row: CompositionRow) => number;
 }) {
   const allEmployees = getActiveSnapshot()?.employees ?? [];
-  const employees = laborTypeFilter ? allEmployees.filter((e) => e.labor_type === laborTypeFilter) : allEmployees;
+  const matchesLabor =
+    typeof laborTypeFilter === "function" ? laborTypeFilter : laborTypeFilter ? (lt: string) => lt === laborTypeFilter : null;
+  const employees = matchesLabor ? allEmployees.filter((e) => matchesLabor(e.labor_type)) : allEmployees;
   const divOptions = Array.from(new Set(employees.map((e) => e.division).filter(Boolean))).sort();
   const deptOptionsFor = (division: string) =>
     Array.from(new Set(employees.filter((e) => e.division === division).map((e) => e.dept).filter(Boolean))).sort();
@@ -205,15 +208,17 @@ export function CompositionRowsEditor({
                             onChange={(e) => update(row.id, { qty: Number(e.target.value) })}
                           />
                         </div>
-                        <div className="min-w-[150px]">
-                          <span className="mb-0.5 block text-[10px] font-medium text-slate-400">{dateLabel}</span>
-                          <Input
-                            type="date"
-                            disabled={locked}
-                            value={row.date}
-                            onChange={(e) => update(row.id, { date: e.target.value })}
-                          />
-                        </div>
+                        {dateLabel && (
+                          <div className="min-w-[150px]">
+                            <span className="mb-0.5 block text-[10px] font-medium text-slate-400">{dateLabel}</span>
+                            <Input
+                              type="date"
+                              disabled={locked}
+                              value={row.date}
+                              onChange={(e) => update(row.id, { date: e.target.value })}
+                            />
+                          </div>
+                        )}
                         {locked ? (
                           <span className="mb-1.5 text-[10px] text-slate-400">qty awal: {minQtyFor?.(row)}</span>
                         ) : (
