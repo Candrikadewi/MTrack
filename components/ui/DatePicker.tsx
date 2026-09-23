@@ -35,11 +35,13 @@ export function DatePicker({
   onChange,
   disabled,
   className = "",
+  ariaLabel,
 }: {
   value: string;
   onChange: (value: string) => void;
   disabled?: boolean;
   className?: string;
+  ariaLabel?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
@@ -110,12 +112,15 @@ export function DatePicker({
         type="button"
         disabled={disabled}
         onClick={toggleOpen}
+        aria-label={ariaLabel ? `${ariaLabel}: ${selected ? format(selected, "dd MMM yyyy") : "belum diisi"}` : undefined}
+        aria-haspopup="dialog"
+        aria-expanded={open}
         className="flex w-full items-center justify-between gap-2 rounded-xl border border-slate-300 bg-white px-3 py-2 text-left text-sm text-slate-800 outline-none transition-colors focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
       >
-        <span className={selected ? "" : "text-slate-400"}>
+        <span className={selected ? "" : "text-slate-500 dark:text-slate-400"}>
           {selected ? format(selected, "dd MMM yyyy") : "Pilih tanggal"}
         </span>
-        <Calendar size={15} className="shrink-0 text-slate-400" />
+        <Calendar size={15} aria-hidden className="shrink-0 text-slate-400" />
       </button>
       {open &&
         !disabled &&

@@ -59,7 +59,10 @@ export function MultiSelect({
         aria-labelledby={label ? `${labelId} ${panelId}-value` : undefined}
         onClick={() => setOpen((o) => !o)}
         onKeyDown={(e) => {
-          if (e.key === "Escape" && open) closeAndReturnFocus();
+          if (e.key === "Escape" && open) {
+            e.stopPropagation();
+            closeAndReturnFocus();
+          }
         }}
         className={`flex w-full items-center justify-between gap-2 rounded-xl border border-slate-300 bg-white px-3 py-2 text-left text-sm text-slate-700 transition-colors hover:border-slate-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 ${
           selected.length > 0 ? "pr-8" : ""
@@ -86,7 +89,10 @@ export function MultiSelect({
           role="group"
           aria-label={label}
           onKeyDown={(e) => {
-            if (e.key === "Escape") closeAndReturnFocus();
+            if (e.key === "Escape") {
+              e.stopPropagation();
+              closeAndReturnFocus();
+            }
           }}
           className="absolute z-30 mt-1 max-h-56 w-full min-w-[180px] overflow-y-auto rounded-xl border border-slate-200 bg-white p-1.5 shadow-lg dark:border-slate-700 dark:bg-slate-900"
         >

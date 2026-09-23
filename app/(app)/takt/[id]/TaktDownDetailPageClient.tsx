@@ -50,7 +50,7 @@ export function TaktDownDetailPageClient({ id }: { id: string }) {
   const poolByNoreg = new Map(utilPool.filter((u) => takt.released_pool_ids.includes(u.id)).map((u) => [u.noreg, u]));
   // Where a utilized person actually went and since when — cross-referenced
   // from the Demand they became the replacement for (the same Demand
-  // assignPoolEntryToDemand set their Util Pool entry to Assigned for).
+  // proposePoolCandidate reserved their Util Pool entry for).
   const demandByNoreg = new Map(demands.filter((d) => d.replacement_noreg).map((d) => [d.replacement_noreg, d]));
 
   const groups = new Map<string, { division: string; dept: string; persons: TaktDownPerson[] }>();

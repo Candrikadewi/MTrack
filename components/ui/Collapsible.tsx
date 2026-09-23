@@ -1,5 +1,5 @@
 "use client";
-import { useState, type ReactNode } from "react";
+import { useId, useState, type ReactNode } from "react";
 import { ChevronDown } from "lucide-react";
 import { NumberBadge } from "@/components/ui/SectionHeading";
 
@@ -29,23 +29,32 @@ export function CollapsibleSection({
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(defaultOpen);
+  const panelId = useId();
   return (
     <div className={divider ? "border-t border-slate-200 pt-6 dark:border-slate-800" : ""}>
-      <button type="button" onClick={() => setOpen((o) => !o)} className="flex w-full items-center justify-between gap-3 text-left">
-        <div className="flex items-start gap-2.5">
-          {n !== undefined && <NumberBadge n={n} />}
-          <div>
-            <h2 className="text-base font-bold text-slate-800 dark:text-slate-100">{title}</h2>
-            {subtitle && <p className="text-xs text-slate-500 dark:text-slate-400">{subtitle}</p>}
-          </div>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          {badge}
-          <ChevronDown size={16} className={`text-slate-400 transition-transform ${open ? "rotate-180" : ""}`} />
-        </div>
-      </button>
+      <h2>
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          aria-controls={panelId}
+          className="flex w-full items-center justify-between gap-3 rounded-xl text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-500"
+        >
+          <span className="flex items-start gap-2.5">
+            {n !== undefined && <NumberBadge n={n} />}
+            <span>
+              <span className="block text-base font-bold text-slate-800 dark:text-slate-100">{title}</span>
+              {subtitle && <span className="block text-xs font-normal text-slate-500 dark:text-slate-400">{subtitle}</span>}
+            </span>
+          </span>
+          <span className="flex shrink-0 items-center gap-2">
+            {badge}
+            <ChevronDown size={16} aria-hidden className={`text-slate-500 transition-transform dark:text-slate-400 ${open ? "rotate-180" : ""}`} />
+          </span>
+        </button>
+      </h2>
       {open && (
-        <div className="animate-reveal mt-3 space-y-4 rounded-3xl border border-slate-200/70 bg-white p-5 shadow-sm shadow-slate-200/60 dark:border-slate-800 dark:bg-slate-900">
+        <div id={panelId} className="animate-reveal mt-3 space-y-4 rounded-3xl border border-slate-200/70 bg-white p-5 shadow-sm shadow-slate-200/60 dark:border-slate-800 dark:bg-slate-900">
           {children}
         </div>
       )}

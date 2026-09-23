@@ -19,25 +19,38 @@ export function ToastHost() {
         return (
           <div
             key={t.id}
-            role="alert"
-            className={`pointer-events-auto flex w-full max-w-md items-start gap-2.5 rounded-2xl border px-4 py-3 shadow-lg backdrop-blur-sm ${
+            role={isError ? "alert" : "status"}
+            className={`animate-reveal pointer-events-auto flex w-full max-w-md items-start gap-2.5 rounded-2xl border px-4 py-3 shadow-lg ${
               isError
-                ? "border-red-200 bg-red-50/95 text-red-800 dark:border-red-500/30 dark:bg-red-950/90 dark:text-red-200"
-                : "border-emerald-200 bg-emerald-50/95 text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-950/90 dark:text-emerald-200"
+                ? "border-red-200 bg-red-50 text-red-800 dark:border-red-500/30 dark:bg-red-950 dark:text-red-200"
+                : "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-950 dark:text-emerald-200"
             }`}
           >
             {isError ? (
-              <AlertCircle size={18} className="mt-0.5 shrink-0" />
+              <AlertCircle size={18} aria-hidden className="mt-0.5 shrink-0" />
             ) : (
-              <CheckCircle2 size={18} className="mt-0.5 shrink-0" />
+              <CheckCircle2 size={18} aria-hidden className="mt-0.5 shrink-0" />
             )}
             <p className="flex-1 text-sm leading-snug">{t.message}</p>
+            {t.action && (
+              <button
+                type="button"
+                onClick={() => {
+                  t.action?.onClick();
+                  dismissToast(t.id);
+                }}
+                className="shrink-0 rounded-lg px-2 py-0.5 text-sm font-semibold underline underline-offset-2 hover:no-underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-current"
+              >
+                {t.action.label}
+              </button>
+            )}
             <button
+              type="button"
               onClick={() => dismissToast(t.id)}
-              aria-label="Tutup"
-              className="shrink-0 rounded-md p-0.5 opacity-60 transition-opacity hover:opacity-100"
+              aria-label="Tutup notifikasi"
+              className="shrink-0 rounded-md p-1 opacity-70 transition-opacity hover:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-current"
             >
-              <X size={15} />
+              <X size={15} aria-hidden />
             </button>
           </div>
         );

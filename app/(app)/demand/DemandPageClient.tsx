@@ -1,5 +1,5 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 import { addMonths, format } from "date-fns";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -7,7 +7,7 @@ import { Select } from "@/components/ui/Form";
 import { FullWidthTabs } from "@/components/ui/Tabs";
 import { Badge, statusTone } from "@/components/ui/Badge";
 import { EmptyState, FilteredEmptyState, TableWrap, Td, Th } from "@/components/ui/Table";
-import { DonutChart } from "@/components/ui/DonutChart";
+import { Skeleton } from "@/components/ui/Skeleton";
 import { MultiSelect } from "@/components/ui/MultiSelect";
 import { BatchTileRow, type BatchTileCategory } from "@/components/ui/BatchTileRow";
 import { RatioWidget, RatioScenarioCompare } from "@/components/ui/RatioWidget";
@@ -19,7 +19,8 @@ import { ReviewSection, VokasiEndedSection } from "@/components/enrollment/Revie
 import { ManualDemandModal } from "@/components/enrollment/ManualDemandModal";
 import { NewProjectModal } from "@/components/projects/NewProjectModal";
 import { TaktUpModal } from "@/components/takt/TaktUpModal";
-import { useStoreList } from "@/lib/useStore";
+import { Check, Circle } from "lucide-react";
+import { useStoreList, useStoreReady } from "@/lib/useStore";
 import { demandStore, pkwtReviewStore, projectStore, taktStore, utilPoolStore, vokasiStore, zparStore } from "@/lib/repo";
 import { fmtDate, sisaHari, demandVisibleDate, fulfillmentDeadline, supplyDemandStatus, computeVokasiStatus } from "@/lib/engine/compute";
 import {
@@ -33,15 +34,14 @@ import {
   filterByDivDept,
 } from "@/lib/engine/enrollment";
 import {
-  assignPoolEntryToDemand,
   confirmDemandFulfillment,
   confirmShopReceipt,
-  getActiveEmployeeByNoreg,
-  getVokasiByNoreg,
+  proposePoolCandidate,
   setDemandFulfillDate,
   setDemandNoReplace,
   setDemandReplacementByNoreg,
 } from "@/lib/engine/actions";
+import { pushToast } from "@/lib/toast";
 import { useRole } from "@/lib/RoleContext";
 import { useSessionState } from "@/lib/useSessionState";
 import type {
@@ -91,12 +91,6 @@ function monthOptions(): string[] {
   return Array.from({ length: 13 }, (_, i) => format(addMonths(base, 6 - i), "yyyy-MM"));
 }
 
-function confirmLabel(d: Demand): string {
-  if (d.replacement_status === "PKWT New Hire" || d.replacement_status === "Vokasi New Hire") return "Tgl Sign Kontrak";
-  if (d.replacement_status === "MP Excess" || d.replacement_status === "MP Back Up") return "Tgl Assigned";
-  return "Tgl Konfirmasi";
-}
-
 /** Default scope for every ratio widget on this page when no Divisi/Dept
  * filter is active: Labor Type A within Vehicle Plant (Pers Area Karawang 1
  * & 2) — not the whole plant. Once a Divisi/Dept filter is picked, that
@@ -127,13 +121,17 @@ type RatioDelta = { permanen: number; kontrak: number; vokasi: number };
  * not a replacement of someone departing) — origin_ref there is a
  * project/case id, not a person, so this deliberately doesn't try to
  * resolve one for them. */
-function outgoingBucket(d: Demand): keyof RatioDelta | null {
+function outgoingBucket(
+  d: Demand,
+  empByNoreg: Map<string, EmployeeRecord>,
+  vokasiNoregs: Set<string>
+): keyof RatioDelta | null {
   if (d.origin_type === "Project" || d.origin_type === "TaktUp") return null;
   if (d.origin_type === "PkwtTerminate") return "kontrak";
   if (d.origin_type === "VokasiEnded") return "vokasi";
-  const emp = getActiveEmployeeByNoreg(d.outgoing_noreg);
+  const emp = empByNoreg.get(d.outgoing_noreg);
   if (emp) return emp.status_kontrak === "Permanen" ? "permanen" : "kontrak";
-  if (getVokasiByNoreg(d.outgoing_noreg)) return "vokasi";
+  if (vokasiNoregs.has(d.outgoing_noreg)) return "vokasi";
   return null;
 }
 
@@ -143,10 +141,10 @@ function outgoingBucket(d: Demand): keyof RatioDelta | null {
  * counted in the current headcount, so they net zero. Undecided demands
  * (no Source picked yet) contribute nothing — there's nothing to project
  * until a mapping choice is actually made. */
-function demandRatioDelta(d: Demand): RatioDelta {
+function demandRatioDelta(d: Demand, empByNoreg: Map<string, EmployeeRecord>, vokasiNoregs: Set<string>): RatioDelta {
   const delta: RatioDelta = { permanen: 0, kontrak: 0, vokasi: 0 };
   if (!d.replacement_status) return delta;
-  const out = outgoingBucket(d);
+  const out = outgoingBucket(d, empByNoreg, vokasiNoregs);
   if (out) delta[out] -= 1;
   if (d.replacement_status === "PKWT New Hire") delta.kontrak += 1;
   else if (d.replacement_status === "Vokasi New Hire") delta.vokasi += 1;
@@ -233,9 +231,39 @@ function buildDemandBatchCategories(
   ];
 }
 
+const TILE_JENIS: Record<string, string[]> = {
+  project: [JENIS_LABEL.Project],
+  taktup: [JENIS_LABEL.TaktUp],
+  pkwt: [JENIS_LABEL.PkwtTerminate],
+  vokasi: [JENIS_LABEL.VokasiEnded],
+  lainnya: (["Resign", "Pension", "PensionDini", "GST", "Unfit", "Others", "Manual"] as DemandOriginType[]).map((t) => JENIS_LABEL[t]),
+};
+
+const STATUS_OPTIONS = ["Open", "DELAY", "Need Replace ASAP", "Fulfilled Ontime", "Fulfilled but Delay"];
+
+function todayKey(): string {
+  return format(new Date(), "yyyy-MM-dd");
+}
+
+function whoOf(d: Demand): string {
+  if (d.origin_type === "Project" || d.origin_type === "TaktUp") return `${d.outgoing_label} (${d.dept})`;
+  return d.outgoing_nama || d.outgoing_noreg || d.dept;
+}
+
+/** Waiting on step 2 of the mapping: a candidate is in, nobody has
+ * verified it yet. */
+function awaitingVerification(d: Demand): boolean {
+  return Boolean(d.replacement_noreg) && !d.fulfillment_confirmed_date && d.replacement_status !== "No Replace";
+}
+
 export function DemandPageClient() {
   const role = useRole();
+  const isAdmin = role === "admin";
+  const canReview = role === "admin" || role === "hr";
+  const canVerify = role === "admin" || role === "hr";
+
   const demands = useStoreList(demandStore);
+  const demandsReady = useStoreReady(demandStore);
   const poolEntries = useStoreList(utilPoolStore);
   const projects = useStoreList(projectStore);
   const taktCases = useStoreList(taktStore);
@@ -243,17 +271,26 @@ export function DemandPageClient() {
   const vokasi = useStoreList(vokasiStore);
   const snapshots = useStoreList(zparStore);
   const employees = useMemo(() => snapshots.find((s) => s.is_active)?.employees ?? [], [snapshots]);
+  const empByNoreg = useMemo(() => new Map(employees.map((e) => [e.noreg, e])), [employees]);
+  const vokasiNoregs = useMemo(() => new Set(vokasi.map((v) => v.noreg)), [vokasi]);
 
   const batchCategories = useMemo(() => buildDemandBatchCategories(demands, projects, taktCases), [demands, projects, taktCases]);
 
-  // ---- Section 2: Enrollment Review ----
+  // Section numbers follow what this role can actually see, so nobody reads
+  // "1, 2, 4" and wonders what they're missing.
+  const sectionNo = {
+    enroll: canReview ? 2 : 0,
+    input: isAdmin ? (canReview ? 3 : 2) : 0,
+    detail: 2 + (canReview ? 1 : 0) + (isAdmin ? 1 : 0),
+  };
+
+  // ---- Enrollment Review ----
   const [enrollTab, setEnrollTab] = useSessionState<DemandCategory>("enrollment.tab", "PKWT");
   const [period, setPeriod] = useSessionState<string>("enrollment.period", currentMonthKey());
   const [reviewDivs, setReviewDivs] = useSessionState<string[]>("enrollment.pkwt.divs", []);
   const [reviewDepts, setReviewDepts] = useSessionState<string[]>("enrollment.pkwt.depts", []);
   const [vokasiDivs, setVokasiDivs] = useSessionState<string[]>("enrollment.vokasi.divs", []);
   const [vokasiDepts, setVokasiDepts] = useSessionState<string[]>("enrollment.vokasi.depts", []);
-  const [manualOpen, setManualOpen] = useState(false);
 
   const fulfilledVokasiIds = useMemo(
     () => new Set(demands.filter((d) => d.category === "Vokasi" && d.status === "Fulfilled").map((d) => d.origin_ref)),
@@ -261,39 +298,44 @@ export function DemandPageClient() {
   );
   const activeDivs = enrollTab === "PKWT" ? reviewDivs : vokasiDivs;
   const activeDepts = enrollTab === "PKWT" ? reviewDepts : vokasiDepts;
-  const ratioScopedEmployeesFinal = scopeEmployeesForRatio(employees, activeDivs, activeDepts);
-  const ratioScopedVokasiFinal = scopeVokasiForRatio(vokasi, activeDivs, activeDepts);
-  const ratioVokasiActive = ratioScopedVokasiFinal.filter((v) => computeVokasiStatus(v.tgl_ended, fulfilledVokasiIds.has(v.id)) !== "Ended");
-  const enrollmentRatioCounts = {
-    permanen: ratioScopedEmployeesFinal.filter((e) => e.status_kontrak === "Permanen").length,
-    kontrak: ratioScopedEmployeesFinal.filter((e) => e.status_kontrak !== "Permanen").length,
-    vokasi: ratioVokasiActive.length,
-  };
+  const enrollmentRatioCounts = useMemo(() => {
+    const emps = scopeEmployeesForRatio(employees, activeDivs, activeDepts);
+    const vok = scopeVokasiForRatio(vokasi, activeDivs, activeDepts).filter(
+      (v) => computeVokasiStatus(v.tgl_ended, fulfilledVokasiIds.has(v.id)) !== "Ended"
+    );
+    return {
+      permanen: emps.filter((e) => e.status_kontrak === "Permanen").length,
+      kontrak: emps.filter((e) => e.status_kontrak !== "Permanen").length,
+      vokasi: vok.length,
+    };
+  }, [employees, vokasi, activeDivs, activeDepts, fulfilledVokasiIds]);
 
-  // ---- Section 3: Input Demand Baru ----
+  // ---- Input Demand Baru ----
   const [inputTab, setInputTab] = useSessionState<"project" | "taktup" | "manual">("demand.input.tab", "project");
   const [projectModalOpen, setProjectModalOpen] = useState(false);
   const [taktUpOpen, setTaktUpOpen] = useState(false);
+  const [manualOpen, setManualOpen] = useState(false);
 
-  // ---- Section 4: Detail Demand ----
-  const [tab, setTab] = useState<DemandCategory>("PKWT");
-  const [month, setMonth] = useState(currentMonthKey());
-  const [jenis, setJenis] = useState<string[]>([]);
-  const [divs, setDivs] = useState<string[]>([]);
-  const [depts, setDepts] = useState<string[]>([]);
-  const [statusMp, setStatusMp] = useState<string[]>([]);
-  const [statusFilter, setStatusFilter] = useState<string[]>([]);
+  // ---- Detail dan Mapping Demand ----
+  const [tab, setTab] = useSessionState<DemandCategory>("demand.detail.tab", "PKWT");
+  const [month, setMonth] = useSessionState<string>("demand.detail.month", currentMonthKey());
+  const [jenis, setJenis] = useSessionState<string[]>("demand.detail.jenis", []);
+  const [divs, setDivs] = useSessionState<string[]>("demand.detail.divs", []);
+  const [depts, setDepts] = useSessionState<string[]>("demand.detail.depts", []);
+  const [statusMp, setStatusMp] = useSessionState<string[]>("demand.detail.statusMp", []);
+  const [statusFilter, setStatusFilter] = useSessionState<string[]>("demand.detail.status", []);
+  const [onlyAwaiting, setOnlyAwaiting] = useSessionState<boolean>("demand.detail.awaiting", false);
+  const detailRef = useRef<HTMLElement>(null);
 
   const tabDemands = useMemo(() => demands.filter((d) => effectiveDemandCategory(d) === tab), [demands, tab]);
   const monthDemands = useMemo(
-    () => tabDemands.filter((d) => demandVisibleDate(demandTargetDate(d)).slice(0, 7) === month),
+    () => (month ? tabDemands.filter((d) => demandVisibleDate(demandTargetDate(d)).slice(0, 7) === month) : tabDemands),
     [tabDemands, month]
   );
   const jenisOptions = useMemo(() => Array.from(new Set(monthDemands.map((d) => JENIS_LABEL[d.origin_type]))).sort(), [monthDemands]);
   const divOptions = useMemo(() => divisionsOfRows(monthDemands), [monthDemands]);
   const deptOptions = useMemo(() => deptsOfRows(monthDemands, divs), [monthDemands, divs]);
   const statusMpOptions = Object.values(EMPLOYMENT_STATUS_LABEL);
-  const statusOptions = ["Open", "DELAY", "Need Replace ASAP", "Fulfilled Ontime", "Fulfilled but Delay"];
 
   const filteredDemands = useMemo(
     () =>
@@ -301,121 +343,149 @@ export function DemandPageClient() {
         .filter((d) => jenis.length === 0 || jenis.includes(JENIS_LABEL[d.origin_type]))
         .filter((d) => statusMp.length === 0 || statusMp.includes(EMPLOYMENT_STATUS_LABEL[d.replacement_employment_status]))
         .filter((d) => statusFilter.length === 0 || statusFilter.includes(demandGranularStatus(d)))
+        .filter((d) => !onlyAwaiting || awaitingVerification(d))
         .slice()
         .sort((a, b) => demandTargetDate(a).localeCompare(demandTargetDate(b))),
-    [monthDemands, divs, depts, jenis, statusMp, statusFilter]
+    [monthDemands, divs, depts, jenis, statusMp, statusFilter, onlyAwaiting]
   );
 
-  const canEditReplacement = role === "admin" || (role === "shop" && tab === "PKWT");
-  const canEditFulfillDate = role === "admin";
+  const canEditReplacement = isAdmin || (role === "shop" && tab === "PKWT");
+  const canEditFulfillDate = isAdmin;
 
   const totalCount = monthDemands.length;
-  const fulfilledCount = monthDemands.filter((d) => demandGranularStatus(d).startsWith("Fulfilled")).length;
+  const shopReceivedCount = monthDemands.filter((d) => demandGranularStatus(d).startsWith("Fulfilled")).length;
+  const awaitingCount = monthDemands.filter(awaitingVerification).length;
+  const activeFilterCount = jenis.length + divs.length + depts.length + statusMp.length + statusFilter.length + (onlyAwaiting ? 1 : 0);
+
+  function resetDetailFilters() {
+    setJenis([]);
+    setDivs([]);
+    setDepts([]);
+    setStatusMp([]);
+    setStatusFilter([]);
+    setOnlyAwaiting(false);
+  }
+
+  function showCategoryInTable(key: string) {
+    const labels = TILE_JENIS[key] ?? [];
+    const open = demands.filter((d) => d.status !== "Fulfilled" && labels.includes(JENIS_LABEL[d.origin_type]));
+    const inTab = (c: DemandCategory) => open.filter((d) => effectiveDemandCategory(d) === c).length;
+    const nextTab: DemandCategory =
+      key === "pkwt" ? "PKWT" : key === "vokasi" ? "Vokasi" : inTab(tab) > 0 ? tab : inTab("PKWT") > 0 ? "PKWT" : "Vokasi";
+    setTab(nextTab);
+    setMonth("");
+    resetDetailFilters();
+    setJenis(labels);
+    detailRef.current?.scrollIntoView({ block: "start" });
+    detailRef.current?.focus({ preventScroll: true });
+  }
 
   // Ratio scope follows the same Divisi/Dept filter as the table below —
   // unfiltered defaults to Labor A within Vehicle Plant, not the whole plant.
-  const ratioScopedEmployeesFinal4 = scopeEmployeesForRatio(employees, divs, depts);
-  const ratioScopedVokasiFinal4 = scopeVokasiForRatio(vokasi, divs, depts);
-  const ratioVokasiActive4 = ratioScopedVokasiFinal4.filter((v) => computeVokasiStatus(v.tgl_ended, fulfilledVokasiIds.has(v.id)) !== "Ended");
-  const scenarioBase = {
-    permanen: ratioScopedEmployeesFinal4.filter((e) => e.status_kontrak === "Permanen").length,
-    kontrak: ratioScopedEmployeesFinal4.filter((e) => e.status_kontrak !== "Permanen").length,
-    vokasi: ratioVokasiActive4.length,
-  };
+  const scenarioBase = useMemo(() => {
+    const emps = scopeEmployeesForRatio(employees, divs, depts);
+    const vok = scopeVokasiForRatio(vokasi, divs, depts).filter(
+      (v) => computeVokasiStatus(v.tgl_ended, fulfilledVokasiIds.has(v.id)) !== "Ended"
+    );
+    return {
+      permanen: emps.filter((e) => e.status_kontrak === "Permanen").length,
+      kontrak: emps.filter((e) => e.status_kontrak !== "Permanen").length,
+      vokasi: vok.length,
+    };
+  }, [employees, vokasi, divs, depts, fulfilledVokasiIds]);
 
   // Projection follows the actual mapping decided per demand (any category,
   // any month — not just what's currently visible in the table), scoped to
   // the same Divisi/Dept filter.
-  const decidedDemands = filterByDivDept(demands, divs, depts).filter((d) => d.replacement_status !== "");
-  const projectionDelta = decidedDemands.reduce<RatioDelta>(
-    (acc, d) => {
-      const delta = demandRatioDelta(d);
-      return { permanen: acc.permanen + delta.permanen, kontrak: acc.kontrak + delta.kontrak, vokasi: acc.vokasi + delta.vokasi };
-    },
-    { permanen: 0, kontrak: 0, vokasi: 0 }
-  );
-  const projectionCounts = {
-    permanen: Math.max(0, scenarioBase.permanen + projectionDelta.permanen),
-    kontrak: Math.max(0, scenarioBase.kontrak + projectionDelta.kontrak),
-    vokasi: Math.max(0, scenarioBase.vokasi + projectionDelta.vokasi),
-  };
+  const { decidedCount, projectionCounts } = useMemo(() => {
+    const decided = filterByDivDept(demands, divs, depts).filter((d) => d.replacement_status !== "");
+    const delta = decided.reduce<RatioDelta>(
+      (acc, d) => {
+        const x = demandRatioDelta(d, empByNoreg, vokasiNoregs);
+        return { permanen: acc.permanen + x.permanen, kontrak: acc.kontrak + x.kontrak, vokasi: acc.vokasi + x.vokasi };
+      },
+      { permanen: 0, kontrak: 0, vokasi: 0 }
+    );
+    return {
+      decidedCount: decided.length,
+      projectionCounts: {
+        permanen: Math.max(0, scenarioBase.permanen + delta.permanen),
+        kontrak: Math.max(0, scenarioBase.kontrak + delta.kontrak),
+        vokasi: Math.max(0, scenarioBase.vokasi + delta.vokasi),
+      },
+    };
+  }, [demands, divs, depts, empByNoreg, vokasiNoregs, scenarioBase]);
+
+  const monthLabel = month ? format(new Date(`${month}-01T00:00:00`), "MMMM yyyy") : "Semua bulan";
 
   function exportReport() {
     import("xlsx").then((XLSX) => {
       const summarySheet = XLSX.utils.aoa_to_sheet([
-        ["Demand Report", format(new Date(`${month}-01T00:00:00`), "MMMM yyyy"), tab],
+        ["Demand Report", monthLabel, tab],
         [],
         ["Total Demand", totalCount],
-        ["Fulfilled", fulfilledCount],
-        ["Open", totalCount - fulfilledCount],
+        ["Menunggu verifikasi", awaitingCount],
+        ["Diterima shop", shopReceivedCount],
         [],
         ["Rasio Sekarang", `${scenarioBase.permanen} : ${scenarioBase.kontrak} : ${scenarioBase.vokasi}`],
         ["Rasio Proyeksi", `${projectionCounts.permanen} : ${projectionCounts.kontrak} : ${projectionCounts.vokasi}`],
       ]);
       const detailRows = filteredDemands.map((d) => ({
-        "Replacement Need": demandStatusLabel(d),
+        Kebutuhan: demandStatusLabel(d),
         Outgoing: d.outgoing_label || `${d.outgoing_nama} (${d.outgoing_noreg})`,
         Divisi: d.div,
         Department: d.dept,
-        "Arrival to Shop": fmtDate(demandTargetDate(d)),
+        "Tiba di Shop": fmtDate(demandTargetDate(d)),
         Source: d.replacement_status,
         Kandidat: d.replacement_nama ? `${d.replacement_nama} (${d.replacement_noreg})` : "-",
         "FS Status": d.fs_status,
-        "Demand Status": demandGranularStatus(d),
+        Verifikasi: d.fulfillment_confirmed_date ? fmtDate(d.fulfillment_confirmed_date) : "-",
+        "Diterima Shop": d.shop_confirmed_date ? fmtDate(d.shop_confirmed_date) : "-",
+        "Status Demand": demandGranularStatus(d),
       }));
       const detailSheet = XLSX.utils.json_to_sheet(detailRows);
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, summarySheet, "Summary");
       XLSX.utils.book_append_sheet(wb, detailSheet, "Detail");
-      XLSX.writeFile(wb, `Demand-Report-${tab}-${month}.xlsx`);
+      XLSX.writeFile(wb, `Demand-Report-${tab}-${month || "semua-bulan"}.xlsx`);
     });
-  }
-
-  function exportReportPdf() {
-    window.print();
   }
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100">Demand</h1>
-        <p className="text-sm text-slate-500 dark:text-slate-400">
-          Ringkasan kebutuhan MP, review enrollment, input demand baru, dan candidate mapping — satu tempat.
+        <p className="text-sm text-slate-600 dark:text-slate-400">
+          Kebutuhan MP pengganti — dari review kontrak, Vokasi berakhir, project, dan takt — sampai kandidatnya diterima shop.
         </p>
       </div>
 
-      {/* 1. Ringkasan per Batch */}
-      <SectionHeading n={1} title="Ringkasan per Batch" subtitle="Klik tile untuk lihat rincian batch." divider={false} />
-      <BatchTileRow categories={batchCategories} />
+      <SectionHeading n={1} title="Ringkasan per Batch" subtitle="Demand yang belum terpenuhi, semua bulan. Klik tile untuk rincian." divider={false} />
+      <BatchTileRow categories={batchCategories} onShowInTable={showCategoryInTable} />
 
-      {/* 2. Enrollment Review — admin-only, folded by default */}
-      {role === "admin" && (
+      {canReview && (
         <CollapsibleSection
-          n={2}
+          n={sectionNo.enroll}
           title="Enrollment Review"
-          subtitle="Review PKWT (Continue/Terminate) dan Vokasi auto-Ended. Candidate mapping ada di Detail Demand di bawah."
+          subtitle="Keputusan Continue/Terminate PKWT dan Vokasi yang berakhir. Terminate membuka demand pengganti."
+          defaultOpen={role === "hr"}
         >
           <RatioWidget
             title="Rasio Permanen : Kontrak : Vokasi — Saat Ini"
             counts={enrollmentRatioCounts}
             scopeLabel={activeDivs.length || activeDepts.length ? "Sesuai filter" : "Vehicle Plant · Labor A"}
           />
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <Select value={period} onChange={(e) => setPeriod(e.target.value)} className="w-40">
-              {monthOptions().map((m) => (
-                <option key={m} value={m}>
-                  {format(new Date(`${m}-01T00:00:00`), "MMM yyyy")}
-                </option>
-              ))}
-            </Select>
-            <div>
-              <Button variant="primary" onClick={() => setManualOpen(true)}>
-                + Manual Demand
-              </Button>
-              <p className="mt-1 max-w-[160px] text-right text-[11px] leading-tight text-slate-400">
-                Untuk demand tambahan: GST/Unfit/Resign/Pension
-              </p>
-            </div>
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">Periode review</span>
+              <Select value={period} onChange={(e) => setPeriod(e.target.value)} className="w-40">
+                {monthOptions().map((m) => (
+                  <option key={m} value={m}>
+                    {format(new Date(`${m}-01T00:00:00`), "MMM yyyy")}
+                  </option>
+                ))}
+              </Select>
+            </label>
           </div>
           <FullWidthTabs
             tabs={[
@@ -429,7 +499,7 @@ export function DemandPageClient() {
             <ReviewSection
               period={period}
               reviews={reviews}
-              canEditReview={role === "admin"}
+              canEditReview={canReview}
               divs={reviewDivs}
               depts={reviewDepts}
               onDivsChange={setReviewDivs}
@@ -448,220 +518,248 @@ export function DemandPageClient() {
         </CollapsibleSection>
       )}
 
-      {/* 3. Input Demand Baru */}
-      {role === "admin" && (
+      {isAdmin && (
         <div className="space-y-4 border-t border-slate-200 pt-6 dark:border-slate-800">
-          <SectionHeading n={3} title="Input Demand Baru" divider={false} />
+          <SectionHeading n={sectionNo.input} title="Input Demand Baru" divider={false} />
           <Card>
             <div className="space-y-4">
-            <FullWidthTabs
-              tabs={[
-                { key: "project", label: "Project Baru" },
-                { key: "taktup", label: "Takt Up" },
-                { key: "manual", label: "Manual" },
-              ]}
-              active={inputTab}
-              onChange={(k) => setInputTab(k as typeof inputTab)}
-            />
-            {inputTab === "project" && (
-              <div className="flex items-center justify-between gap-3 rounded-xl border border-dashed border-slate-200 p-4 dark:border-slate-700">
-                <p className="text-sm text-slate-500 dark:text-slate-400">
-                  Daftarkan project baru beserta rincian kebutuhan MP per divisi/department.
+              <FullWidthTabs
+                tabs={[
+                  { key: "project", label: "Project Baru" },
+                  { key: "taktup", label: "Takt Up" },
+                  { key: "manual", label: "Manual" },
+                ]}
+                active={inputTab}
+                onChange={(k) => setInputTab(k as typeof inputTab)}
+              />
+              <div className="flex flex-col gap-3 rounded-xl border border-dashed border-slate-300 p-4 sm:flex-row sm:items-center sm:justify-between dark:border-slate-700">
+                <p className="text-sm text-slate-600 dark:text-slate-400">
+                  {inputTab === "project"
+                    ? "Daftarkan project baru beserta rincian kebutuhan MP per divisi/department."
+                    : inputTab === "taktup"
+                      ? "Catat kebutuhan MP dari perubahan takt time (takt naik → butuh tambahan MP)."
+                      : "Demand di luar review otomatis: GST, Unfit, Resign, Pensiun, Pensiun Dini, atau alasan lain."}
                 </p>
-                <Button variant="primary" onClick={() => setProjectModalOpen(true)}>
-                  + Project Baru
+                <Button
+                  variant="primary"
+                  className="shrink-0"
+                  onClick={() =>
+                    inputTab === "project" ? setProjectModalOpen(true) : inputTab === "taktup" ? setTaktUpOpen(true) : setManualOpen(true)
+                  }
+                >
+                  {inputTab === "project" ? "+ Project Baru" : inputTab === "taktup" ? "+ Takt Up" : "+ Manual Demand"}
                 </Button>
               </div>
-            )}
-            {inputTab === "taktup" && (
-              <div className="flex items-center justify-between gap-3 rounded-xl border border-dashed border-slate-200 p-4 dark:border-slate-700">
-                <p className="text-sm text-slate-500 dark:text-slate-400">
-                  Catat kebutuhan MP dari perubahan takt time (takt naik → butuh tambahan MP).
-                </p>
-                <Button variant="primary" onClick={() => setTaktUpOpen(true)}>
-                  + Takt Up
-                </Button>
-              </div>
-            )}
-            {inputTab === "manual" && (
-              <div className="flex items-center justify-between gap-3 rounded-xl border border-dashed border-slate-200 p-4 dark:border-slate-700">
-                <p className="text-sm text-slate-500 dark:text-slate-400">
-                  Demand tambahan di luar review otomatis: GST, Unfit, Resign, Pension, Pension Dini, atau alasan lain.
-                </p>
-                <Button variant="primary" onClick={() => setManualOpen(true)}>
-                  + Manual Demand
-                </Button>
-              </div>
-            )}
             </div>
           </Card>
           {projectModalOpen && <NewProjectModal open onClose={() => setProjectModalOpen(false)} />}
           {taktUpOpen && <TaktUpModal open onClose={() => setTaktUpOpen(false)} />}
+          {manualOpen && <ManualDemandModal open onClose={() => setManualOpen(false)} />}
         </div>
       )}
-      {role === "admin" && manualOpen && <ManualDemandModal open onClose={() => setManualOpen(false)} />}
 
-      {/* 4. Detail dan Mapping Demand — bulan berjalan */}
-      <SectionHeading
-        n={4}
-        title="Detail dan Mapping Demand"
-        subtitle="Bulan berjalan — pilih Kontrak/Vokasi untuk mapping kandidat."
-        action={
-          <SegmentedSwitch
-            options={[
-              { value: "PKWT", label: "Kontrak" },
-              { value: "Vokasi", label: "Vokasi" },
-            ]}
-            value={tab}
-            onChange={(v) => {
-              setTab(v);
-              setDivs([]);
-              setDepts([]);
-            }}
-          />
-        }
-      />
-
-      <RatioScenarioCompare
-        scopeLabel={divs.length || depts.length ? "Sesuai filter" : "Vehicle Plant · Labor A"}
-        scenarios={[
-          { label: "Sekarang", counts: scenarioBase },
-          {
-            label: "Proyeksi",
-            counts: projectionCounts,
-            hint: `Mengikuti ${decidedDemands.length} demand yang sudah punya Source dipilih`,
-          },
-        ]}
-      />
-
-      <Card
-        title={`Detail Demand: ${format(new Date(`${month}-01T00:00:00`), "MMMM yyyy")}`}
-        subtitle="Demand muncul H-4 minggu (hari kerja) dari Arrival to Shop. Bulan yang dipilih adalah bulan demand ini actionable."
-        action={
-          <div className="flex gap-2">
-            <Button variant="secondary" size="sm" onClick={exportReport} disabled={filteredDemands.length === 0}>
-              Laporan Excel
-            </Button>
-            <Button variant="secondary" size="sm" onClick={exportReportPdf} disabled={filteredDemands.length === 0}>
-              Laporan PDF
-            </Button>
-          </div>
-        }
-      >
-        <div className="mb-4 flex flex-wrap gap-2">
-          <MultiSelect options={jenisOptions} selected={jenis} onChange={setJenis} placeholder="Semua Jenis" className="w-44" />
-          <MultiSelect
-            options={divOptions}
-            selected={divs}
-            onChange={(v) => {
-              setDivs(v);
-              setDepts([]);
-            }}
-            placeholder="Semua Divisi"
-            className="w-44"
-          />
-          <MultiSelect options={deptOptions} selected={depts} onChange={setDepts} placeholder="Semua Department" className="w-44" />
-          <MultiSelect options={statusMpOptions} selected={statusMp} onChange={setStatusMp} placeholder="Semua Status MP" className="w-44" />
-          <MultiSelect options={statusOptions} selected={statusFilter} onChange={setStatusFilter} placeholder="Semua Status" className="w-48" />
-          <Select bare value={month} onChange={(e) => { setMonth(e.target.value); setDivs([]); setDepts([]); }} className="w-40">
-            {monthOptions().map((m) => (
-              <option key={m} value={m}>
-                {format(new Date(`${m}-01T00:00:00`), "MMM yyyy")}
-              </option>
-            ))}
-          </Select>
-        </div>
-
-        <div className="mb-4 flex items-center gap-3">
-          <div className="h-14 w-14 shrink-0">
-            <DonutChart
-              heightClass="h-full"
-              data={[
-                { key: "fulfilled", label: "Fulfilled", value: fulfilledCount, color: "#2563eb" },
-                { key: "open", label: "Open", value: Math.max(totalCount - fulfilledCount, 0), color: "#94a3b8" },
+      <section ref={detailRef} tabIndex={-1} aria-labelledby="detail-demand-heading" className="scroll-mt-4 space-y-4 outline-none">
+        <SectionHeading
+          n={sectionNo.detail}
+          title={<span id="detail-demand-heading">Detail dan Mapping Demand</span>}
+          subtitle="Shop mengusulkan kandidat, HR memverifikasi, lalu shop konfirmasi kandidat sudah diterima."
+          action={
+            <SegmentedSwitch
+              label="Kategori demand"
+              options={[
+                { value: "PKWT", label: "Kontrak" },
+                { value: "Vokasi", label: "Vokasi" },
               ]}
+              value={tab}
+              onChange={setTab}
             />
-          </div>
-          <div className="text-sm text-slate-500 dark:text-slate-400">
-            <span className="font-semibold text-slate-800 dark:text-slate-100">
-              {fulfilledCount}/{totalCount}
-            </span>{" "}
-            MP fulfilled bulan ini.
-          </div>
-        </div>
-        {filteredDemands.length === 0 ? (
-          monthDemands.length === 0 ? (
-            <EmptyState text="Tidak ada demand pada bulan ini." />
-          ) : (
-            <FilteredEmptyState
-              onReset={() => {
-                setJenis([]);
-                setDivs([]);
+          }
+        />
+
+        <RatioScenarioCompare
+          scopeLabel={divs.length || depts.length ? "Sesuai filter" : "Vehicle Plant · Labor A"}
+          scenarios={[
+            { label: "Sekarang", counts: scenarioBase },
+            { label: "Proyeksi", counts: projectionCounts, hint: `Mengikuti ${decidedCount} demand yang sudah punya Source dipilih` },
+          ]}
+        />
+
+        <Card
+          title={`Detail Demand — ${monthLabel}`}
+          subtitle="Demand muncul H-4 minggu (hari kerja) sebelum Tiba di Shop."
+          action={
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <Select
+                value={month}
+                aria-label="Bulan demand"
+                onChange={(e) => setMonth(e.target.value)}
+                className="w-40"
+              >
+                <option value="">Semua bulan</option>
+                {monthOptions().map((m) => (
+                  <option key={m} value={m}>
+                    {format(new Date(`${m}-01T00:00:00`), "MMM yyyy")}
+                  </option>
+                ))}
+              </Select>
+              <Button variant="secondary" size="sm" onClick={exportReport} disabled={filteredDemands.length === 0}>
+                Laporan Excel
+              </Button>
+              <Button variant="secondary" size="sm" onClick={() => window.print()} disabled={filteredDemands.length === 0}>
+                Cetak
+              </Button>
+            </div>
+          }
+        >
+          <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+            <MultiSelect label="Jenis" options={jenisOptions} selected={jenis} onChange={setJenis} />
+            <MultiSelect
+              label="Divisi"
+              options={divOptions}
+              selected={divs}
+              onChange={(v) => {
+                setDivs(v);
                 setDepts([]);
-                setStatusMp([]);
-                setStatusFilter([]);
               }}
             />
-          )
-        ) : (
-          <TableWrap>
-            <thead>
-              <tr>
-                <Th>Replacement Need</Th>
-                <Th>Outgoing</Th>
-                <Th>Divisi</Th>
-                <Th>Department</Th>
-                <Th>Arrival to Shop</Th>
-                <Th>Due Date Sign Contract / Assigned</Th>
-                <Th>Source</Th>
-                <Th>Kandidat</Th>
-                <Th>FS Status</Th>
-                <Th>Planning Sign Contract / Assigned</Th>
-                <Th>Shop Confirmation</Th>
-                <Th>Demand Status</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredDemands.map((d) => (
-                <DemandRow
-                  key={d.id}
-                  demand={d}
-                  tab={tab}
-                  canEditReplacement={canEditReplacement}
-                  canEditFulfillDate={canEditFulfillDate}
-                  poolEntries={poolEntries}
-                />
+            <MultiSelect label="Department" options={deptOptions} selected={depts} onChange={setDepts} />
+            <MultiSelect label="Status MP" options={statusMpOptions} selected={statusMp} onChange={setStatusMp} />
+            <MultiSelect label="Status Demand" options={STATUS_OPTIONS} selected={statusFilter} onChange={setStatusFilter} />
+          </div>
+
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3 text-sm text-slate-600 dark:text-slate-400">
+            <p>
+              <span className="font-semibold text-slate-800 tabular-nums dark:text-slate-100">{shopReceivedCount}</span> dari{" "}
+              <span className="font-semibold text-slate-800 tabular-nums dark:text-slate-100">{totalCount}</span> demand sudah diterima shop
+              {awaitingCount > 0 && (
+                <>
+                  {" · "}
+                  <span className="font-semibold text-amber-700 tabular-nums dark:text-amber-300">{awaitingCount}</span> menunggu verifikasi
+                </>
+              )}
+              .
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              {(awaitingCount > 0 || onlyAwaiting) && (
+                <button
+                  type="button"
+                  aria-pressed={onlyAwaiting}
+                  onClick={() => setOnlyAwaiting((v) => !v)}
+                  className={`min-h-9 rounded-full border px-3 text-xs font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 ${
+                    onlyAwaiting
+                      ? "border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200"
+                      : "border-slate-300 text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                  }`}
+                >
+                  Hanya yang menunggu verifikasi
+                </button>
+              )}
+              {activeFilterCount > 0 && (
+                <Button variant="ghost" size="sm" onClick={resetDetailFilters}>
+                  Reset filter ({activeFilterCount})
+                </Button>
+              )}
+            </div>
+          </div>
+
+          {!demandsReady ? (
+            <div className="space-y-2" aria-busy="true" aria-label="Memuat demand">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <Skeleton key={i} className="h-12 w-full" />
               ))}
-            </tbody>
-          </TableWrap>
-        )}
-      </Card>
+            </div>
+          ) : filteredDemands.length === 0 ? (
+            monthDemands.length === 0 ? (
+              <EmptyState text={month ? `Tidak ada demand ${tab === "PKWT" ? "Kontrak" : "Vokasi"} di ${monthLabel}.` : "Belum ada demand."} />
+            ) : (
+              <FilteredEmptyState onReset={resetDetailFilters} />
+            )
+          ) : (
+            <TableWrap maxHeightClass="max-h-[70vh]">
+              <thead>
+                <tr>
+                  <Th>Status</Th>
+                  <Th>Kebutuhan</Th>
+                  <Th>Department</Th>
+                  <Th>Tiba di Shop</Th>
+                  <Th>Source</Th>
+                  <Th>Kandidat</Th>
+                  <Th>Progres</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredDemands.map((d) => (
+                  <DemandRow
+                    key={d.id}
+                    demand={d}
+                    tab={tab}
+                    canEditReplacement={canEditReplacement}
+                    canEditFulfillDate={canEditFulfillDate}
+                    canVerify={canVerify}
+                    poolEntries={poolEntries}
+                  />
+                ))}
+              </tbody>
+            </TableWrap>
+          )}
+        </Card>
+      </section>
     </div>
   );
 }
 
-function DeadlineCell({ deadline, fulfilled }: { deadline: string; fulfilled: boolean }) {
-  if (!deadline) return <Td className="text-slate-400">-</Td>;
-  const days = sisaHari(deadline);
-  const cls = fulfilled ? "" : days < 0 ? "text-red-600 font-semibold" : days <= 5 ? "text-amber-600 font-semibold" : "";
-  return <Td className={cls}>{fmtDate(deadline)}</Td>;
+function confirmStepLabel(d: Demand): string {
+  if (d.replacement_status === "PKWT New Hire" || d.replacement_status === "Vokasi New Hire") return "Sign kontrak";
+  if (d.replacement_status === "MP Excess" || d.replacement_status === "MP Back Up") return "Assigned";
+  return "Verifikasi";
 }
 
-function ShopConfirmCell({ value, canEdit, onChange }: { value: string; canEdit: boolean; onChange: (date: string) => void }) {
-  const checked = Boolean(value);
-  if (!canEdit) {
-    return checked ? <span>{fmtDate(value)}</span> : <span className="text-slate-400">Belum</span>;
-  }
+function DeadlineNote({ deadline, fulfilled }: { deadline: string; fulfilled: boolean }) {
+  if (!deadline || fulfilled) return null;
+  const days = sisaHari(deadline);
+  const text = days < 0 ? `lewat ${-days} hari` : days === 0 ? "hari ini" : `${days} hari lagi`;
+  const cls =
+    days < 0
+      ? "font-semibold text-red-700 dark:text-red-300"
+      : days <= 5
+        ? "font-semibold text-amber-700 dark:text-amber-300"
+        : "text-slate-500 dark:text-slate-400";
   return (
-    <div className="flex items-center gap-2">
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={(e) => onChange(e.target.checked ? format(new Date(), "yyyy-MM-dd") : "")}
-        className="h-4 w-4 shrink-0 rounded border-slate-300 text-blue-600 focus:ring-1 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-900"
-      />
-      {checked && <DateInput value={value} onCommit={onChange} />}
+    <div className={`mt-1 text-xs ${cls}`}>
+      Batas sign/assign {fmtDate(deadline)} · {text}
     </div>
+  );
+}
+
+type StepState = "done" | "current" | "todo";
+
+function Step({ state, label, children }: { state: StepState; label: string; children?: ReactNode }) {
+  return (
+    <li className="flex items-start gap-2">
+      <span
+        aria-hidden
+        className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full ${
+          state === "done"
+            ? "bg-emerald-600 text-white"
+            : state === "current"
+              ? "border-2 border-blue-600 dark:border-blue-400"
+              : "border border-slate-300 dark:border-slate-600"
+        }`}
+      >
+        {state === "done" ? <Check size={11} strokeWidth={3} /> : state === "current" ? <Circle size={5} className="fill-blue-600 text-blue-600 dark:fill-blue-400 dark:text-blue-400" /> : null}
+      </span>
+      <div className="min-w-0">
+        <div
+          className={`text-xs font-medium ${
+            state === "todo" ? "text-slate-500 dark:text-slate-400" : "text-slate-800 dark:text-slate-100"
+          }`}
+        >
+          {label}
+          <span className="sr-only">{state === "done" ? " — selesai" : state === "current" ? " — langkah berikutnya" : " — belum"}</span>
+        </div>
+        {children}
+      </div>
+    </li>
   );
 }
 
@@ -670,191 +768,353 @@ function DemandRow({
   tab,
   canEditReplacement,
   canEditFulfillDate,
+  canVerify,
   poolEntries,
 }: {
   demand: Demand;
   tab: DemandCategory;
   canEditReplacement: boolean;
   canEditFulfillDate: boolean;
+  canVerify: boolean;
   poolEntries: UtilPoolEntry[];
 }) {
   const isLabelRow = d.origin_type === "Project" || d.origin_type === "TaktUp";
+  const who = whoOf(d);
   const target = demandTargetDate(d);
   const deadline = fulfillmentDeadline(target, d.fs_status);
   const isNoReplace = d.replacement_status === "No Replace";
   const hasCandidate = Boolean(d.replacement_noreg);
+  const verified = Boolean(d.fulfillment_confirmed_date);
   const isPoolSource = POOL_SOURCES.includes(d.replacement_status);
   const status = supplyDemandStatus(target, deadline, d.shop_confirmed_date);
   const recommendedEntries = !d.replacement_status ? eligiblePoolEntriesForDemand(poolEntries, d) : [];
   const isRecommended = recommendedEntries.length > 0;
   const crossSourced = d.category !== tab;
   const sourceOptions = tab === "PKWT" ? PKWT_SOURCE_OPTIONS : VOKASI_SOURCE_OPTIONS;
+  const sourceLocked = verified && !isNoReplace;
+
+  function verify() {
+    confirmDemandFulfillment(d.id, todayKey());
+    pushToast(`${who}: ${d.replacement_nama || d.replacement_noreg} diverifikasi.`, "success", {
+      label: "Batalkan",
+      onClick: () => confirmDemandFulfillment(d.id, ""),
+    });
+  }
+
+  function unverify() {
+    const previous = d.fulfillment_confirmed_date;
+    confirmDemandFulfillment(d.id, "");
+    pushToast(`Verifikasi ${who} dibatalkan.`, "success", {
+      label: "Kembalikan",
+      onClick: () => confirmDemandFulfillment(d.id, previous),
+    });
+  }
 
   return (
-    <tr>
+    <tr className="align-top">
       <Td>
-        {demandStatusLabel(d)}
-        {crossSourced && <span className="ml-1.5 text-[10px] font-normal text-slate-400">(dari Kontrak)</span>}
+        <Badge tone={statusTone(status)}>{status}</Badge>
+        <DeadlineNote deadline={deadline} fulfilled={status.startsWith("Fulfilled") || verified} />
       </Td>
-      {isLabelRow ? (
-        <Td className="italic text-slate-500">{d.outgoing_label}</Td>
-      ) : (
-        <Td>
-          {d.outgoing_nama} <span className="text-slate-400">({d.outgoing_noreg})</span>
-        </Td>
-      )}
-      <Td>{d.div}</Td>
-      <Td>{d.dept}</Td>
+      <Td className="min-w-[180px] whitespace-normal">
+        <div className="font-medium text-slate-800 dark:text-slate-100">
+          {demandStatusLabel(d)}
+          {crossSourced && <span className="ml-1.5 text-xs font-normal text-slate-500 dark:text-slate-400">(dari Kontrak)</span>}
+        </div>
+        <div className="text-xs text-slate-500 dark:text-slate-400">
+          {isLabelRow ? d.outgoing_label : `${d.outgoing_nama} · ${d.outgoing_noreg}`}
+        </div>
+      </Td>
+      <Td>
+        <div>{d.dept}</div>
+        <div className="text-xs text-slate-500 dark:text-slate-400">{d.div}</div>
+      </Td>
       <Td>
         {canEditFulfillDate ? (
-          <DateInput value={d.fulfill_date || target} onCommit={(v) => setDemandFulfillDate(d.id, v)} />
+          <DateInput value={d.fulfill_date || target} ariaLabel={`Tiba di shop, ${who}`} onCommit={(v) => setDemandFulfillDate(d.id, v)} />
         ) : (
           fmtDate(target)
         )}
       </Td>
-      <DeadlineCell deadline={deadline} fulfilled={status.startsWith("Fulfilled")} />
 
       <Td>
-        {canEditReplacement ? (
+        {canEditReplacement && !sourceLocked ? (
           <Select
             value={d.replacement_status}
+            aria-label={`Source pengganti, ${who}`}
             onChange={(e) => {
               const replStatus = e.target.value as ReplacementStatus;
               if (replStatus === "No Replace") setDemandNoReplace(d.id, d.no_replace_reason);
               else setDemandReplacementByNoreg(d.id, d.replacement_noreg, replStatus);
             }}
-            className={`min-w-[140px] ${isRecommended ? "border-blue-400 ring-1 ring-blue-300 dark:border-blue-500 dark:ring-blue-500/40" : ""}`}
+            className={`min-w-[150px] ${isRecommended ? "border-blue-500 ring-1 ring-blue-400 dark:border-blue-500 dark:ring-blue-500/40" : ""}`}
           >
             <option value="">- pilih -</option>
             {sourceOptions.map((s) => (
-              <option key={s} value={s} className={isRecommended && s === "MP Excess" ? "font-semibold" : undefined}>
+              <option key={s} value={s}>
                 {s}
-                {isRecommended && s === "MP Excess" ? " ← rekomendasi" : ""}
+                {isRecommended && s === "MP Excess" ? " (rekomendasi)" : ""}
               </option>
             ))}
           </Select>
         ) : (
-          d.replacement_status || "-"
+          d.replacement_status || <span className="text-slate-500 dark:text-slate-400">-</span>
         )}
       </Td>
 
-      {isNoReplace ? (
-        <>
-          <Td className="text-slate-400">
-            {canEditReplacement ? (
-              <NoregInput value={d.no_replace_reason} placeholder="Alasan tidak direplace..." onCommit={(v) => setDemandNoReplace(d.id, v)} />
-            ) : (
-              d.no_replace_reason || "-"
-            )}
-          </Td>
-          <Td className="text-slate-400">-</Td>
-          <Td className="text-slate-400">-</Td>
-          <Td className="text-slate-400">-</Td>
-        </>
-      ) : !d.replacement_status ? (
-        isRecommended ? (
-          <Td colSpan={4} className="whitespace-normal">
-            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1.5 dark:border-blue-500/30 dark:bg-blue-500/10">
-              <span className="shrink-0 rounded-full bg-blue-600 px-2 py-0.5 text-[10px] font-semibold text-white">Rekomendasi</span>
-              <span className="text-xs text-blue-700 dark:text-blue-300">{recommendedEntries.length} MP Excess tersedia untuk diutilize —</span>
-              {canEditReplacement ? (
-                <PoolReplacementSelect demand={d} poolEntries={poolEntries} />
-              ) : (
-                <span className="text-xs text-blue-700 dark:text-blue-300">lihat kolom Source.</span>
-              )}
+      <Td className="min-w-[220px] whitespace-normal">
+        {isNoReplace ? (
+          canEditReplacement ? (
+            <NoregInput
+              value={d.no_replace_reason}
+              placeholder="Alasan tidak direplace..."
+              ariaLabel={`Alasan tidak direplace, ${who}`}
+              onCommit={(v) => setDemandNoReplace(d.id, v)}
+            />
+          ) : (
+            <span className="text-slate-600 dark:text-slate-300">{d.no_replace_reason || "Tidak direplace"}</span>
+          )
+        ) : !d.replacement_status ? (
+          isRecommended ? (
+            <div className="space-y-2 rounded-lg border border-blue-200 bg-blue-50 p-2.5 dark:border-blue-500/30 dark:bg-blue-500/10">
+              <p className="text-xs text-blue-800 dark:text-blue-200">
+                <span className="font-semibold">Rekomendasi:</span> {recommendedEntries.length} MP Excess tersedia di Supply Pool.
+              </p>
+              {canEditReplacement && <PoolProposal demand={d} who={who} poolEntries={poolEntries} />}
             </div>
-          </Td>
+          ) : (
+            <span className="text-slate-500 dark:text-slate-400">Pilih Source dulu</span>
+          )
+        ) : verified ? (
+          <CandidateSummary demand={d} />
+        ) : isPoolSource ? (
+          canEditReplacement ? (
+            <PoolProposal demand={d} who={who} poolEntries={poolEntries} />
+          ) : (
+            <CandidateSummary demand={d} />
+          )
+        ) : canEditReplacement ? (
+          <div className="space-y-1">
+            <NoregInput
+              value={d.replacement_noreg}
+              ariaLabel={`Noreg kandidat, ${who}`}
+              onCommit={(v) => setDemandReplacementByNoreg(d.id, v, d.replacement_status)}
+            />
+            {(d.replacement_nama || d.fs_status) && <CandidateMeta demand={d} />}
+          </div>
         ) : (
-          <Td colSpan={4} className="text-slate-400">
-            Pilih Source terlebih dahulu
-          </Td>
-        )
-      ) : (
-        <>
-          <Td className="whitespace-normal">
-            {canEditReplacement ? (
-              isPoolSource ? (
-                <PoolReplacementSelect demand={d} poolEntries={poolEntries} />
-              ) : (
-                <NoregInput value={d.replacement_noreg} onCommit={(v) => setDemandReplacementByNoreg(d.id, v, d.replacement_status)} />
-              )
-            ) : (
-              d.replacement_noreg || "-"
-            )}
-            {(d.replacement_nama || d.replacement_dept) && (
-              <div className="mt-0.5 text-xs text-slate-400">
-                {d.replacement_nama || "-"}
-                {d.replacement_dept ? ` · ${d.replacement_dept}` : ""}
-              </div>
-            )}
-          </Td>
-          <Td>{d.fs_status ? <Badge tone={statusTone(d.fs_status)}>{d.fs_status}</Badge> : "-"}</Td>
-          <Td>
-            {!hasCandidate ? (
-              <span className="text-slate-400">Isi kandidat dulu</span>
-            ) : (
-              <div>
-                <div className="mb-0.5 text-[11px] text-slate-400">{confirmLabel(d)}</div>
-                {canEditReplacement ? (
-                  <DateInput value={d.fulfillment_confirmed_date} onCommit={(v) => confirmDemandFulfillment(d.id, v)} />
+          <CandidateSummary demand={d} />
+        )}
+      </Td>
+
+      <Td className="min-w-[200px] whitespace-normal">
+        {isNoReplace || !d.replacement_status ? (
+          <span className="text-slate-500 dark:text-slate-400">-</span>
+        ) : (
+          <ol className="space-y-2" aria-label={`Progres mapping, ${who}`}>
+            <Step state={hasCandidate ? "done" : "current"} label="Diusulkan">
+              {!hasCandidate && <div className="text-xs text-slate-500 dark:text-slate-400">Isi kandidat dulu</div>}
+            </Step>
+            <Step state={verified ? "done" : hasCandidate ? "current" : "todo"} label={confirmStepLabel(d)}>
+              {verified ? (
+                canVerify ? (
+                  <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                    <DateInput
+                      value={d.fulfillment_confirmed_date}
+                      ariaLabel={`Tanggal ${confirmStepLabel(d).toLowerCase()}, ${who}`}
+                      onCommit={(v) => (v ? confirmDemandFulfillment(d.id, v) : unverify())}
+                    />
+                    <button
+                      type="button"
+                      onClick={unverify}
+                      className="min-h-9 rounded-lg px-2 text-xs font-medium text-slate-600 underline underline-offset-2 hover:text-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500 dark:text-slate-300 dark:hover:text-white"
+                    >
+                      Batalkan
+                    </button>
+                  </div>
                 ) : (
-                  fmtDate(d.fulfillment_confirmed_date)
-                )}
-              </div>
-            )}
-          </Td>
-          <Td>
-            {!hasCandidate ? (
-              <span className="text-slate-400">-</span>
-            ) : !d.fulfillment_confirmed_date ? (
-              <span className="text-slate-400">{confirmLabel(d)} dulu</span>
-            ) : (
-              <ShopConfirmCell value={d.shop_confirmed_date} canEdit={canEditReplacement} onChange={(v) => confirmShopReceipt(d.id, v)} />
-            )}
-          </Td>
-        </>
-      )}
-      <Td>
-        <Badge tone={statusTone(status)}>{status}</Badge>
+                  <div className="text-xs text-slate-600 dark:text-slate-300">{fmtDate(d.fulfillment_confirmed_date)}</div>
+                )
+              ) : hasCandidate ? (
+                canVerify ? (
+                  <Button size="sm" variant="primary" className="mt-1" onClick={verify}>
+                    Verifikasi
+                  </Button>
+                ) : (
+                  <div className="text-xs text-amber-700 dark:text-amber-300">Menunggu verifikasi HR</div>
+                )
+              ) : null}
+            </Step>
+            <Step state={d.shop_confirmed_date ? "done" : verified ? "current" : "todo"} label="Diterima shop">
+              {verified && (
+                <ShopConfirmCell
+                  value={d.shop_confirmed_date}
+                  who={who}
+                  canEdit={canEditReplacement}
+                  onChange={(v) => confirmShopReceipt(d.id, v)}
+                />
+              )}
+            </Step>
+          </ol>
+        )}
       </Td>
     </tr>
   );
 }
 
-function PoolReplacementSelect({ demand, poolEntries }: { demand: Demand; poolEntries: UtilPoolEntry[] }) {
-  const [editing, setEditing] = useState(false);
-  const eligible = eligiblePoolEntriesForDemand(poolEntries, demand);
+function CandidateMeta({ demand: d }: { demand: Demand }) {
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-600 dark:text-slate-400">
+      {d.replacement_nama && <span>{d.replacement_nama}</span>}
+      {d.replacement_dept && <span>· {d.replacement_dept}</span>}
+      {d.fs_status && <Badge tone={statusTone(d.fs_status)}>{d.fs_status}</Badge>}
+    </div>
+  );
+}
 
-  if (demand.replacement_noreg && !editing) {
+function CandidateSummary({ demand: d }: { demand: Demand }) {
+  if (!d.replacement_noreg) return <span className="text-slate-500 dark:text-slate-400">Belum ada kandidat</span>;
+  return (
+    <div>
+      <div className="text-slate-800 dark:text-slate-100">
+        {d.replacement_nama || d.replacement_noreg} <span className="text-xs text-slate-500 dark:text-slate-400">{d.replacement_noreg}</span>
+      </div>
+      <CandidateMeta demand={{ ...d, replacement_nama: "" }} />
+    </div>
+  );
+}
+
+function ShopConfirmCell({
+  value,
+  who,
+  canEdit,
+  onChange,
+}: {
+  value: string;
+  who: string;
+  canEdit: boolean;
+  onChange: (date: string) => void;
+}) {
+  const checked = Boolean(value);
+  if (!canEdit) {
     return (
-      <button
-        type="button"
-        onClick={() => setEditing(true)}
-        className="text-sm text-slate-700 underline decoration-dotted underline-offset-2 hover:text-blue-600 dark:text-slate-200"
-      >
-        {demand.replacement_noreg}
-      </button>
+      <div className="text-xs text-slate-600 dark:text-slate-300">{checked ? fmtDate(value) : "Menunggu konfirmasi shop"}</div>
+    );
+  }
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-2">
+      <label className="flex min-h-9 cursor-pointer items-center gap-2 text-xs text-slate-700 dark:text-slate-300">
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={(e) => onChange(e.target.checked ? todayKey() : "")}
+          className="h-4 w-4 shrink-0 rounded border-slate-400 text-blue-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:border-slate-600 dark:bg-slate-900"
+        />
+        Sudah diterima
+        <span className="sr-only">, {who}</span>
+      </label>
+      {checked && <DateInput value={value} ariaLabel={`Tanggal diterima shop, ${who}`} onCommit={onChange} />}
+    </div>
+  );
+}
+
+/** Step 1 of pool mapping. Picking a person only stages a draft; nothing is
+ * saved until "Usulkan", which reserves them for this demand and leaves the
+ * demand Open until HR/admin verifies. */
+function PoolProposal({ demand, who, poolEntries }: { demand: Demand; who: string; poolEntries: UtilPoolEntry[] }) {
+  const [changing, setChanging] = useState(false);
+  const [draftId, setDraftId] = useState("");
+  const eligible = eligiblePoolEntriesForDemand(poolEntries, demand);
+  const current = demand.replacement_noreg ? eligible.find((e) => e.noreg === demand.replacement_noreg) : undefined;
+  const choices = eligible.filter((e) => e.noreg !== demand.replacement_noreg);
+  const draft = choices.find((e) => e.id === draftId);
+
+  function propose() {
+    if (!draft) return;
+    const previousId = current?.id ?? null;
+    proposePoolCandidate(draft.id, demand.id);
+    pushToast(`${draft.nama} diusulkan untuk ${demand.dept}. Menunggu verifikasi HR.`, "success", {
+      label: "Batalkan",
+      onClick: () => proposePoolCandidate(previousId, demand.id),
+    });
+    setDraftId("");
+    setChanging(false);
+  }
+
+  function withdraw() {
+    if (!current) return;
+    const previousId = current.id;
+    proposePoolCandidate(null, demand.id);
+    pushToast(`Usulan ${current.nama} ditarik, kembali ke Supply Pool.`, "success", {
+      label: "Batalkan",
+      onClick: () => proposePoolCandidate(previousId, demand.id),
+    });
+  }
+
+  if (demand.replacement_noreg && !changing) {
+    return (
+      <div className="space-y-1.5">
+        <CandidateSummary demand={demand} />
+        <div className="flex flex-wrap gap-1">
+          <button
+            type="button"
+            onClick={() => setChanging(true)}
+            className="min-h-8 rounded-lg px-2 text-xs font-medium text-blue-700 hover:bg-blue-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500 dark:text-blue-300 dark:hover:bg-blue-500/10"
+          >
+            Ganti
+          </button>
+          {current && (
+            <button
+              type="button"
+              onClick={withdraw}
+              className="min-h-8 rounded-lg px-2 text-xs font-medium text-slate-600 hover:bg-slate-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500 dark:text-slate-300 dark:hover:bg-slate-800"
+            >
+              Tarik usulan
+            </button>
+          )}
+        </div>
+      </div>
     );
   }
 
+  if (choices.length === 0) {
+    return <span className="text-xs text-slate-500 dark:text-slate-400">Tidak ada MP di Supply Pool yang bisa diusulkan.</span>;
+  }
+
   return (
-    <Select
-      value={demand.replacement_noreg}
-      onChange={(e) => {
-        const entry = eligible.find((p) => p.noreg === e.target.value);
-        if (entry) assignPoolEntryToDemand(entry.id, demand.id);
-        setEditing(false);
-      }}
-      onBlur={() => setEditing(false)}
-      className="min-w-[160px]"
-      autoFocus={editing}
-    >
-      <option value="">- pilih dari Supply Pool -</option>
-      {eligible.map((e) => (
-        <option key={e.id} value={e.noreg} style={e.prev_dept !== demand.dept ? { color: "#e11d48" } : undefined}>
-          {e.nama} ({e.noreg}) — {e.prev_dept}
-        </option>
-      ))}
-    </Select>
+    <div className="space-y-1.5">
+      <Select value={draftId} aria-label={`Pilih kandidat Supply Pool, ${who}`} onChange={(e) => setDraftId(e.target.value)} className="min-w-[200px]">
+        <option value="">- pilih dari Supply Pool -</option>
+        {choices.map((e) => (
+          <option key={e.id} value={e.id}>
+            {e.nama} ({e.noreg}) — {e.prev_dept}
+            {e.prev_dept !== demand.dept ? " · beda dept" : ""}
+          </option>
+        ))}
+      </Select>
+      {draft && (
+        <p className="text-xs text-slate-600 dark:text-slate-300">
+          {draft.nama} → {demand.dept}
+          {draft.prev_dept !== demand.dept && <> (pindah dari {draft.prev_dept})</>}
+        </p>
+      )}
+      <div className="flex flex-wrap gap-1">
+        <Button size="sm" variant="primary" disabled={!draft} onClick={propose}>
+          Usulkan
+        </Button>
+        {changing && (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              setChanging(false);
+              setDraftId("");
+            }}
+          >
+            Batal
+          </Button>
+        )}
+      </div>
+    </div>
   );
 }

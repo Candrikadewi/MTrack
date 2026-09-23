@@ -390,7 +390,7 @@ export function setDemandFulfillDate(demandId: string, date: string): void {
 export function confirmDemandFulfillment(demandId: string, confirmedDate: string): void {
   const previous = demandStore.get(demandId);
   if (!previous) return;
-  demandStore.update(demandId, {
+  demandStore.patchLocal(demandId, {
     fulfillment_confirmed_date: confirmedDate,
     status: confirmedDate ? "Fulfilled" : "Open",
   });
@@ -400,11 +400,11 @@ export function confirmDemandFulfillment(demandId: string, confirmedDate: string
     .then((res: { error: { message: string } | null }) => {
       if (res.error) {
         console.error("confirm_demand_fulfillment failed:", res.error.message);
-        demandStore.update(demandId, {
+        demandStore.patchLocal(demandId, {
           fulfillment_confirmed_date: previous.fulfillment_confirmed_date,
           status: previous.status,
         });
-        pushToast(`Gagal konfirmasi fulfillment: ${res.error.message}`);
+        pushToast(`Gagal verifikasi: ${res.error.message}`);
         return;
       }
       demandStore.refetch();
@@ -865,53 +865,70 @@ export function createKaizenSupply(input: {
   });
 }
 
-/** Assigning a pool entry (MP Back Up/Excess) to a demand IS the "officially
- * assigned to destination department" moment — so this both maps the
- * candidate and confirms fulfillment in one step, unlike the New Hire path
- * (map via setDemandReplacementByNoreg, confirm separately via
- * confirmDemandFulfillment once contract is signed). */
-export function assignPoolEntryToDemand(poolEntryId: string, demandId: string): void {
-  const entry = utilPoolStore.get(poolEntryId);
+/** Step 1 of pool mapping: propose a Util Pool person (MP Excess/Back Up)
+ * for a demand. The demand stays Open ("Diusulkan") and the pool entry is
+ * reserved so no other demand can take it; step 2 is HR/admin verifying via
+ * confirmDemandFulfillment. Pass `null` to withdraw the proposal and release
+ * the reserved entry. Routed through the `propose_pool_candidate` RPC
+ * (migration_12) so the admin / shop-PKWT rule holds server-side — direct
+ * table writes here are admin-only under RLS and fail silently for shop. */
+export function proposePoolCandidate(poolEntryId: string | null, demandId: string): void {
   const demand = demandStore.get(demandId);
-  if (!entry || !demand) return;
+  if (!demand) return;
+  const entry = poolEntryId ? utilPoolStore.get(poolEntryId) : undefined;
+  if (poolEntryId && !entry) return;
 
-  // Swapping to a different candidate — release whichever pool entry was
-  // previously assigned to this demand back to Open, so it doesn't stay
-  // stuck "Assigned" once it's no longer actually backing anything.
-  if (demand.replacement_noreg && demand.replacement_noreg !== entry.noreg) {
-    const previousEntry = utilPoolStore
-      .list()
-      .find((e) => e.noreg === demand.replacement_noreg && e.status === "Assigned");
-    if (previousEntry) {
-      utilPoolStore.update(previousEntry.id, { status: "Open", action_note: "" });
-    }
-  }
+  const previousDemand = demand;
+  const previousEntry = demand.replacement_noreg
+    ? utilPoolStore.list().find((e) => e.noreg === demand.replacement_noreg && e.status === "Assigned")
+    : undefined;
+  const releasing = previousEntry && previousEntry.id !== poolEntryId ? previousEntry : undefined;
+  const entryBefore = entry ? { status: entry.status, action_note: entry.action_note } : undefined;
 
-  const confirmedDate = today().toISOString().slice(0, 10);
-  // Util Pool assign is always an MP Back Up/Excess-style redeployment
-  // (someone already employed, not a fresh hire) — default the Source to
-  // MP Excess if it wasn't already set via the Demand Supply page, so the
-  // row doesn't get stuck behind the "pick Source first" gate despite
-  // already being fully mapped and confirmed here.
   const replacement_status: ReplacementStatus =
     demand.replacement_status === "" || demand.replacement_status === "No Replace"
       ? "MP Excess"
       : demand.replacement_status;
-  const fs_status = computeFsStatus(replacement_status, demand.dept, entry.prev_dept, undefined);
-  demandStore.update(demandId, {
-    replacement_status,
-    replacement_noreg: entry.noreg,
-    replacement_nama: entry.nama,
-    replacement_dept: entry.prev_dept,
-    replacement_batch: "",
-    fs_status,
-    fulfillment_confirmed_date: confirmedDate,
-    status: "Fulfilled",
-  });
-  utilPoolStore.update(poolEntryId, {
-    status: "Assigned",
-    action_note: `Assigned to demand ${demandId}`,
-  });
+  const fs_status = entry ? computeFsStatus(replacement_status, demand.dept, entry.prev_dept, undefined) : "";
+
+  if (releasing) utilPoolStore.patchLocal(releasing.id, { status: "Open", action_note: "" });
+  if (entry) {
+    demandStore.patchLocal(demandId, {
+      replacement_status,
+      no_replace_reason: "",
+      replacement_noreg: entry.noreg,
+      replacement_nama: entry.nama,
+      replacement_dept: entry.prev_dept,
+      replacement_batch: "",
+      fs_status,
+      status: "Open",
+    });
+    utilPoolStore.patchLocal(entry.id, { status: "Assigned", action_note: `Diusulkan untuk demand ${demandId}` });
+  } else {
+    demandStore.patchLocal(demandId, {
+      replacement_noreg: "",
+      replacement_nama: "",
+      replacement_dept: "",
+      replacement_batch: "",
+      fs_status: "",
+      status: "Open",
+    });
+  }
+
+  createClient()
+    .rpc("propose_pool_candidate", { p_demand_id: demandId, p_pool_entry_id: poolEntryId, p_fs_status: fs_status })
+    .then((res: { error: { message: string } | null }) => {
+      if (res.error) {
+        console.error("propose_pool_candidate failed:", res.error.message);
+        demandStore.patchLocal(demandId, previousDemand);
+        if (releasing) utilPoolStore.patchLocal(releasing.id, { status: releasing.status, action_note: releasing.action_note });
+        if (entry && entryBefore) utilPoolStore.patchLocal(entry.id, entryBefore);
+        pushToast(`Gagal menyimpan usulan: ${res.error.message}`);
+        return;
+      }
+      demandStore.refetch();
+      utilPoolStore.refetch();
+    });
 }
 
 export function naturalRelease(poolEntryId: string): void {

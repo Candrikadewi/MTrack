@@ -55,4 +55,8 @@ select
 union all
 select
   'migration_11 (Vokasi plant segregation)',
-  exists (select 1 from information_schema.columns where table_name = 'vokasi_records' and column_name = 'plant');
+  exists (select 1 from information_schema.columns where table_name = 'vokasi_records' and column_name = 'plant')
+union all
+select
+  'migration_12 (two-step pool mapping)',
+  exists (select 1 from pg_proc where proname = 'propose_pool_candidate');

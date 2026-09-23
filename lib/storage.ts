@@ -59,6 +59,9 @@ export interface Store<T extends { id: string }> {
   insert(item: T): T;
   insertMany(items: T[]): T[];
   update(id: string, patch: Partial<T>): T | undefined;
+  /** Cache-only patch, no table write — for optimistic UI ahead of an RPC
+   * that does the real (role-checked) write server-side. */
+  patchLocal(id: string, patch: Partial<T>): void;
   upsert(item: T): T;
   remove(id: string): void;
   ready(): boolean;
@@ -186,6 +189,12 @@ export function createStore<T extends { id: string }>(table: string): Store<T> {
         })
         .catch((err: unknown) => console.error(`update ${table} failed:`, err));
       return updated;
+    },
+    patchLocal(id, patch) {
+      const idx = cache.findIndex((i) => i.id === id);
+      if (idx === -1) return;
+      cache = cache.map((r, i) => (i === idx ? { ...r, ...patch } : r));
+      notify();
     },
     upsert(item) {
       const idx = cache.findIndex((i) => i.id === item.id);

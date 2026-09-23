@@ -1,11 +1,13 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { EmptyState, FilteredEmptyState } from "@/components/ui/Table";
 import { MultiSelect } from "@/components/ui/MultiSelect";
 import { fmtDate } from "@/lib/engine/compute";
-import { useStoreList } from "@/lib/useStore";
+import { useStoreList, useStoreReady } from "@/lib/useStore";
+import { useSessionState } from "@/lib/useSessionState";
+import { Skeleton } from "@/components/ui/Skeleton";
 import { demandStore, projectStore, taktStore, utilPoolStore } from "@/lib/repo";
 import type { Plant, Project, TaktCase, UtilPoolEntry } from "@/lib/types";
 
@@ -128,18 +130,22 @@ export function HistoryPageClient() {
   const taktCases = useStoreList(taktStore);
   const demands = useStoreList(demandStore);
   const poolEntries = useStoreList(utilPoolStore);
+  const projectsReady = useStoreReady(projectStore);
+  const taktReady = useStoreReady(taktStore);
+  const poolReady = useStoreReady(utilPoolStore);
+  const ready = projectsReady && taktReady && poolReady;
 
   const allBatches = useMemo(
     () => buildHistoryBatches(projects, taktCases, demands, poolEntries),
     [projects, taktCases, demands, poolEntries]
   );
 
-  const [jenisFilter, setJenisFilter] = useState<string[]>([]);
-  const [statusFilter, setStatusFilter] = useState<string[]>([]);
-  const [periodeFilter, setPeriodeFilter] = useState<string[]>([]);
-  const [plantFilter, setPlantFilter] = useState<string[]>([]);
-  const [divFilter, setDivFilter] = useState<string[]>([]);
-  const [deptFilter, setDeptFilter] = useState<string[]>([]);
+  const [jenisFilter, setJenisFilter] = useSessionState<string[]>("history.jenis", []);
+  const [statusFilter, setStatusFilter] = useSessionState<string[]>("history.status", []);
+  const [periodeFilter, setPeriodeFilter] = useSessionState<string[]>("history.periode", []);
+  const [plantFilter, setPlantFilter] = useSessionState<string[]>("history.plant", []);
+  const [divFilter, setDivFilter] = useSessionState<string[]>("history.div", []);
+  const [deptFilter, setDeptFilter] = useSessionState<string[]>("history.dept", []);
 
   const jenisOptions = useMemo(() => Array.from(new Set(allBatches.map((b) => b.jenis))).sort(), [allBatches]);
   const statusOptions = useMemo(() => Array.from(new Set(allBatches.map((b) => b.statusLabel))).sort(), [allBatches]);
@@ -181,7 +187,7 @@ export function HistoryPageClient() {
     );
     if (matching.length === 0) return null;
     const depts = Array.from(new Set(matching.map((r) => r.dept))).join(", ");
-    return `✓ cocok: ${depts} (${matching.length} dari ${b.rows.length} baris)`;
+    return `Cocok: ${depts} (${matching.length} dari ${b.rows.length} baris)`;
   }
 
   function exportCsv() {
@@ -208,12 +214,12 @@ export function HistoryPageClient() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100">History</h1>
-          <p className="text-sm text-slate-500 dark:text-slate-400">
-            Ledger Project/Takt Up/Takt Down/Kaizen yang sudah closed dan sudah lewat bulan berjalan.
+          <p className="text-sm text-slate-600 dark:text-slate-400">
+            Batch Project, Takt Up, Takt Down, dan Kaizen yang sudah selesai. Demand PKWT/Vokasi yang terpenuhi ada di Detail Demand.
           </p>
         </div>
         <Button variant="secondary" onClick={exportCsv} disabled={filtered.length === 0}>
-          Export
+          Unduh CSV
         </Button>
       </div>
 
@@ -235,9 +241,15 @@ export function HistoryPageClient() {
         <MultiSelect label="Department" options={deptOptions} selected={deptFilter} onChange={setDeptFilter} className="w-44" />
       </div>
 
-      {filtered.length === 0 ? (
+      {!ready ? (
+        <div className="space-y-3" aria-busy="true" aria-label="Memuat history">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <Skeleton key={i} className="h-16 w-full rounded-2xl" />
+          ))}
+        </div>
+      ) : filtered.length === 0 ? (
         allBatches.length === 0 ? (
-          <EmptyState text="Belum ada batch yang closed." />
+          <EmptyState text="Belum ada batch yang selesai." />
         ) : (
           <FilteredEmptyState
             onReset={() => {
@@ -264,10 +276,10 @@ export function HistoryPageClient() {
                     <Badge tone={JENIS_TONE[b.jenis]}>{b.jenis}</Badge>
                     <span className="font-semibold text-slate-800 dark:text-slate-100">{b.label}</span>
                   </div>
-                  <div className="mt-0.5 text-xs text-slate-400">
+                  <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
                     {b.meta} · {b.statusLabel} · Periode {b.closureMonth || "-"}
                   </div>
-                  {indicator && <div className="mt-1 text-xs font-medium text-emerald-600 dark:text-emerald-400">{indicator}</div>}
+                  {indicator && <div className="mt-1 text-xs font-medium text-emerald-700 dark:text-emerald-400">{indicator}</div>}
                 </div>
                 <div className="text-sm font-semibold text-slate-600 dark:text-slate-300">{b.totalQty} MP</div>
               </div>

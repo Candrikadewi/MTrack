@@ -1,7 +1,7 @@
 "use client";
-import { useState } from "react";
+import { useId, useState } from "react";
 import Link from "next/link";
-import { ChevronDown } from "lucide-react";
+import { ArrowDown, ChevronDown } from "lucide-react";
 import { Badge, type Tone } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/Table";
 
@@ -39,9 +39,18 @@ const TONE_DOT: Record<Tone, string> = {
  * tile to expand its batch list inline below the row; a category with more
  * than 2 batches collapses the rest behind "+N lainnya" (uniform in-page
  * accordion, never a separate rollup UI). */
-export function BatchTileRow({ categories }: { categories: BatchTileCategory[] }) {
+export function BatchTileRow({
+  categories,
+  onShowInTable,
+}: {
+  categories: BatchTileCategory[];
+  /** When given, the expanded panel offers a jump that filters the page's
+   * detail table down to this category. */
+  onShowInTable?: (categoryKey: string) => void;
+}) {
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const expanded = categories.find((c) => c.key === expandedKey) ?? null;
+  const panelId = useId();
 
   return (
     <div className="space-y-3">
@@ -53,20 +62,23 @@ export function BatchTileRow({ categories }: { categories: BatchTileCategory[] }
               key={cat.key}
               type="button"
               onClick={() => setExpandedKey(isActive ? null : cat.key)}
-              className={`flex items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-white px-3.5 py-3 text-left shadow-sm shadow-slate-200/60 transition-all duration-150 hover:-translate-y-0.5 hover:shadow-md dark:border-slate-800 dark:bg-slate-900 dark:shadow-none ${
+              aria-expanded={isActive}
+              aria-controls={isActive ? panelId : undefined}
+              className={`flex min-h-11 items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-white px-3.5 py-3 text-left shadow-sm shadow-slate-200/60 transition-all duration-150 hover:-translate-y-0.5 hover:shadow-md dark:border-slate-800 dark:bg-slate-900 dark:shadow-none ${
                 isActive ? "ring-2 ring-blue-400/60" : ""
               }`}
             >
               <div>
-                <div className="flex items-center gap-1.5 text-[11px] font-medium text-slate-500 dark:text-slate-400">
-                  <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${TONE_DOT[cat.tone]}`} />
+                <div className="flex items-center gap-1.5 text-xs font-medium text-slate-600 dark:text-slate-400">
+                  <span aria-hidden className={`h-1.5 w-1.5 shrink-0 rounded-full ${TONE_DOT[cat.tone]}`} />
                   {cat.label}
                 </div>
                 <div className="text-xl font-bold tabular-nums text-slate-800 dark:text-slate-100">{cat.count}</div>
               </div>
               <ChevronDown
                 size={15}
-                className={`shrink-0 text-slate-400 transition-transform ${isActive ? "rotate-180" : ""}`}
+                aria-hidden
+                className={`shrink-0 text-slate-500 transition-transform dark:text-slate-400 ${isActive ? "rotate-180" : ""}`}
               />
             </button>
           );
@@ -74,8 +86,23 @@ export function BatchTileRow({ categories }: { categories: BatchTileCategory[] }
       </div>
 
       {expanded && (
-        <div className="animate-reveal rounded-2xl border border-slate-200 bg-slate-50/60 p-3 dark:border-slate-800 dark:bg-slate-900/40">
+        <div
+          id={panelId}
+          className="animate-reveal space-y-2 rounded-2xl border border-slate-200 bg-slate-50/60 p-3 dark:border-slate-800 dark:bg-slate-900/40"
+        >
           <BatchBreakdown category={expanded} />
+          {onShowInTable && expanded.count > 0 && (
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => onShowInTable(expanded.key)}
+                className="inline-flex min-h-9 items-center gap-1 rounded-lg px-2 text-xs font-semibold text-blue-700 hover:bg-blue-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500 dark:text-blue-300 dark:hover:bg-blue-500/10"
+              >
+                Tampilkan {expanded.count} {expanded.label} di tabel
+                <ArrowDown size={13} aria-hidden />
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -99,13 +126,14 @@ function BatchBreakdown({ category }: { category: BatchTileCategory }) {
         >
           <div>
             <div className="font-medium text-slate-700 dark:text-slate-200">{b.label}</div>
-            {b.meta && <div className="text-xs text-slate-400">{b.meta}</div>}
+            {b.meta && <div className="text-xs text-slate-500 dark:text-slate-400">{b.meta}</div>}
           </div>
           <div className="flex items-center gap-2">
             {b.href && (
               <Link
                 href={b.href}
-                className="text-xs font-medium text-blue-600 hover:underline dark:text-blue-400"
+                aria-label={`Kelola ${b.label}`}
+                className="text-xs font-medium text-blue-700 hover:underline dark:text-blue-400"
               >
                 Kelola →
               </Link>

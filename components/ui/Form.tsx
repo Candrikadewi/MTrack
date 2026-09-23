@@ -19,6 +19,7 @@ export function Input(props: InputHTMLAttributes<HTMLInputElement>) {
         onChange={(v) => onChange?.({ target: { value: v } } as ChangeEvent<HTMLInputElement>)}
         disabled={disabled}
         className={className}
+        ariaLabel={props["aria-label"]}
       />
     );
   }

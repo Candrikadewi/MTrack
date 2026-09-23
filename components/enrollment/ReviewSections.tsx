@@ -1,9 +1,11 @@
 "use client";
+import { useState } from "react";
 import { Card } from "@/components/ui/Card";
 import { Select } from "@/components/ui/Form";
 import { Badge, statusTone } from "@/components/ui/Badge";
 import { EmptyState, TableWrap, Td, Th } from "@/components/ui/Table";
 import { MultiSelect } from "@/components/ui/MultiSelect";
+import { ConfirmDialog } from "@/components/ui/Modal";
 import { fmtDate, sisaHari } from "@/lib/engine/compute";
 import { deptsOfRows, divisionsOfRows, filterByDivDept } from "@/lib/engine/enrollment";
 import { setReviewResult } from "@/lib/engine/actions";
@@ -36,6 +38,7 @@ export function ReviewSection({
   const filteredReviews = filterByDivDept(monthReviews, divs, depts);
 
   const terminateCount = filteredReviews.filter((r) => r.review_result === "Terminate").length;
+  const [pendingTerminate, setPendingTerminate] = useState<PkwtReview | null>(null);
 
   return (
     <Card
@@ -93,7 +96,12 @@ export function ReviewSection({
                     {canEditReview ? (
                       <Select
                         value={r.review_result}
-                        onChange={(e) => setReviewResult(r.id, e.target.value as ReviewResult)}
+                        aria-label={`Review result ${r.nama} (${r.noreg})`}
+                        onChange={(e) => {
+                          const next = e.target.value as ReviewResult;
+                          if (next === "Terminate") setPendingTerminate(r);
+                          else setReviewResult(r.id, next);
+                        }}
                         className="min-w-[130px]"
                       >
                         <option value="">-</option>
@@ -112,6 +120,25 @@ export function ReviewSection({
           </tbody>
         </TableWrap>
       )}
+      <ConfirmDialog
+        open={pendingTerminate !== null}
+        title="Terminate kontrak?"
+        confirmLabel="Ya, Terminate"
+        tone="danger"
+        onCancel={() => setPendingTerminate(null)}
+        onConfirm={() => {
+          if (pendingTerminate) setReviewResult(pendingTerminate.id, "Terminate");
+          setPendingTerminate(null);
+        }}
+      >
+        {pendingTerminate && (
+          <>
+            Kontrak <strong className="font-semibold text-slate-800 dark:text-slate-100">{pendingTerminate.nama}</strong> ({pendingTerminate.noreg}) tidak
+            dilanjutkan. Ini akan membuka <strong className="font-semibold text-slate-800 dark:text-slate-100">1 demand replacement</strong> untuk{" "}
+            {pendingTerminate.dept || pendingTerminate.div}.
+          </>
+        )}
+      </ConfirmDialog>
     </Card>
   );
 }

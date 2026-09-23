@@ -6,12 +6,15 @@ import { FullWidthTabs } from "@/components/ui/Tabs";
 import { MultiSelect } from "@/components/ui/MultiSelect";
 import { Select } from "@/components/ui/Form";
 import { EmptyState, FilteredEmptyState, TableWrap, Td, Th } from "@/components/ui/Table";
+import { Skeleton } from "@/components/ui/Skeleton";
+import { ConfirmDialog } from "@/components/ui/Modal";
 import { BatchTileRow, type BatchTileCategory } from "@/components/ui/BatchTileRow";
 import { SectionHeading } from "@/components/ui/SectionHeading";
 import { SegmentedSwitch } from "@/components/ui/SegmentedSwitch";
 import { KaizenModal } from "@/components/util-pool/KaizenModal";
 import { TaktDownModal } from "@/components/takt/TaktDownModal";
-import { useStoreList } from "@/lib/useStore";
+import { useStoreList, useStoreReady } from "@/lib/useStore";
+import { pushToast } from "@/lib/toast";
 import { taktStore, utilPoolStore, zparStore } from "@/lib/repo";
 import { contractRemainingLabel, contractUrgency, fmtDate, poolLeadTimeDays } from "@/lib/engine/compute";
 import { naturalRelease } from "@/lib/engine/actions";
@@ -20,10 +23,10 @@ import { useSessionState } from "@/lib/useSessionState";
 import type { TaktCase, UtilPoolEntry, UtilPoolSource } from "@/lib/types";
 
 const urgencyClass: Record<string, string> = {
-  red: "text-red-600 font-semibold",
-  orange: "text-amber-600 font-semibold",
-  green: "text-emerald-600",
-  none: "text-slate-500",
+  red: "font-semibold text-red-700 dark:text-red-300",
+  orange: "font-semibold text-amber-700 dark:text-amber-300",
+  green: "text-emerald-700 dark:text-emerald-300",
+  none: "text-slate-600 dark:text-slate-400",
 };
 
 const SOURCE_TYPE_LABELS: Record<UtilPoolSource, string> = {
@@ -88,11 +91,14 @@ export function SupplyPageClient() {
   const role = useRole();
   const [kaizenOpen, setKaizenOpen] = useState(false);
   const [taktDownOpen, setTaktDownOpen] = useState(false);
-  // `.sort()` on the array useStoreList returns would mutate the store's
-  // own cache in place (list() hands back the live reference, not a copy)
-  // — copy first, or every other reader of utilPoolStore sees its order
-  // silently reshuffled mid-render.
-  const entries = [...useStoreList(utilPoolStore)].sort((a, b) => b.entered_pool_date.localeCompare(a.entered_pool_date));
+  const poolList = useStoreList(utilPoolStore);
+  const poolReady = useStoreReady(utilPoolStore);
+  // Copy before sorting: list() hands back the store's live cache, and an
+  // in-place sort would reshuffle it for every other reader mid-render.
+  const entries = useMemo(
+    () => [...poolList].sort((a, b) => b.entered_pool_date.localeCompare(a.entered_pool_date)),
+    [poolList]
+  );
   const taktCases = useStoreList(taktStore);
   const snapshots = useStoreList(zparStore);
   // Live lookup, not snapshotted — Posisi (Struktural) only exists on the
@@ -155,25 +161,29 @@ export function SupplyPageClient() {
     [openAllEntries, selOpenSources, selOpenDivs, selOpenDepts, selOpenStatus, selOpenPosisi, selOpenMonth, posisiByNoreg]
   );
 
-  function handleNaturalRelease(e: UtilPoolEntry) {
-    if (!confirm(`Natural Release ${e.nama} (${e.noreg})? Tindakan ini tidak bisa dibatalkan.`)) return;
-    naturalRelease(e.id);
+  const [pendingRelease, setPendingRelease] = useState<UtilPoolEntry | null>(null);
+
+  function resetOpenFilters() {
+    setSelOpenSources([]);
+    setSelOpenDivs([]);
+    setSelOpenDepts([]);
+    setSelOpenStatus([]);
+    setSelOpenPosisi([]);
+    setSelOpenMonth("");
   }
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100">Supply</h1>
-        <p className="text-sm text-slate-500 dark:text-slate-400">
+        <p className="text-sm text-slate-600 dark:text-slate-400">
           Personil sementara tidak bertugas (Takt Down/Project Selesai/Kaizen), siap diutilize sebagai MP Excess/Back Up.
         </p>
       </div>
 
-      {/* 1. Ringkasan per Batch */}
-      <SectionHeading n={1} title="Ringkasan per Batch" subtitle="Klik tile untuk lihat rincian batch." divider={false} />
+      <SectionHeading n={1} title="Ringkasan per Batch" subtitle="Supply yang masih Open, semua bulan. Klik tile untuk rincian." divider={false} />
       <BatchTileRow categories={batchCategories} />
 
-      {/* 2. Input Supply Baru */}
       {role === "admin" && (
         <div className="space-y-4 border-t border-slate-200 pt-6 dark:border-slate-800">
           <SectionHeading n={2} title="Input Supply Baru" divider={false} />
@@ -188,20 +198,20 @@ export function SupplyPageClient() {
               onChange={(k) => setInputTab(k as typeof inputTab)}
             />
             {inputTab === "taktdown" ? (
-              <div className="flex items-center justify-between gap-3 rounded-xl border border-dashed border-slate-200 p-4 dark:border-slate-700">
-                <p className="text-sm text-slate-500 dark:text-slate-400">
+              <div className="flex flex-col gap-3 rounded-xl border border-dashed border-slate-300 p-4 sm:flex-row sm:items-center sm:justify-between dark:border-slate-700">
+                <p className="text-sm text-slate-600 dark:text-slate-400">
                   Lepas personil dari shop akibat takt time turun — rencana per shop dulu, baru mapping name-by-name.
                 </p>
-                <Button variant="primary" onClick={() => setTaktDownOpen(true)}>
+                <Button variant="primary" className="shrink-0" onClick={() => setTaktDownOpen(true)}>
                   + Takt Down
                 </Button>
               </div>
             ) : (
-              <div className="flex items-center justify-between gap-3 rounded-xl border border-dashed border-slate-200 p-4 dark:border-slate-700">
-                <p className="text-sm text-slate-500 dark:text-slate-400">
+              <div className="flex flex-col gap-3 rounded-xl border border-dashed border-slate-300 p-4 sm:flex-row sm:items-center sm:justify-between dark:border-slate-700">
+                <p className="text-sm text-slate-600 dark:text-slate-400">
                   Catat supply dari hasil improvement/Kaizen — personil yang jadi excess karena efisiensi proses.
                 </p>
-                <Button variant="primary" onClick={() => setKaizenOpen(true)}>
+                <Button variant="primary" className="shrink-0" onClick={() => setKaizenOpen(true)}>
                   + Tambah Kaizen
                 </Button>
               </div>
@@ -213,13 +223,13 @@ export function SupplyPageClient() {
         </div>
       )}
 
-      {/* 3. Detail Supply — bulan berjalan */}
       <SectionHeading
-        n={3}
+        n={role === "admin" ? 3 : 2}
         title="Detail Supply"
-        subtitle="Bulan berjalan — pilih Kontrak/Vokasi untuk menyaring."
+        subtitle="Supply yang masih Open dan bisa diusulkan ke demand. Pilih Kontrak/Vokasi untuk menyaring."
         action={
           <SegmentedSwitch
+            label="Kategori supply"
             options={[
               { value: "kontrak", label: "Kontrak" },
               { value: "vokasi", label: "Vokasi" },
@@ -229,8 +239,14 @@ export function SupplyPageClient() {
           />
         }
       />
-      {entries.length === 0 ? (
-        <EmptyState text="Supply Pool kosong." />
+      {!poolReady ? (
+        <div className="space-y-2" aria-busy="true" aria-label="Memuat Supply Pool">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="h-12 w-full" />
+          ))}
+        </div>
+      ) : entries.length === 0 ? (
+        <EmptyState text="Supply Pool masih kosong. Supply baru masuk dari Takt Down, Project selesai, atau Kaizen." />
       ) : (
         <Card>
           <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
@@ -247,7 +263,7 @@ export function SupplyPageClient() {
             <MultiSelect label="Department" options={openDeptOptions} selected={selOpenDepts} onChange={setSelOpenDepts} />
             <MultiSelect label="Status MP" options={openStatusOptions} selected={selOpenStatus} onChange={setSelOpenStatus} />
             <MultiSelect label="Posisi" options={openPosisiOptions} selected={selOpenPosisi} onChange={setSelOpenPosisi} />
-            <div>
+            <label className="block">
               <span className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">Bulan Masuk</span>
               <Select value={selOpenMonth} onChange={(e) => setSelOpenMonth(e.target.value)}>
                 <option value="">Semua Bulan</option>
@@ -257,22 +273,13 @@ export function SupplyPageClient() {
                   </option>
                 ))}
               </Select>
-            </div>
+            </label>
           </div>
           {openEntries.length === 0 ? (
             openAllEntries.length === 0 ? (
               <EmptyState text="Tidak ada supply yang masih Open." />
             ) : (
-              <FilteredEmptyState
-                onReset={() => {
-                  setSelOpenSources([]);
-                  setSelOpenDivs([]);
-                  setSelOpenDepts([]);
-                  setSelOpenStatus([]);
-                  setSelOpenPosisi([]);
-                  setSelOpenMonth("");
-                }}
-              />
+              <FilteredEmptyState onReset={resetOpenFilters} />
             )
           ) : (
             <TableWrap>
@@ -288,7 +295,7 @@ export function SupplyPageClient() {
                   <Th>Tanggal Masuk Pool</Th>
                   <Th>Lead Time in Pool</Th>
                   <Th>Sisa Kontrak</Th>
-                  <Th>Aksi</Th>
+                  {role === "admin" && <Th>Aksi</Th>}
                 </tr>
               </thead>
               <tbody>
@@ -306,13 +313,19 @@ export function SupplyPageClient() {
                       <Td>{fmtDate(e.entered_pool_date)}</Td>
                       <Td>{poolLeadTimeDays(e.entered_pool_date)} hari</Td>
                       <Td className={urgencyClass[urgency]}>{contractRemainingLabel(e.contract_end)}</Td>
-                      <Td>
-                        {role === "admin" && (
-                          <Button size="sm" variant="danger" onClick={() => handleNaturalRelease(e)}>
+                      {role === "admin" && (
+                        <Td>
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            className="text-red-700 dark:text-red-300"
+                            aria-label={`Natural Release ${e.nama}`}
+                            onClick={() => setPendingRelease(e)}
+                          >
                             Natural Release
                           </Button>
-                        )}
-                      </Td>
+                        </Td>
+                      )}
                     </tr>
                   );
                 })}
@@ -321,6 +334,27 @@ export function SupplyPageClient() {
           )}
         </Card>
       )}
+      <ConfirmDialog
+        open={pendingRelease !== null}
+        title="Natural Release?"
+        confirmLabel="Ya, Release"
+        tone="danger"
+        onCancel={() => setPendingRelease(null)}
+        onConfirm={() => {
+          if (pendingRelease) {
+            naturalRelease(pendingRelease.id);
+            pushToast(`${pendingRelease.nama} dikeluarkan dari Supply Pool (Natural Release).`, "success");
+          }
+          setPendingRelease(null);
+        }}
+      >
+        {pendingRelease && (
+          <>
+            <strong className="font-semibold text-slate-800 dark:text-slate-100">{pendingRelease.nama}</strong> ({pendingRelease.noreg}) keluar dari
+            Supply Pool dan tidak bisa lagi diusulkan ke demand. Tindakan ini tidak bisa dibatalkan.
+          </>
+        )}
+      </ConfirmDialog>
     </div>
   );
 }
