@@ -67,7 +67,10 @@ const PERS_AREA_ALIASES = ["pers area", "personnel area", "pers. area", "area ke
  * substring-based on the normalized (lowercased, whitespace-collapsed) raw
  * value, so "Karawang 1", "KARAWANG1", "Krw 1" etc. all resolve the same
  * way; anything that doesn't mention one of the six known areas returns
- * null so the caller can flag and exclude it rather than silently guessing. */
+ * null. This is purely a tag for the Demand menu's ratio widgets to scope
+ * by (default scope = Vehicle Plant + Labor A) — it never excludes a row
+ * from the upload itself; ZPAR/Vokasi data outside these five areas is
+ * still real headcount and stays in the dataset. */
 export function mapPersAreaToPlant(persArea: string): PlantUnit | null {
   const s = persArea.toLowerCase().replace(/\s+/g, " ").trim();
   if (!s) return null;
@@ -81,15 +84,18 @@ export function mapPersAreaToPlant(persArea: string): PlantUnit | null {
 }
 
 export interface SkipBreakdown {
-  /** Reason label -> row count. */
+  /** Reason label -> row count. Rows counted here are genuinely excluded
+   * from the upload. */
   reasons: Record<string, number>;
-  /** Unique raw "Pers Area" values that failed to map, for the upload
-   * preview to show exactly what text is tripping the mapping up. */
+  /** Informational only — rows here are NOT excluded, just flagged: their
+   * Pers Area didn't resolve to one of the five known areas, so they won't
+   * count toward Demand's default (Vehicle Plant + Labor A) ratio scope. */
+  unmatchedPersAreaCount: number;
   unmatchedPersAreaValues: string[];
 }
 
 function emptySkipBreakdown(): SkipBreakdown {
-  return { reasons: {}, unmatchedPersAreaValues: [] };
+  return { reasons: {}, unmatchedPersAreaCount: 0, unmatchedPersAreaValues: [] };
 }
 
 function addReason(b: SkipBreakdown, reason: string) {
@@ -125,9 +131,8 @@ export async function parseZparFile(file: File): Promise<ZparParseResult> {
     const persAreaRaw = findValue(row, PERS_AREA_ALIASES);
     const plant = mapPersAreaToPlant(persAreaRaw);
     if (!plant) {
-      addReason(skipBreakdown, "Pers Area tidak termasuk Vehicle/Unit KRW/Unit STR Plant");
+      skipBreakdown.unmatchedPersAreaCount++;
       unmatchedPersAreaSet.add(persAreaRaw || "(kosong)");
-      continue;
     }
     const division = findValue(row, ["division", "divisi"]);
     employees.push({
@@ -144,7 +149,7 @@ export async function parseZparFile(file: File): Promise<ZparParseResult> {
       line: findValue(row, ["line"]),
       tgl_lahir: toIsoDate(findValue(row, ["tgl lahir", "tanggal lahir", "birth date", "dob"])),
       gender: normalizeGender(findValue(row, ["gender", "jk", "jenis kelamin", "sex"])),
-      plant,
+      plant: plant ?? "",
       posisi_struktural: findValue(row, [
         "posisi (struktural)",
         "posisi struktural",
@@ -178,9 +183,8 @@ export async function parseVokasiFile(file: File, defaultTglMasuk: string): Prom
     const persAreaRaw = findValue(row, PERS_AREA_ALIASES);
     const plant = mapPersAreaToPlant(persAreaRaw);
     if (!plant) {
-      addReason(skipBreakdown, "Pers Area tidak termasuk Vehicle/Unit KRW/Unit STR Plant");
+      skipBreakdown.unmatchedPersAreaCount++;
       unmatchedPersAreaSet.add(persAreaRaw || "(kosong)");
-      continue;
     }
     const tglMasuk = toIsoDate(findValue(row, ["tgl masuk", "tanggal masuk"])) || defaultTglMasuk;
     records.push({
@@ -189,7 +193,7 @@ export async function parseVokasiFile(file: File, defaultTglMasuk: string): Prom
       div: findValue(row, ["div", "division", "divisi"]),
       dept: findValue(row, ["dept", "shop", "department", "departemen"]),
       lokasi: findValue(row, ["lokasi", "location"]),
-      plant,
+      plant: plant ?? "",
       tgl_masuk: tglMasuk,
       // Business rule: Vokasi selalu 6 bulan − 1 hari dari tgl_masuk, bukan dari file upload.
       tgl_ended: computeVokasiEndedDate(tglMasuk),

@@ -48,11 +48,13 @@ import type {
   Demand,
   DemandCategory,
   DemandOriginType,
+  EmployeeRecord,
   EmploymentStatus,
   Project,
   ReplacementStatus,
   TaktCase,
   UtilPoolEntry,
+  VokasiRecord,
 } from "@/lib/types";
 
 const POOL_SOURCES: ReplacementStatus[] = ["MP Excess", "MP Back Up"];
@@ -93,6 +95,29 @@ function confirmLabel(d: Demand): string {
   if (d.replacement_status === "PKWT New Hire" || d.replacement_status === "Vokasi New Hire") return "Tgl Sign Kontrak";
   if (d.replacement_status === "MP Excess" || d.replacement_status === "MP Back Up") return "Tgl Assigned";
   return "Tgl Konfirmasi";
+}
+
+/** Default scope for every ratio widget on this page when no Divisi/Dept
+ * filter is active: Labor Type A within Vehicle Plant (Pers Area Karawang 1
+ * & 2) — not the whole plant. Once a Divisi/Dept filter is picked, that
+ * filter takes over as the scope instead (no Labor A/Vehicle Plant
+ * restriction) — this default only exists to give the unfiltered view a
+ * meaningful baseline. Dashboard's own ratio widget is unrelated and keeps
+ * scoping to the whole plant regardless. */
+function scopeEmployeesForRatio(employees: EmployeeRecord[], divs: string[], depts: string[]): EmployeeRecord[] {
+  if (divs.length === 0 && depts.length === 0) {
+    return employees.filter((e) => e.labor_type === "A" && e.plant === "Vehicle Plant");
+  }
+  const byDiv = divs.length ? employees.filter((e) => divs.includes(e.division)) : employees;
+  return depts.length ? byDiv.filter((e) => depts.includes(e.dept)) : byDiv;
+}
+
+function scopeVokasiForRatio(vokasi: VokasiRecord[], divs: string[], depts: string[]): VokasiRecord[] {
+  if (divs.length === 0 && depts.length === 0) {
+    return vokasi.filter((v) => v.labor_type === "A" && v.plant === "Vehicle Plant");
+  }
+  const byDiv = divs.length ? vokasi.filter((v) => divs.includes(v.div)) : vokasi;
+  return depts.length ? byDiv.filter((v) => depts.includes(v.dept)) : byDiv;
 }
 
 type RatioDelta = { permanen: number; kontrak: number; vokasi: number };
@@ -236,10 +261,8 @@ export function DemandPageClient() {
   );
   const activeDivs = enrollTab === "PKWT" ? reviewDivs : vokasiDivs;
   const activeDepts = enrollTab === "PKWT" ? reviewDepts : vokasiDepts;
-  const ratioScopedEmployees = activeDivs.length ? employees.filter((e) => activeDivs.includes(e.division)) : employees;
-  const ratioScopedEmployeesFinal = activeDepts.length ? ratioScopedEmployees.filter((e) => activeDepts.includes(e.dept)) : ratioScopedEmployees;
-  const ratioScopedVokasi = activeDivs.length ? vokasi.filter((v) => activeDivs.includes(v.div)) : vokasi;
-  const ratioScopedVokasiFinal = activeDepts.length ? ratioScopedVokasi.filter((v) => activeDepts.includes(v.dept)) : ratioScopedVokasi;
+  const ratioScopedEmployeesFinal = scopeEmployeesForRatio(employees, activeDivs, activeDepts);
+  const ratioScopedVokasiFinal = scopeVokasiForRatio(vokasi, activeDivs, activeDepts);
   const ratioVokasiActive = ratioScopedVokasiFinal.filter((v) => computeVokasiStatus(v.tgl_ended, fulfilledVokasiIds.has(v.id)) !== "Ended");
   const enrollmentRatioCounts = {
     permanen: ratioScopedEmployeesFinal.filter((e) => e.status_kontrak === "Permanen").length,
@@ -286,11 +309,9 @@ export function DemandPageClient() {
   const fulfilledCount = monthDemands.filter((d) => demandGranularStatus(d).startsWith("Fulfilled")).length;
 
   // Ratio scope follows the same Divisi/Dept filter as the table below —
-  // unfiltered = whole plant (Karawang 1 & 2).
-  const ratioScopedEmployees4 = divs.length ? employees.filter((e) => divs.includes(e.division)) : employees;
-  const ratioScopedEmployeesFinal4 = depts.length ? ratioScopedEmployees4.filter((e) => depts.includes(e.dept)) : ratioScopedEmployees4;
-  const ratioScopedVokasi4 = divs.length ? vokasi.filter((v) => divs.includes(v.div)) : vokasi;
-  const ratioScopedVokasiFinal4 = depts.length ? ratioScopedVokasi4.filter((v) => depts.includes(v.dept)) : ratioScopedVokasi4;
+  // unfiltered defaults to Labor A within Vehicle Plant, not the whole plant.
+  const ratioScopedEmployeesFinal4 = scopeEmployeesForRatio(employees, divs, depts);
+  const ratioScopedVokasiFinal4 = scopeVokasiForRatio(vokasi, divs, depts);
   const ratioVokasiActive4 = ratioScopedVokasiFinal4.filter((v) => computeVokasiStatus(v.tgl_ended, fulfilledVokasiIds.has(v.id)) !== "Ended");
   const scenarioBase = {
     permanen: ratioScopedEmployeesFinal4.filter((e) => e.status_kontrak === "Permanen").length,
@@ -373,7 +394,7 @@ export function DemandPageClient() {
           <RatioWidget
             title="Rasio Permanen : Kontrak : Vokasi — Saat Ini"
             counts={enrollmentRatioCounts}
-            scopeLabel={activeDivs.length || activeDepts.length ? "Sesuai filter" : "Seluruh plant"}
+            scopeLabel={activeDivs.length || activeDepts.length ? "Sesuai filter" : "Vehicle Plant · Labor A"}
           />
           <div className="flex flex-wrap items-center justify-between gap-3">
             <Select value={period} onChange={(e) => setPeriod(e.target.value)} className="w-40">
@@ -498,7 +519,7 @@ export function DemandPageClient() {
       />
 
       <RatioScenarioCompare
-        scopeLabel={divs.length || depts.length ? "Sesuai filter" : "Seluruh plant"}
+        scopeLabel={divs.length || depts.length ? "Sesuai filter" : "Vehicle Plant · Labor A"}
         scenarios={[
           { label: "Sekarang", counts: scenarioBase },
           {

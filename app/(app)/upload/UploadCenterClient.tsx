@@ -26,10 +26,11 @@ import { useSessionState } from "@/lib/useSessionState";
 import type { VokasiRecord } from "@/lib/types";
 
 /** Pre-commit validation preview — how many rows will actually be used and
- * why the rest won't, before anything gets written to the store. Shared
- * between ZPAR and Vokasi, which both now skip rows for the same two kinds
- * of reasons (a hard data-quality gate for ZPAR — EG/Status Kontrak — plus
- * Pers Area not resolving to Vehicle/Unit KRW/Unit STR Plant for both). */
+ * why the rest won't, before anything gets written to the store. Only EG
+ * inactive / Status Kontrak unrecognized actually exclude a row; Pers Area
+ * not resolving to one of the five known areas is informational only — that
+ * row still uploads, it just won't count toward Demand's default (Vehicle
+ * Plant + Labor A) ratio scope. */
 function ValidationSummary({
   totalRows,
   included,
@@ -57,7 +58,7 @@ function ValidationSummary({
       </div>
       {reasonEntries.length > 0 && (
         <div>
-          <div className="mb-1 text-xs font-semibold text-slate-500">Alasan tidak match:</div>
+          <div className="mb-1 text-xs font-semibold text-slate-500">Alasan tidak match (baris ini dilewati):</div>
           <ul className="space-y-0.5 text-xs text-slate-600 dark:text-slate-300">
             {reasonEntries.map(([reason, count]) => (
               <li key={reason}>
@@ -67,12 +68,15 @@ function ValidationSummary({
           </ul>
         </div>
       )}
-      {skipBreakdown.unmatchedPersAreaValues.length > 0 && (
+      {skipBreakdown.unmatchedPersAreaCount > 0 && (
         <div>
-          <div className="mb-1 text-xs font-semibold text-slate-500">Nilai Pers Area yang tidak dikenali:</div>
+          <div className="mb-1 text-xs font-semibold text-slate-500">
+            {skipBreakdown.unmatchedPersAreaCount} baris dengan Pers Area di luar Vehicle/Unit KRW/Unit STR Plant — tetap
+            diupload, hanya tidak masuk skop default ratio di menu Demand:
+          </div>
           <div className="flex flex-wrap gap-1.5">
             {skipBreakdown.unmatchedPersAreaValues.map((v) => (
-              <Badge key={v} tone="amber">
+              <Badge key={v} tone="slate">
                 {v}
               </Badge>
             ))}

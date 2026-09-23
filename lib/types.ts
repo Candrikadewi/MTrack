@@ -39,7 +39,11 @@ export interface EmployeeRecord {
   line: string;
   tgl_lahir: string;
   gender: Gender;
-  plant: PlantUnit; // derived from ZPAR "Pers Area" — see mapPersAreaToPlant
+  /** Derived from ZPAR "Pers Area" — see mapPersAreaToPlant. Empty when Pers
+   * Area doesn't resolve to one of the five known areas; the employee is
+   * still included in the dataset, just outside Demand's default ratio
+   * scope (which only kicks in when Divisi/Dept aren't otherwise filtered). */
+  plant: PlantUnit | "";
   posisi_struktural: string; // ZPAR "Posisi (Struktural)" column, free text
 }
 
@@ -81,7 +85,7 @@ export interface VokasiRecord {
   div: string;
   dept: string; // shop/dept
   lokasi: string;
-  plant: PlantUnit; // derived from Vokasi's "Pers Area" — see mapPersAreaToPlant
+  plant: PlantUnit | ""; // derived from Vokasi's "Pers Area" — see mapPersAreaToPlant; "" if unresolved
   tgl_masuk: string; // tanggal masuk vokasi
   tgl_ended: string;
   utilisasi: string;
