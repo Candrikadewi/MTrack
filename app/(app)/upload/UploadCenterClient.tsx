@@ -11,7 +11,7 @@ import { EmptyState, TableWrap, Td, Th } from "@/components/ui/Table";
 import { useStoreList } from "@/lib/useStore";
 import { zparStore, vokasiStore, activateSnapshot, clearAllData } from "@/lib/repo";
 import { genId } from "@/lib/storage";
-import { parseVokasiFile, parseZparFile, type SkipBreakdown } from "@/lib/parseFile";
+import { parseVokasiFile, parseZparFile, type ColumnCheck, type SkipBreakdown } from "@/lib/parseFile";
 import {
   autoMatchVokasiBatch,
   deleteVokasiBatch,
@@ -25,22 +25,37 @@ import { pushToast } from "@/lib/toast";
 import { useSessionState } from "@/lib/useSessionState";
 import type { VokasiRecord } from "@/lib/types";
 
+function ColumnChips({ items, tone }: { items: string[]; tone: "red" | "amber" | "slate" }) {
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {items.map((c) => (
+        <Badge key={c} tone={tone}>
+          {c}
+        </Badge>
+      ))}
+    </div>
+  );
+}
+
 /** Pre-commit validation preview — how many rows will actually be used and
- * why the rest won't, before anything gets written to the store. Only EG
- * inactive / Status Kontrak unrecognized actually exclude a row; Pers Area
- * not resolving to one of the five known areas is informational only — that
- * row still uploads, it just won't count toward Demand's default (Vehicle
- * Plant + Labor A) ratio scope. */
+ * why the rest won't, before anything is written. Only EG not Active and an
+ * unrecognised Status exclude a row; everything else here (area counts,
+ * data-quality flags, column drift) is informational. */
 function ValidationSummary({
   totalRows,
   included,
   skipBreakdown,
+  columns,
 }: {
   totalRows: number;
   included: number;
   skipBreakdown: SkipBreakdown;
+  columns?: ColumnCheck;
 }) {
   const reasonEntries = Object.entries(skipBreakdown.reasons);
+  const warningEntries = Object.entries(skipBreakdown.warnings);
+  const plantEntries = Object.entries(skipBreakdown.plantCounts).sort((a, b) => b[1] - a[1]);
+  const heading = "mb-1 text-xs font-semibold text-slate-600 dark:text-slate-400";
   return (
     <div className="mt-3 space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900/50">
       <div className="flex flex-wrap items-center gap-4 text-sm">
@@ -52,14 +67,24 @@ function ValidationSummary({
         </span>
         {totalRows - included > 0 && (
           <span className="text-amber-700 dark:text-amber-400">
-            Tidak match: <b>{totalRows - included}</b>
+            Dilewati: <b>{totalRows - included}</b>
           </span>
         )}
       </div>
+
+      {columns && columns.missingRequired.length > 0 && (
+        <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-500/30 dark:bg-red-500/10">
+          <div className="mb-1 text-xs font-semibold text-red-800 dark:text-red-200">
+            Kolom yang dipakai aplikasi tidak ada di file — datanya akan kosong. Cek lagi export ZPAR-nya:
+          </div>
+          <ColumnChips items={columns.missingRequired} tone="red" />
+        </div>
+      )}
+
       {reasonEntries.length > 0 && (
         <div>
-          <div className="mb-1 text-xs font-semibold text-slate-500">Alasan tidak match (baris ini dilewati):</div>
-          <ul className="space-y-0.5 text-xs text-slate-600 dark:text-slate-300">
+          <div className={heading}>Alasan dilewati:</div>
+          <ul className="space-y-0.5 text-xs text-slate-700 dark:text-slate-300">
             {reasonEntries.map(([reason, count]) => (
               <li key={reason}>
                 {reason}: <b>{count}</b> baris
@@ -68,19 +93,54 @@ function ValidationSummary({
           </ul>
         </div>
       )}
-      {skipBreakdown.unmatchedPersAreaCount > 0 && (
+
+      {plantEntries.length > 0 && (
         <div>
-          <div className="mb-1 text-xs font-semibold text-slate-500">
-            {skipBreakdown.unmatchedPersAreaCount} baris dengan Pers Area di luar Vehicle/Unit KRW/Unit STR Plant — tetap
-            diupload, hanya tidak masuk skop default ratio di menu Demand:
-          </div>
+          <div className={heading}>Segregasi area (Pers Area) dari baris yang diupload:</div>
           <div className="flex flex-wrap gap-1.5">
-            {skipBreakdown.unmatchedPersAreaValues.map((v) => (
-              <Badge key={v} tone="slate">
-                {v}
+            {plantEntries.map(([label, count]) => (
+              <Badge key={label} tone={label.startsWith("(") ? "amber" : "slate"}>
+                {label}: {count}
               </Badge>
             ))}
           </div>
+        </div>
+      )}
+
+      {warningEntries.length > 0 && (
+        <div>
+          <div className={heading}>Perlu dicek (baris tetap diupload):</div>
+          <ul className="space-y-0.5 text-xs text-amber-800 dark:text-amber-300">
+            {warningEntries.map(([label, count]) => (
+              <li key={label}>
+                {label}: <b>{count}</b> baris
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {columns && (columns.missingBaseline.length > 0 || columns.unknown.length > 0 || columns.nonStandard.length > 0) && (
+        <div className="space-y-2 border-t border-slate-200 pt-3 dark:border-slate-700">
+          <div className="text-xs font-semibold text-slate-700 dark:text-slate-300">Perubahan kolom dibanding skema ZPAR</div>
+          {columns.unknown.length > 0 && (
+            <div>
+              <div className={heading}>Kolom baru, belum pernah tercatat — review dan catat keputusannya di docs/data-schema.md:</div>
+              <ColumnChips items={columns.unknown} tone="amber" />
+            </div>
+          )}
+          {columns.missingBaseline.length > 0 && (
+            <div>
+              <div className={heading}>Kolom baseline tidak ada bulan ini:</div>
+              <ColumnChips items={columns.missingBaseline} tone="slate" />
+            </div>
+          )}
+          {columns.nonStandard.length > 0 && (
+            <div>
+              <div className={heading}>Kolom non-standar yang sudah dikenal (diabaikan):</div>
+              <ColumnChips items={columns.nonStandard} tone="slate" />
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -91,11 +151,19 @@ function currentMonthKey(): string {
   return new Date().toISOString().slice(0, 7);
 }
 
-/** +2 months ahead down to 36 months back — wide enough for retroactive
- * historical backfill while still nudging toward the current/near periods. */
+/** ZPAR history starts in 2019 (March snapshots until 2025, monthly from
+ * 2026) — options run from 2 months ahead back to January 2019. */
+const ZPAR_FIRST_PERIOD = "2019-01";
+
 function zparPeriodOptions(): string[] {
   const base = new Date(`${currentMonthKey()}-01T00:00:00`);
-  return Array.from({ length: 39 }, (_, i) => format(addMonths(base, 2 - i), "yyyy-MM"));
+  const out: string[] = [];
+  for (let i = 0; ; i++) {
+    const m = format(addMonths(base, 2 - i), "yyyy-MM");
+    if (m < ZPAR_FIRST_PERIOD) break;
+    out.push(m);
+  }
+  return out;
 }
 
 export function UploadCenterClient() {
@@ -151,6 +219,10 @@ export function UploadCenterClient() {
     try {
       const result = await parseZparFile(zparFile);
       setZparPreview(result);
+      // The file knows its own snapshot month — pick it instead of trusting
+      // whatever the dropdown happened to be on.
+      const filePeriod = result.periods.find((p) => !takenPeriods.has(p.period))?.period ?? result.periods[0]?.period;
+      if (filePeriod) setZparPeriod(filePeriod);
     } catch (e) {
       setZparMsg(`Gagal parsing file: ${(e as Error).message}`);
     } finally {
@@ -158,10 +230,23 @@ export function UploadCenterClient() {
     }
   }
 
+  const zparMultiPeriod = (zparPreview?.periods.length ?? 0) > 1;
+  const zparFilePeriods = zparPreview?.periods.map((p) => p.period) ?? [];
+  const zparPeriodMismatch = Boolean(zparPreview && zparFilePeriods.length > 0 && !zparFilePeriods.includes(zparPeriod));
+  const zparUploadEmployees = zparPreview
+    ? zparMultiPeriod
+      ? zparPreview.employeesByPeriod[zparPeriod] ?? []
+      : zparPreview.employees
+    : [];
+
   function handleZparUpload() {
     if (!zparFile || !zparPeriod || !zparPreview) return;
     if (takenPeriods.has(zparPeriod)) {
       setZparMsg("Periode ini sudah diupload — pilih periode lain atau hapus snapshot yang ada terlebih dahulu.");
+      return;
+    }
+    if (zparUploadEmployees.length === 0) {
+      setZparMsg("Tidak ada baris untuk periode ini di file.");
       return;
     }
     const snapshot = {
@@ -170,11 +255,25 @@ export function UploadCenterClient() {
       filename: zparFile.name,
       upload_date: new Date().toISOString(),
       is_active: false,
-      employees: zparPreview.employees,
+      employees: zparUploadEmployees,
     };
     zparStore.insert(snapshot);
     if (!snapshots.some((s) => s.is_active)) activateAndRefresh(snapshot.id);
-    setZparMsg(`Berhasil upload ${zparPreview.employees.length} employee dari ${zparPreview.totalRows} baris.`);
+    const label = format(new Date(`${zparPeriod}-01T00:00:00`), "MMMM yyyy");
+    if (zparMultiPeriod) {
+      // Keep the parsed file so the remaining periods can be uploaded next.
+      const next = zparFilePeriods.find((p) => p !== zparPeriod && !takenPeriods.has(p));
+      setZparMsg(
+        `Periode ${label}: ${zparUploadEmployees.length} employee diupload.${next ? " Pilih periode berikutnya lalu upload lagi." : " Semua periode di file sudah diupload."}`
+      );
+      if (next) setZparPeriod(next);
+      else {
+        setZparFile(null);
+        setZparPreview(null);
+      }
+      return;
+    }
+    setZparMsg(`Berhasil upload ${zparUploadEmployees.length} employee (${label}) dari ${zparPreview.totalRows} baris.`);
     setZparFile(null);
     setZparPreview(null);
   }
@@ -252,7 +351,7 @@ export function UploadCenterClient() {
 
       <Card
         title="Upload ZPAR (Snapshot Bulanan)"
-        subtitle="Filter EG = Active, status Permanen/Kontrak/AKTI, Pers Area termasuk Vehicle/Unit KRW/Unit STR Plant"
+        subtitle="CSV ZPAR (;) atau .xlsx · hanya EG = Active · Pers Area dikelompokkan Vehicle / Unit KRW / Unit STR / Head Office · periode diambil dari kolom Period"
       >
         <div className="grid gap-4 sm:grid-cols-3">
           <Field label="Bulan & Tahun (period)">
@@ -276,11 +375,11 @@ export function UploadCenterClient() {
             {zparPreview ? (
               <Button
                 variant="primary"
-                disabled={zparBusy || takenPeriods.has(zparPeriod)}
+                disabled={zparBusy || takenPeriods.has(zparPeriod) || zparUploadEmployees.length === 0}
                 onClick={handleZparUpload}
                 className="w-full"
               >
-                Konfirmasi &amp; Upload
+                Konfirmasi &amp; Upload ({zparUploadEmployees.length})
               </Button>
             ) : (
               <Button variant="secondary" disabled={!zparFile || zparBusy} onClick={handleCheckZpar} className="w-full">
@@ -290,11 +389,23 @@ export function UploadCenterClient() {
           </div>
         </div>
         {zparPreview && (
-          <ValidationSummary
-            totalRows={zparPreview.totalRows}
-            included={zparPreview.employees.length}
-            skipBreakdown={zparPreview.skipBreakdown}
-          />
+          <>
+            {(zparMultiPeriod || zparPeriodMismatch) && (
+              <p role="status" className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+                {zparMultiPeriod
+                  ? `File berisi ${zparPreview.periods.length} periode (${zparPreview.periods
+                      .map((p) => `${p.period}: ${p.count}`)
+                      .join(", ")}). Upload satu periode per kali — pilih periodenya di atas.`
+                  : `Kolom Period di file berisi ${zparFilePeriods.join(", ")}, tapi yang dipilih ${zparPeriod}. Pastikan periodenya benar sebelum upload.`}
+              </p>
+            )}
+            <ValidationSummary
+              totalRows={zparPreview.totalRows}
+              included={zparPreview.employees.length}
+              skipBreakdown={zparPreview.skipBreakdown}
+              columns={zparPreview.columns}
+            />
+          </>
         )}
         {zparMsg && <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">{zparMsg}</p>}
 

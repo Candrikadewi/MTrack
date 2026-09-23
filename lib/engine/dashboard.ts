@@ -4,7 +4,7 @@ import { addMonths, addYears, differenceInYears, endOfMonth, endOfYear, format, 
 import { demandVisibleDate, fulfillmentDeadline, reviewFillDeadline, reviewReminderDate, sisaHari } from "./compute";
 import { demandTargetDate, effectiveDemandCategory } from "./enrollment";
 import { POSISI_STRUKTURAL_GROUPS } from "../types";
-import type { Demand, DemandCategory, DemandOriginType, EmployeeRecord, PkwtReview, VokasiRecord } from "../types";
+import { isPermanenForRatio, type Demand, type DemandCategory, type DemandOriginType, type EmployeeRecord, type PkwtReview, type VokasiRecord } from "../types";
 
 export function directorates(employees: EmployeeRecord[]): string[] {
   return Array.from(new Set(employees.map((e) => e.directorat))).sort();
@@ -232,8 +232,8 @@ export function manpowerMovementByFiscalYear(
     const scoped = filterEmployees(snapshotsByPeriod.get(month) ?? [], filter.org).filter(
       (e) => filter.laborTypes.length === 0 || filter.laborTypes.includes(e.labor_type)
     );
-    const permanenRows = showPermanen ? scoped.filter((e) => e.status_kontrak === "Permanen") : [];
-    const kontrakRows = showKontrak ? scoped.filter((e) => e.status_kontrak !== "Permanen") : [];
+    const permanenRows = showPermanen ? scoped.filter((e) => isPermanenForRatio(e.status_kontrak)) : [];
+    const kontrakRows = showKontrak ? scoped.filter((e) => !isPermanenForRatio(e.status_kontrak)) : [];
     const monthEnd = format(endOfMonth(new Date(`${month}-01T00:00:00`)), "yyyy-MM-dd");
     const vokasiScoped = vokasi.filter(
       (v) =>
@@ -272,7 +272,7 @@ export function filterByLaborTypeStatus(
   const scopeStatuses = statuses.length ? statuses : (["Permanen", "Kontrak", "Vokasi"] as MovementStatus[]);
   return employees.filter((e) => {
     if (laborTypes.length > 0 && !laborTypes.includes(e.labor_type)) return false;
-    return scopeStatuses.includes(e.status_kontrak === "Permanen" ? "Permanen" : "Kontrak");
+    return scopeStatuses.includes(isPermanenForRatio(e.status_kontrak) ? "Permanen" : "Kontrak");
   });
 }
 

@@ -9,7 +9,7 @@ import { MultiSelect } from "@/components/ui/MultiSelect";
 import { TableWrap, Th, Td, EmptyState } from "@/components/ui/Table";
 import type { CompositionRow } from "@/components/takt/CompositionRowsEditor";
 import { getActiveSnapshot, vokasiStore } from "@/lib/repo";
-import type { MpStatusKategori, TaktDownPerson } from "@/lib/types";
+import { isPermanenForRatio, type MpStatusKategori, type TaktDownPerson } from "@/lib/types";
 
 function loadCandidates(matchesLabor?: (laborType: string) => boolean): TaktDownPerson[] {
   const snap = getActiveSnapshot();
@@ -21,7 +21,7 @@ function loadCandidates(matchesLabor?: (laborType: string) => boolean): TaktDown
       nama: e.nama,
       div: e.division,
       dept: e.dept,
-      type: e.status_kontrak === "Permanen" ? "Permanen" : e.status_kontrak === "AKTI" ? "AKTI" : "PKWT",
+      type: e.status_kontrak === "AKTI" ? "AKTI" : isPermanenForRatio(e.status_kontrak) ? "Permanen" : "PKWT",
     }));
   const fromVokasi: TaktDownPerson[] = vokasiStore
     .list()

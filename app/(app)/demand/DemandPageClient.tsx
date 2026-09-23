@@ -56,6 +56,7 @@ import type {
   UtilPoolEntry,
   VokasiRecord,
 } from "@/lib/types";
+import { isPermanenForRatio } from "@/lib/types";
 
 const POOL_SOURCES: ReplacementStatus[] = ["MP Excess", "MP Back Up"];
 const PKWT_SOURCE_OPTIONS: ReplacementStatus[] = ["PKWT New Hire", "Vokasi New Hire", "MP Excess", "MP Back Up", "No Replace"];
@@ -130,7 +131,7 @@ function outgoingBucket(
   if (d.origin_type === "PkwtTerminate") return "kontrak";
   if (d.origin_type === "VokasiEnded") return "vokasi";
   const emp = empByNoreg.get(d.outgoing_noreg);
-  if (emp) return emp.status_kontrak === "Permanen" ? "permanen" : "kontrak";
+  if (emp) return isPermanenForRatio(emp.status_kontrak) ? "permanen" : "kontrak";
   if (vokasiNoregs.has(d.outgoing_noreg)) return "vokasi";
   return null;
 }
@@ -304,8 +305,8 @@ export function DemandPageClient() {
       (v) => computeVokasiStatus(v.tgl_ended, fulfilledVokasiIds.has(v.id)) !== "Ended"
     );
     return {
-      permanen: emps.filter((e) => e.status_kontrak === "Permanen").length,
-      kontrak: emps.filter((e) => e.status_kontrak !== "Permanen").length,
+      permanen: emps.filter((e) => isPermanenForRatio(e.status_kontrak)).length,
+      kontrak: emps.filter((e) => !isPermanenForRatio(e.status_kontrak)).length,
       vokasi: vok.length,
     };
   }, [employees, vokasi, activeDivs, activeDepts, fulfilledVokasiIds]);
@@ -388,8 +389,8 @@ export function DemandPageClient() {
       (v) => computeVokasiStatus(v.tgl_ended, fulfilledVokasiIds.has(v.id)) !== "Ended"
     );
     return {
-      permanen: emps.filter((e) => e.status_kontrak === "Permanen").length,
-      kontrak: emps.filter((e) => e.status_kontrak !== "Permanen").length,
+      permanen: emps.filter((e) => isPermanenForRatio(e.status_kontrak)).length,
+      kontrak: emps.filter((e) => !isPermanenForRatio(e.status_kontrak)).length,
       vokasi: vok.length,
     };
   }, [employees, vokasi, divs, depts, fulfilledVokasiIds]);

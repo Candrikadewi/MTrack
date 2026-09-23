@@ -1,7 +1,28 @@
 // Core domain types for M-TRACK — Manpower Tracking Application
 // See MTRACK_SPEC.md §3 for the conceptual data model this mirrors.
 
-export type StatusKontrak = "Permanen" | "Kontrak 1.1" | "Kontrak 1.2" | "Kontrak 2" | "AKTI";
+export type StatusKontrak =
+  | "Permanen"
+  | "Kontrak 1.1"
+  | "Kontrak 1.2"
+  | "Kontrak 2"
+  | "Kontrak Profesi"
+  | "Prolongation"
+  | "Expatriate"
+  | "Incoming ICT"
+  | "Outgoing ICT"
+  | "AKTI";
+
+/** Only these stages go through the PKWT Continue/Terminate review cycle. */
+export const KONTRAK_REVIEW_STATUSES: readonly StatusKontrak[] = ["Kontrak 1.1", "Kontrak 1.2", "Kontrak 2"];
+
+/** Which side of the Permanen : Kontrak ratio a ZPAR status counts toward.
+ * Kontrak Profesi, Prolongation, Expatriate and ICT count as Permanen (user
+ * decision); only the reviewed PKWT stages and AKTI count as Kontrak. This
+ * is ratio grouping only — retirement still applies to literal "Permanen". */
+export function isPermanenForRatio(status: StatusKontrak): boolean {
+  return status !== "AKTI" && !KONTRAK_REVIEW_STATUSES.includes(status);
+}
 
 export type Gender = "L" | "P";
 
@@ -9,10 +30,10 @@ export type MpStatusKategori = "Vokasi" | "PKWT" | "Permanen" | "AKTI";
 
 /** Area segregation derived from ZPAR/Vokasi's "Pers Area" column at parse
  * time (see mapPersAreaToPlant in lib/parseFile.ts) — Vehicle Plant =
- * Karawang 1 & 2, Unit KRW Plant = Karawang 3, Unit STR Plant = Sunter 1 & 2.
- * Unrelated to the `Plant` type below, which is Takt Up/Down's own manual
- * "Plant 1"/"Plant 2" selection. */
-export const PLANT_UNITS = ["Vehicle Plant", "Unit KRW Plant", "Unit STR Plant"] as const;
+ * Karawang 1 & 2, Unit KRW Plant = Karawang 3, Unit STR Plant = Sunter 1 & 2,
+ * Head Office = any other non-empty Pers Area. Unrelated to the `Plant` type
+ * below, which is Takt Up/Down's own manual "Plant 1"/"Plant 2" selection. */
+export const PLANT_UNITS = ["Vehicle Plant", "Unit KRW Plant", "Unit STR Plant", "Head Office"] as const;
 export type PlantUnit = (typeof PLANT_UNITS)[number];
 
 /** Known Labor Type codes (Dashboard §Komposisi by Labor Type). Employee/Vokasi
@@ -58,10 +79,9 @@ export interface EmployeeRecord {
   line: string;
   tgl_lahir: string;
   gender: Gender;
-  /** Derived from ZPAR "Pers Area" — see mapPersAreaToPlant. Empty when Pers
-   * Area doesn't resolve to one of the five known areas; the employee is
-   * still included in the dataset, just outside Demand's default ratio
-   * scope (which only kicks in when Divisi/Dept aren't otherwise filtered). */
+  /** Derived from ZPAR "Pers Area" — see mapPersAreaToPlant. Empty only when
+   * Pers Area itself is empty; the employee is still included, just outside
+   * Demand's default ratio scope (Vehicle Plant · Labor A). */
   plant: PlantUnit | "";
   posisi_struktural: string; // ZPAR "Posisi (Struktural)" column, free text
 }
@@ -104,7 +124,7 @@ export interface VokasiRecord {
   div: string;
   dept: string; // shop/dept
   lokasi: string;
-  plant: PlantUnit | ""; // derived from Vokasi's "Pers Area" — see mapPersAreaToPlant; "" if unresolved
+  plant: PlantUnit | ""; // derived from Vokasi's "Pers Area" — see mapPersAreaToPlant; "" if Pers Area is empty
   tgl_masuk: string; // tanggal masuk vokasi
   tgl_ended: string;
   utilisasi: string;

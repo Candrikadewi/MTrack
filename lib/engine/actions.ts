@@ -15,6 +15,7 @@ import {
 import { createClient } from "../supabase/client";
 import { pushToast } from "../toast";
 import { computeFsStatus, computeReviewDate, sisaHari, today } from "./compute";
+import { KONTRAK_REVIEW_STATUSES, isPermanenForRatio } from "../types";
 import type {
   Demand,
   DemandCategory,
@@ -94,7 +95,7 @@ export function getEmploymentStatus(noreg: string): EmploymentStatus {
   if (getVokasiByNoreg(noreg)) return "Vokasi";
   const emp = getActiveEmployeeByNoreg(noreg);
   if (!emp) return "";
-  return emp.status_kontrak === "Permanen" ? "Permanen" : "Kontrak";
+  return isPermanenForRatio(emp.status_kontrak) ? "Permanen" : "Kontrak";
 }
 
 // ---------------------------------------------------------------------------
@@ -230,7 +231,6 @@ export function generatePkwtReviews(): void {
   const snap = getActiveSnapshot();
   if (!snap) return;
   const existing = pkwtReviewStore.list();
-  const kontrakTypes = new Set(["Kontrak 1.1", "Kontrak 1.2", "Kontrak 2"]);
   // Collected into one insertMany() call — firing one insert() per employee
   // (previously up to hundreds of concurrent requests) risked silent partial
   // failures where a review would show up locally (optimistic cache) but
@@ -238,7 +238,7 @@ export function generatePkwtReviews(): void {
   // "Review not found".
   const toCreate: PkwtReview[] = [];
   for (const emp of snap.employees) {
-    if (!kontrakTypes.has(emp.status_kontrak)) continue;
+    if (!KONTRAK_REVIEW_STATUSES.includes(emp.status_kontrak)) continue;
     const tgl_review = computeReviewDate(emp.tgl_masuk, emp.status_kontrak);
     const prior = existing.find((r) => r.noreg === emp.noreg && r.tgl_review === tgl_review);
     if (prior) continue; // keep as-is (preserves review_result / demand_id)
@@ -477,7 +477,7 @@ export function estimateContractEnd(noreg: string, type: MpStatusKategori): stri
   const vokasi = getVokasiByNoreg(noreg);
   if (vokasi?.tgl_ended) return vokasi.tgl_ended;
   const emp = getActiveEmployeeByNoreg(noreg);
-  if (emp && emp.status_kontrak !== "Permanen") {
+  if (emp && !isPermanenForRatio(emp.status_kontrak)) {
     return computeReviewDate(emp.tgl_masuk, emp.status_kontrak);
   }
   return null;

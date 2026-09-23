@@ -63,7 +63,7 @@ import {
 } from "@/lib/engine/dashboard";
 import { demandTargetDate, filterByDivDept } from "@/lib/engine/enrollment";
 import { computeVokasiStatus, demandVisibleDate } from "@/lib/engine/compute";
-import { LABOR_TYPES } from "@/lib/types";
+import { LABOR_TYPES, isPermanenForRatio } from "@/lib/types";
 import { useRole } from "@/lib/RoleContext";
 import type { Role } from "@/lib/roles";
 import type {
@@ -178,8 +178,8 @@ export default function DashboardPage() {
       (selDepts.length === 0 || selDepts.includes(v.dept))
   );
 
-  const permanenCount = filteredEmployees.filter((e) => e.status_kontrak === "Permanen");
-  const kontrakCount = filteredEmployees.filter((e) => e.status_kontrak !== "Permanen");
+  const permanenCount = filteredEmployees.filter((e) => isPermanenForRatio(e.status_kontrak));
+  const kontrakCount = filteredEmployees.filter((e) => !isPermanenForRatio(e.status_kontrak));
   const vokasiActive = filteredVokasi.filter(
     (v) => computeVokasiStatus(v.tgl_ended, fulfilledVokasiIds.has(v.id)) !== "Ended"
   );
