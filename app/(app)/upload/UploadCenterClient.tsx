@@ -151,18 +151,22 @@ function currentMonthKey(): string {
   return new Date().toISOString().slice(0, 7);
 }
 
-/** ZPAR history starts in 2019 (March snapshots until 2025, monthly from
- * 2026) — options run from 2 months ahead back to January 2019. */
-const ZPAR_FIRST_PERIOD = "2019-01";
+/** ZPAR cadence (docs/data-schema.md): 2019–2025 history exists only as
+ * March snapshots; from 2026 onward ZPAR arrives every month. Options run
+ * from 2 months ahead back through the monthly era, then the March history. */
+const ZPAR_MONTHLY_FROM = "2026-01";
+const ZPAR_HISTORY_FIRST_YEAR = 2019;
 
 function zparPeriodOptions(): string[] {
   const base = new Date(`${currentMonthKey()}-01T00:00:00`);
   const out: string[] = [];
   for (let i = 0; ; i++) {
     const m = format(addMonths(base, 2 - i), "yyyy-MM");
-    if (m < ZPAR_FIRST_PERIOD) break;
+    if (m < ZPAR_MONTHLY_FROM) break;
     out.push(m);
   }
+  const lastHistoryYear = Number(ZPAR_MONTHLY_FROM.slice(0, 4)) - 1;
+  for (let y = lastHistoryYear; y >= ZPAR_HISTORY_FIRST_YEAR; y--) out.push(`${y}-03`);
   return out;
 }
 
@@ -221,7 +225,9 @@ export function UploadCenterClient() {
       setZparPreview(result);
       // The file knows its own snapshot month — pick it instead of trusting
       // whatever the dropdown happened to be on.
-      const filePeriod = result.periods.find((p) => !takenPeriods.has(p.period))?.period ?? result.periods[0]?.period;
+      const valid = new Set(zparPeriodOptions());
+      const usable = result.periods.filter((p) => valid.has(p.period));
+      const filePeriod = usable.find((p) => !takenPeriods.has(p.period))?.period ?? usable[0]?.period;
       if (filePeriod) setZparPeriod(filePeriod);
     } catch (e) {
       setZparMsg(`Gagal parsing file: ${(e as Error).message}`);
@@ -233,6 +239,8 @@ export function UploadCenterClient() {
   const zparMultiPeriod = (zparPreview?.periods.length ?? 0) > 1;
   const zparFilePeriods = zparPreview?.periods.map((p) => p.period) ?? [];
   const zparPeriodMismatch = Boolean(zparPreview && zparFilePeriods.length > 0 && !zparFilePeriods.includes(zparPeriod));
+  const zparValidPeriods = new Set(zparPeriodOptions());
+  const zparOffSchedule = zparFilePeriods.filter((p) => !zparValidPeriods.has(p));
   const zparUploadEmployees = zparPreview
     ? zparMultiPeriod
       ? zparPreview.employeesByPeriod[zparPeriod] ?? []
@@ -390,6 +398,12 @@ export function UploadCenterClient() {
         </div>
         {zparPreview && (
           <>
+            {zparOffSchedule.length > 0 && (
+              <p role="alert" className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200">
+                Periode {zparOffSchedule.join(", ")} di file tidak sesuai jadwal ZPAR: 2019–2025 hanya Maret, mulai 2026 per bulan. Cek lagi
+                kolom Period di file.
+              </p>
+            )}
             {(zparMultiPeriod || zparPeriodMismatch) && (
               <p role="status" className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
                 {zparMultiPeriod
