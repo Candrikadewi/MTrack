@@ -7,6 +7,14 @@ export type Gender = "L" | "P";
 
 export type MpStatusKategori = "Vokasi" | "PKWT" | "Permanen" | "AKTI";
 
+/** Area segregation derived from ZPAR/Vokasi's "Pers Area" column at parse
+ * time (see mapPersAreaToPlant in lib/parseFile.ts) — Vehicle Plant =
+ * Karawang 1 & 2, Unit KRW Plant = Karawang 3, Unit STR Plant = Sunter 1 & 2.
+ * Unrelated to the `Plant` type below, which is Takt Up/Down's own manual
+ * "Plant 1"/"Plant 2" selection. */
+export const PLANT_UNITS = ["Vehicle Plant", "Unit KRW Plant", "Unit STR Plant"] as const;
+export type PlantUnit = (typeof PLANT_UNITS)[number];
+
 /** Known Labor Type codes (Dashboard §Komposisi by Labor Type). Employee/Vokasi
  * records store labor_type as free text — this is the recognized set used for
  * chart grouping; anything else is bucketed as "Other". */
@@ -31,7 +39,7 @@ export interface EmployeeRecord {
   line: string;
   tgl_lahir: string;
   gender: Gender;
-  plant: string; // derived from division
+  plant: PlantUnit; // derived from ZPAR "Pers Area" — see mapPersAreaToPlant
   posisi_struktural: string; // ZPAR "Posisi (Struktural)" column, free text
 }
 
@@ -73,6 +81,7 @@ export interface VokasiRecord {
   div: string;
   dept: string; // shop/dept
   lokasi: string;
+  plant: PlantUnit; // derived from Vokasi's "Pers Area" — see mapPersAreaToPlant
   tgl_masuk: string; // tanggal masuk vokasi
   tgl_ended: string;
   utilisasi: string;

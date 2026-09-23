@@ -4,7 +4,7 @@
 import * as XLSX from "xlsx";
 import { format } from "date-fns";
 import { computeVokasiEndedDate } from "./engine/compute";
-import type { EmployeeRecord, Gender, StatusKontrak, VokasiRecord } from "./types";
+import type { EmployeeRecord, Gender, PlantUnit, StatusKontrak, VokasiRecord } from "./types";
 
 async function sheetToRows(file: File): Promise<Record<string, unknown>[]> {
   const buf = await file.arrayBuffer();
@@ -61,34 +61,72 @@ function normalizeLaborType(raw: string): string {
   return raw.trim().toUpperCase();
 }
 
-export function derivePlant(division: string): string {
-  const d = division.toLowerCase();
-  if (d.includes("2")) return "Plant 2";
-  return "Plant 1";
+const PERS_AREA_ALIASES = ["pers area", "personnel area", "pers. area", "area kerja", "area"];
+
+/** Area segregation — see PlantUnit's doc comment. Matches are
+ * substring-based on the normalized (lowercased, whitespace-collapsed) raw
+ * value, so "Karawang 1", "KARAWANG1", "Krw 1" etc. all resolve the same
+ * way; anything that doesn't mention one of the six known areas returns
+ * null so the caller can flag and exclude it rather than silently guessing. */
+export function mapPersAreaToPlant(persArea: string): PlantUnit | null {
+  const s = persArea.toLowerCase().replace(/\s+/g, " ").trim();
+  if (!s) return null;
+  const has = (...needles: string[]) => needles.some((n) => s.includes(n));
+  if (has("karawang 1", "karawang1", "krw 1", "krw1")) return "Vehicle Plant";
+  if (has("karawang 2", "karawang2", "krw 2", "krw2")) return "Vehicle Plant";
+  if (has("karawang 3", "karawang3", "krw 3", "krw3")) return "Unit KRW Plant";
+  if (has("sunter 1", "sunter1", "str 1", "str1")) return "Unit STR Plant";
+  if (has("sunter 2", "sunter2", "str 2", "str2")) return "Unit STR Plant";
+  return null;
+}
+
+export interface SkipBreakdown {
+  /** Reason label -> row count. */
+  reasons: Record<string, number>;
+  /** Unique raw "Pers Area" values that failed to map, for the upload
+   * preview to show exactly what text is tripping the mapping up. */
+  unmatchedPersAreaValues: string[];
+}
+
+function emptySkipBreakdown(): SkipBreakdown {
+  return { reasons: {}, unmatchedPersAreaValues: [] };
+}
+
+function addReason(b: SkipBreakdown, reason: string) {
+  b.reasons[reason] = (b.reasons[reason] ?? 0) + 1;
 }
 
 export interface ZparParseResult {
   employees: EmployeeRecord[];
   totalRows: number;
   skipped: number;
+  skipBreakdown: SkipBreakdown;
 }
 
 export async function parseZparFile(file: File): Promise<ZparParseResult> {
   const rows = await sheetToRows(file);
   const employees: EmployeeRecord[] = [];
-  let skipped = 0;
+  const skipBreakdown = emptySkipBreakdown();
+  const unmatchedPersAreaSet = new Set<string>();
 
   for (const row of rows) {
     const egRaw = findValue(row, ["eg", "employee group", "employment group"]).toLowerCase();
     const eg = egRaw || "active";
     if (eg && !eg.includes("active") && eg !== "a") {
-      skipped++;
+      addReason(skipBreakdown, "EG tidak aktif");
       continue;
     }
     const statusRaw = findValue(row, ["status kontrak", "status_kontrak", "contract status", "status"]);
     const status_kontrak = normalizeStatusKontrak(statusRaw);
     if (!status_kontrak) {
-      skipped++;
+      addReason(skipBreakdown, "Status Kontrak tidak dikenali");
+      continue;
+    }
+    const persAreaRaw = findValue(row, PERS_AREA_ALIASES);
+    const plant = mapPersAreaToPlant(persAreaRaw);
+    if (!plant) {
+      addReason(skipBreakdown, "Pers Area tidak termasuk Vehicle/Unit KRW/Unit STR Plant");
+      unmatchedPersAreaSet.add(persAreaRaw || "(kosong)");
       continue;
     }
     const division = findValue(row, ["division", "divisi"]);
@@ -106,7 +144,7 @@ export async function parseZparFile(file: File): Promise<ZparParseResult> {
       line: findValue(row, ["line"]),
       tgl_lahir: toIsoDate(findValue(row, ["tgl lahir", "tanggal lahir", "birth date", "dob"])),
       gender: normalizeGender(findValue(row, ["gender", "jk", "jenis kelamin", "sex"])),
-      plant: derivePlant(division),
+      plant,
       posisi_struktural: findValue(row, [
         "posisi (struktural)",
         "posisi struktural",
@@ -118,24 +156,40 @@ export async function parseZparFile(file: File): Promise<ZparParseResult> {
       ]),
     });
   }
-  return { employees, totalRows: rows.length, skipped };
+  skipBreakdown.unmatchedPersAreaValues = Array.from(unmatchedPersAreaSet).sort();
+  const skipped = rows.length - employees.length;
+  return { employees, totalRows: rows.length, skipped, skipBreakdown };
 }
 
 export interface VokasiParseResult {
   records: Omit<VokasiRecord, "id" | "batch" | "upload_date">[];
   totalRows: number;
+  skipped: number;
+  skipBreakdown: SkipBreakdown;
 }
 
 export async function parseVokasiFile(file: File, defaultTglMasuk: string): Promise<VokasiParseResult> {
   const rows = await sheetToRows(file);
-  const records = rows.map((row) => {
+  const records: Omit<VokasiRecord, "id" | "batch" | "upload_date">[] = [];
+  const skipBreakdown = emptySkipBreakdown();
+  const unmatchedPersAreaSet = new Set<string>();
+
+  for (const row of rows) {
+    const persAreaRaw = findValue(row, PERS_AREA_ALIASES);
+    const plant = mapPersAreaToPlant(persAreaRaw);
+    if (!plant) {
+      addReason(skipBreakdown, "Pers Area tidak termasuk Vehicle/Unit KRW/Unit STR Plant");
+      unmatchedPersAreaSet.add(persAreaRaw || "(kosong)");
+      continue;
+    }
     const tglMasuk = toIsoDate(findValue(row, ["tgl masuk", "tanggal masuk"])) || defaultTglMasuk;
-    return {
+    records.push({
       noreg: findValue(row, ["noreg", "no reg", "nik", "id"]),
       nama: findValue(row, ["nama", "name"]),
       div: findValue(row, ["div", "division", "divisi"]),
       dept: findValue(row, ["dept", "shop", "department", "departemen"]),
       lokasi: findValue(row, ["lokasi", "location"]),
+      plant,
       tgl_masuk: tglMasuk,
       // Business rule: Vokasi selalu 6 bulan − 1 hari dari tgl_masuk, bukan dari file upload.
       tgl_ended: computeVokasiEndedDate(tglMasuk),
@@ -143,7 +197,8 @@ export async function parseVokasiFile(file: File, defaultTglMasuk: string): Prom
       status_saat_ini: "Active" as const,
       gender: normalizeGender(findValue(row, ["gender", "jk", "jenis kelamin", "sex"])),
       labor_type: normalizeLaborType(findValue(row, ["labor type", "labor_type", "tipe tenaga kerja"])),
-    };
-  });
-  return { records, totalRows: rows.length };
+    });
+  }
+  skipBreakdown.unmatchedPersAreaValues = Array.from(unmatchedPersAreaSet).sort();
+  return { records, totalRows: rows.length, skipped: rows.length - records.length, skipBreakdown };
 }

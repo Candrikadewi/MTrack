@@ -14,14 +14,14 @@ import {
   setReviewResult,
 } from "./engine/actions";
 import { demandStore, pkwtReviewStore } from "./repo";
-import type { EmployeeRecord, Gender, StatusKontrak, VokasiRecord } from "./types";
+import type { EmployeeRecord, Gender, PlantUnit, StatusKontrak, VokasiRecord } from "./types";
 
-const DIRECTORATES: Record<string, { division: string; plant: string; depts: string[] }[]> = {
+const DIRECTORATES: Record<string, { division: string; lokasi: string; plantUnit: PlantUnit; depts: string[] }[]> = {
   Manufacturing: [
-    { division: "Assembly Division", plant: "Plant 1", depts: ["Assembly Line 1", "Assembly Line 2"] },
-    { division: "Body Shop Division", plant: "Plant 2", depts: ["Body Shop A", "Body Shop B"] },
+    { division: "Assembly Division", lokasi: "Plant 1", plantUnit: "Vehicle Plant", depts: ["Assembly Line 1", "Assembly Line 2"] },
+    { division: "Body Shop Division", lokasi: "Plant 2", plantUnit: "Unit KRW Plant", depts: ["Body Shop A", "Body Shop B"] },
   ],
-  Quality: [{ division: "QA Division", plant: "Plant 1", depts: ["QA Incoming", "QA Final"] }],
+  Quality: [{ division: "QA Division", lokasi: "Plant 1", plantUnit: "Vehicle Plant", depts: ["QA Incoming", "QA Final"] }],
 };
 
 const iso = (d: Date) => format(d, "yyyy-MM-dd");
@@ -87,7 +87,7 @@ export function seedSampleData(): void {
             line: `Line ${(n % 3) + 1}`,
             tgl_lahir: iso(subMonths(now(), pick(AGE_MONTHS_AGO_CYCLE, n))),
             gender,
-            plant: div.plant,
+            plant: div.plantUnit,
             posisi_struktural: pick(POSISI_CYCLE, n),
           });
         }
@@ -141,7 +141,8 @@ export function seedSampleData(): void {
             batch: batch.batch,
             div: div.division,
             dept,
-            lokasi: div.plant,
+            lokasi: div.lokasi,
+            plant: div.plantUnit,
             tgl_masuk: iso(subMonths(now(), batch.monthsAgo)),
             tgl_ended: iso(addMonths(now(), endedOffset)),
             utilisasi: dept,

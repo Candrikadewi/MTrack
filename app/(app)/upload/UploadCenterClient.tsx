@@ -11,7 +11,7 @@ import { EmptyState, TableWrap, Td, Th } from "@/components/ui/Table";
 import { useStoreList } from "@/lib/useStore";
 import { zparStore, vokasiStore, activateSnapshot, clearAllData } from "@/lib/repo";
 import { genId } from "@/lib/storage";
-import { parseVokasiFile, parseZparFile } from "@/lib/parseFile";
+import { parseVokasiFile, parseZparFile, type SkipBreakdown } from "@/lib/parseFile";
 import {
   autoMatchVokasiBatch,
   deleteVokasiBatch,
@@ -24,6 +24,64 @@ import { createClient } from "@/lib/supabase/client";
 import { pushToast } from "@/lib/toast";
 import { useSessionState } from "@/lib/useSessionState";
 import type { VokasiRecord } from "@/lib/types";
+
+/** Pre-commit validation preview — how many rows will actually be used and
+ * why the rest won't, before anything gets written to the store. Shared
+ * between ZPAR and Vokasi, which both now skip rows for the same two kinds
+ * of reasons (a hard data-quality gate for ZPAR — EG/Status Kontrak — plus
+ * Pers Area not resolving to Vehicle/Unit KRW/Unit STR Plant for both). */
+function ValidationSummary({
+  totalRows,
+  included,
+  skipBreakdown,
+}: {
+  totalRows: number;
+  included: number;
+  skipBreakdown: SkipBreakdown;
+}) {
+  const reasonEntries = Object.entries(skipBreakdown.reasons);
+  return (
+    <div className="mt-3 space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900/50">
+      <div className="flex flex-wrap items-center gap-4 text-sm">
+        <span className="text-slate-600 dark:text-slate-300">
+          Total baris: <b className="text-slate-800 dark:text-slate-100">{totalRows}</b>
+        </span>
+        <span className="text-emerald-700 dark:text-emerald-400">
+          Akan diupload: <b>{included}</b>
+        </span>
+        {totalRows - included > 0 && (
+          <span className="text-amber-700 dark:text-amber-400">
+            Tidak match: <b>{totalRows - included}</b>
+          </span>
+        )}
+      </div>
+      {reasonEntries.length > 0 && (
+        <div>
+          <div className="mb-1 text-xs font-semibold text-slate-500">Alasan tidak match:</div>
+          <ul className="space-y-0.5 text-xs text-slate-600 dark:text-slate-300">
+            {reasonEntries.map(([reason, count]) => (
+              <li key={reason}>
+                {reason}: <b>{count}</b> baris
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {skipBreakdown.unmatchedPersAreaValues.length > 0 && (
+        <div>
+          <div className="mb-1 text-xs font-semibold text-slate-500">Nilai Pers Area yang tidak dikenali:</div>
+          <div className="flex flex-wrap gap-1.5">
+            {skipBreakdown.unmatchedPersAreaValues.map((v) => (
+              <Badge key={v} tone="amber">
+                {v}
+              </Badge>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function currentMonthKey(): string {
   return new Date().toISOString().slice(0, 7);
@@ -51,6 +109,7 @@ export function UploadCenterClient() {
   const [zparFile, setZparFile] = useState<File | null>(null);
   const [zparBusy, setZparBusy] = useState(false);
   const [zparMsg, setZparMsg] = useState("");
+  const [zparPreview, setZparPreview] = useState<Awaited<ReturnType<typeof parseZparFile>> | null>(null);
 
   const [selPeriods, setSelPeriods] = useSessionState<string[]>("upload.zpar.periods", []);
   const periodOptions = Array.from(takenPeriods).sort().reverse();
@@ -61,6 +120,7 @@ export function UploadCenterClient() {
   const [vokasiFile, setVokasiFile] = useState<File | null>(null);
   const [vokasiBusy, setVokasiBusy] = useState(false);
   const [vokasiMsg, setVokasiMsg] = useState("");
+  const [vokasiPreview, setVokasiPreview] = useState<Awaited<ReturnType<typeof parseVokasiFile>> | null>(null);
 
   const [resetModalOpen, setResetModalOpen] = useState(false);
 
@@ -74,35 +134,45 @@ export function UploadCenterClient() {
     return { batch, count: rows.length, upload_date: rows[0]?.upload_date ?? "" };
   });
 
-  async function handleZparUpload() {
-    if (!zparFile || !zparPeriod) return;
-    if (takenPeriods.has(zparPeriod)) {
-      setZparMsg("Periode ini sudah diupload — pilih periode lain atau hapus snapshot yang ada terlebih dahulu.");
-      return;
-    }
+  function handleZparFileChange(file: File | null) {
+    setZparFile(file);
+    setZparPreview(null);
+    setZparMsg("");
+  }
+
+  async function handleCheckZpar() {
+    if (!zparFile) return;
     setZparBusy(true);
     setZparMsg("");
     try {
-      const { employees, totalRows, skipped } = await parseZparFile(zparFile);
-      const snapshot = {
-        id: genId("zpar"),
-        period: zparPeriod,
-        filename: zparFile.name,
-        upload_date: new Date().toISOString(),
-        is_active: false,
-        employees,
-      };
-      zparStore.insert(snapshot);
-      if (!snapshots.some((s) => s.is_active)) activateAndRefresh(snapshot.id);
-      setZparMsg(
-        `Berhasil upload ${employees.length} employee aktif dari ${totalRows} baris (${skipped} baris dilewati / tidak match filter).`
-      );
-      setZparFile(null);
+      const result = await parseZparFile(zparFile);
+      setZparPreview(result);
     } catch (e) {
       setZparMsg(`Gagal parsing file: ${(e as Error).message}`);
     } finally {
       setZparBusy(false);
     }
+  }
+
+  function handleZparUpload() {
+    if (!zparFile || !zparPeriod || !zparPreview) return;
+    if (takenPeriods.has(zparPeriod)) {
+      setZparMsg("Periode ini sudah diupload — pilih periode lain atau hapus snapshot yang ada terlebih dahulu.");
+      return;
+    }
+    const snapshot = {
+      id: genId("zpar"),
+      period: zparPeriod,
+      filename: zparFile.name,
+      upload_date: new Date().toISOString(),
+      is_active: false,
+      employees: zparPreview.employees,
+    };
+    zparStore.insert(snapshot);
+    if (!snapshots.some((s) => s.is_active)) activateAndRefresh(snapshot.id);
+    setZparMsg(`Berhasil upload ${zparPreview.employees.length} employee dari ${zparPreview.totalRows} baris.`);
+    setZparFile(null);
+    setZparPreview(null);
   }
 
   function handleDeleteSnapshot(id: string, period: string) {
@@ -111,30 +181,42 @@ export function UploadCenterClient() {
     if (!result.ok) pushToast(result.error ?? "Gagal menghapus snapshot.");
   }
 
-  async function handleVokasiUpload() {
-    if (!vokasiFile || !vokasiBatch || !vokasiTglMasuk) return;
+  function handleVokasiFileChange(file: File | null) {
+    setVokasiFile(file);
+    setVokasiPreview(null);
+    setVokasiMsg("");
+  }
+
+  async function handleCheckVokasi() {
+    if (!vokasiFile || !vokasiTglMasuk) return;
     setVokasiBusy(true);
     setVokasiMsg("");
     try {
-      const { records, totalRows } = await parseVokasiFile(vokasiFile, vokasiTglMasuk);
-      const upload_date = new Date().toISOString();
-      const full: VokasiRecord[] = records.map((r) => ({
-        ...r,
-        id: genId("vokasi"),
-        batch: vokasiBatch,
-        upload_date,
-      }));
-      vokasiStore.insertMany(full);
-      ensureVokasiEndedDemands();
-      const matched = autoMatchVokasiBatch(full);
-      setVokasiMsg(`Berhasil upload ${full.length} record dari ${totalRows} baris. Auto-matched ke ${matched} demand Vokasi.`);
-      setVokasiFile(null);
-      setVokasiBatch("");
+      const result = await parseVokasiFile(vokasiFile, vokasiTglMasuk);
+      setVokasiPreview(result);
     } catch (e) {
       setVokasiMsg(`Gagal parsing file: ${(e as Error).message}`);
     } finally {
       setVokasiBusy(false);
     }
+  }
+
+  function handleVokasiUpload() {
+    if (!vokasiFile || !vokasiBatch || !vokasiPreview) return;
+    const upload_date = new Date().toISOString();
+    const full: VokasiRecord[] = vokasiPreview.records.map((r) => ({
+      ...r,
+      id: genId("vokasi"),
+      batch: vokasiBatch,
+      upload_date,
+    }));
+    vokasiStore.insertMany(full);
+    ensureVokasiEndedDemands();
+    const matched = autoMatchVokasiBatch(full);
+    setVokasiMsg(`Berhasil upload ${full.length} record dari ${vokasiPreview.totalRows} baris. Auto-matched ke ${matched} demand Vokasi.`);
+    setVokasiFile(null);
+    setVokasiBatch("");
+    setVokasiPreview(null);
   }
 
   function handleDeleteBatch(batch: string) {
@@ -164,7 +246,10 @@ export function UploadCenterClient() {
         </div>
       </div>
 
-      <Card title="Upload ZPAR (Snapshot Bulanan)" subtitle="Filter EG = Active, status Permanen/Kontrak/AKTI">
+      <Card
+        title="Upload ZPAR (Snapshot Bulanan)"
+        subtitle="Filter EG = Active, status Permanen/Kontrak/AKTI, Pers Area termasuk Vehicle/Unit KRW/Unit STR Plant"
+      >
         <div className="grid gap-4 sm:grid-cols-3">
           <Field label="Bulan & Tahun (period)">
             <Select value={zparPeriod} onChange={(e) => setZparPeriod(e.target.value)}>
@@ -180,20 +265,33 @@ export function UploadCenterClient() {
             <Input
               type="file"
               accept=".xlsx,.xls,.csv"
-              onChange={(e) => setZparFile(e.target.files?.[0] ?? null)}
+              onChange={(e) => handleZparFileChange(e.target.files?.[0] ?? null)}
             />
           </Field>
           <div className="flex items-end">
-            <Button
-              variant="primary"
-              disabled={!zparFile || zparBusy || takenPeriods.has(zparPeriod)}
-              onClick={handleZparUpload}
-              className="w-full"
-            >
-              {zparBusy ? "Mengupload..." : "Upload Snapshot"}
-            </Button>
+            {zparPreview ? (
+              <Button
+                variant="primary"
+                disabled={zparBusy || takenPeriods.has(zparPeriod)}
+                onClick={handleZparUpload}
+                className="w-full"
+              >
+                Konfirmasi &amp; Upload
+              </Button>
+            ) : (
+              <Button variant="secondary" disabled={!zparFile || zparBusy} onClick={handleCheckZpar} className="w-full">
+                {zparBusy ? "Mengecek..." : "Cek Data"}
+              </Button>
+            )}
           </div>
         </div>
+        {zparPreview && (
+          <ValidationSummary
+            totalRows={zparPreview.totalRows}
+            included={zparPreview.employees.length}
+            skipBreakdown={zparPreview.skipBreakdown}
+          />
+        )}
         {zparMsg && <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">{zparMsg}</p>}
 
         <div className="mt-5">
@@ -261,32 +359,50 @@ export function UploadCenterClient() {
         </div>
       </Card>
 
-      <Card title="Upload Vokasi (Database Kumulatif)" subtitle="Compiling: setiap upload menambah, tidak menimpa">
+      <Card
+        title="Upload Vokasi (Database Kumulatif)"
+        subtitle="Compiling: setiap upload menambah, tidak menimpa. Pers Area termasuk Vehicle/Unit KRW/Unit STR Plant"
+      >
         <div className="grid gap-4 sm:grid-cols-4">
           <Field label="Batch (nama/nomor)">
             <Input value={vokasiBatch} onChange={(e) => setVokasiBatch(e.target.value)} placeholder="Batch 2026-A" />
           </Field>
           <Field label="Tanggal Masuk Batch">
-            <Input type="date" value={vokasiTglMasuk} onChange={(e) => setVokasiTglMasuk(e.target.value)} />
+            <Input
+              type="date"
+              value={vokasiTglMasuk}
+              onChange={(e) => {
+                setVokasiTglMasuk(e.target.value);
+                setVokasiPreview(null);
+              }}
+            />
           </Field>
           <Field label="File Vokasi (.xlsx / .csv)">
             <Input
               type="file"
               accept=".xlsx,.xls,.csv"
-              onChange={(e) => setVokasiFile(e.target.files?.[0] ?? null)}
+              onChange={(e) => handleVokasiFileChange(e.target.files?.[0] ?? null)}
             />
           </Field>
           <div className="flex items-end">
-            <Button
-              variant="primary"
-              disabled={!vokasiFile || !vokasiBatch || vokasiBusy}
-              onClick={handleVokasiUpload}
-              className="w-full"
-            >
-              {vokasiBusy ? "Mengupload..." : "Upload Batch"}
-            </Button>
+            {vokasiPreview ? (
+              <Button variant="primary" disabled={!vokasiBatch || vokasiBusy} onClick={handleVokasiUpload} className="w-full">
+                Konfirmasi &amp; Upload
+              </Button>
+            ) : (
+              <Button variant="secondary" disabled={!vokasiFile || vokasiBusy} onClick={handleCheckVokasi} className="w-full">
+                {vokasiBusy ? "Mengecek..." : "Cek Data"}
+              </Button>
+            )}
           </div>
         </div>
+        {vokasiPreview && (
+          <ValidationSummary
+            totalRows={vokasiPreview.totalRows}
+            included={vokasiPreview.records.length}
+            skipBreakdown={vokasiPreview.skipBreakdown}
+          />
+        )}
         {vokasiMsg && <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">{vokasiMsg}</p>}
 
         <div className="mt-5">

@@ -51,4 +51,8 @@ select
 union all
 select
   'migration_10 (Takt Down plan_rows)',
-  exists (select 1 from information_schema.columns where table_name = 'takt_cases' and column_name = 'plan_rows');
+  exists (select 1 from information_schema.columns where table_name = 'takt_cases' and column_name = 'plan_rows')
+union all
+select
+  'migration_11 (Vokasi plant segregation)',
+  exists (select 1 from information_schema.columns where table_name = 'vokasi_records' and column_name = 'plant');
