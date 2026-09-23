@@ -84,6 +84,9 @@ export interface EmployeeRecord {
    * Demand's default ratio scope (Vehicle Plant · Labor A). */
   plant: PlantUnit | "";
   posisi_struktural: string; // ZPAR "Posisi (Struktural)" column, free text
+  /** Values of non-schema columns the admin marked "Pakai" in Upload Center
+   * (column name -> raw value). */
+  extra?: Record<string, string>;
 }
 
 /** Dashboard §Total Manpower position-breakdown order & abbreviation, keyed by
@@ -132,6 +135,21 @@ export interface VokasiRecord {
   gender: Gender;
   labor_type: string;
   upload_date: string; // metadata: when this batch record was uploaded
+  /** Values of non-schema columns the admin marked "Pakai" in Upload Center. */
+  extra?: Record<string, string>;
+}
+
+/** An admin's standing decision about a column outside the known upload
+ * schema — asked once per dataset + column, then applied to every later
+ * upload (see migration_13). */
+export interface ColumnDecision {
+  id: string;
+  dataset: "zpar" | "vokasi";
+  column_name: string;
+  /** Header normalized for matching (case/space/paren-insensitive). */
+  normalized: string;
+  decision: "use" | "ignore";
+  decided_at: string;
 }
 
 // ---------------------------------------------------------------------------

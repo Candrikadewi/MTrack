@@ -8,10 +8,18 @@ import { Badge } from "@/components/ui/Badge";
 import { Modal } from "@/components/ui/Modal";
 import { MultiSelect } from "@/components/ui/MultiSelect";
 import { EmptyState, TableWrap, Td, Th } from "@/components/ui/Table";
+import { SegmentedSwitch } from "@/components/ui/SegmentedSwitch";
 import { useStoreList } from "@/lib/useStore";
-import { zparStore, vokasiStore, activateSnapshot, clearAllData } from "@/lib/repo";
+import { zparStore, vokasiStore, columnDecisionStore, activateSnapshot, clearAllData } from "@/lib/repo";
 import { genId } from "@/lib/storage";
-import { parseVokasiFile, parseZparFile, type ColumnCheck, type SkipBreakdown } from "@/lib/parseFile";
+import {
+  keepUsedExtra,
+  parseVokasiFile,
+  parseZparFile,
+  type ColumnCheck,
+  type ExtraColumn,
+  type SkipBreakdown,
+} from "@/lib/parseFile";
 import {
   autoMatchVokasiBatch,
   deleteVokasiBatch,
@@ -23,7 +31,7 @@ import { fmtDate } from "@/lib/engine/compute";
 import { createClient } from "@/lib/supabase/client";
 import { pushToast } from "@/lib/toast";
 import { useSessionState } from "@/lib/useSessionState";
-import type { VokasiRecord } from "@/lib/types";
+import type { ColumnDecision, VokasiRecord } from "@/lib/types";
 
 function ColumnChips({ items, tone }: { items: string[]; tone: "red" | "amber" | "slate" }) {
   return (
@@ -75,7 +83,7 @@ function ValidationSummary({
       {columns && columns.missingRequired.length > 0 && (
         <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-500/30 dark:bg-red-500/10">
           <div className="mb-1 text-xs font-semibold text-red-800 dark:text-red-200">
-            Kolom yang dipakai aplikasi tidak ada di file — datanya akan kosong. Cek lagi export ZPAR-nya:
+            Kolom yang dipakai aplikasi tidak ada di file — datanya akan kosong. Cek lagi file export-nya:
           </div>
           <ColumnChips items={columns.missingRequired} tone="red" />
         </div>
@@ -120,29 +128,96 @@ function ValidationSummary({
         </div>
       )}
 
-      {columns && (columns.missingBaseline.length > 0 || columns.unknown.length > 0 || columns.nonStandard.length > 0) && (
-        <div className="space-y-2 border-t border-slate-200 pt-3 dark:border-slate-700">
-          <div className="text-xs font-semibold text-slate-700 dark:text-slate-300">Perubahan kolom dibanding skema ZPAR</div>
-          {columns.unknown.length > 0 && (
-            <div>
-              <div className={heading}>Kolom baru, belum pernah tercatat — review dan catat keputusannya di docs/data-schema.md:</div>
-              <ColumnChips items={columns.unknown} tone="amber" />
-            </div>
-          )}
-          {columns.missingBaseline.length > 0 && (
-            <div>
-              <div className={heading}>Kolom baseline tidak ada bulan ini:</div>
-              <ColumnChips items={columns.missingBaseline} tone="slate" />
-            </div>
-          )}
-          {columns.nonStandard.length > 0 && (
-            <div>
-              <div className={heading}>Kolom non-standar yang sudah dikenal (diabaikan):</div>
-              <ColumnChips items={columns.nonStandard} tone="slate" />
-            </div>
-          )}
+      {columns && columns.missingBaseline.length > 0 && (
+        <div className="border-t border-slate-200 pt-3 dark:border-slate-700">
+          <div className={heading}>Kolom baseline skema ZPAR yang tidak ada di file ini (cek export-nya):</div>
+          <ColumnChips items={columns.missingBaseline} tone="slate" />
         </div>
       )}
+    </div>
+  );
+}
+
+type Decision = ColumnDecision["decision"];
+
+/** Standing decision for an extra column: what the admin chose before, or
+ * "ignore" for columns docs/data-schema.md already lists as non-standard. */
+function decisionFor(dataset: ColumnDecision["dataset"], col: ExtraColumn, decisions: ColumnDecision[]): Decision | undefined {
+  return decisions.find((d) => d.dataset === dataset && d.normalized === col.normalized)?.decision ?? (col.knownNonStandard ? "ignore" : undefined);
+}
+
+function usedColumns(dataset: ColumnDecision["dataset"], cols: ExtraColumn[], decisions: ColumnDecision[]): Set<string> {
+  return new Set(cols.filter((c) => decisionFor(dataset, c, decisions) === "use").map((c) => c.normalized));
+}
+
+function saveDecision(dataset: ColumnDecision["dataset"], col: ExtraColumn, decision: Decision, decisions: ColumnDecision[]) {
+  const existing = decisions.find((d) => d.dataset === dataset && d.normalized === col.normalized);
+  const decided_at = new Date().toISOString();
+  if (existing) columnDecisionStore.update(existing.id, { decision, decided_at, column_name: col.name });
+  else columnDecisionStore.insert({ id: genId("coldec"), dataset, column_name: col.name, normalized: col.normalized, decision, decided_at });
+}
+
+/** Every column outside the known schema gets a Pakai/Abaikan decision,
+ * stored once so next month's file doesn't ask again. Upload waits until
+ * each one is decided. */
+function ColumnDecisionPanel({
+  dataset,
+  columns,
+  decisions,
+}: {
+  dataset: ColumnDecision["dataset"];
+  columns: ExtraColumn[];
+  decisions: ColumnDecision[];
+}) {
+  if (columns.length === 0) return null;
+  const pending = columns.filter((c) => !decisionFor(dataset, c, decisions)).length;
+  return (
+    <div className="mt-3 space-y-3 rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h4 className="text-sm font-semibold text-slate-800 dark:text-slate-100">Kolom di luar skema ({columns.length})</h4>
+        {pending > 0 ? (
+          <span className="text-xs font-semibold text-amber-700 dark:text-amber-300">{pending} kolom perlu keputusan sebelum upload</span>
+        ) : (
+          <span className="text-xs text-emerald-700 dark:text-emerald-400">Semua kolom sudah diputuskan</span>
+        )}
+      </div>
+      <p className="text-xs text-slate-600 dark:text-slate-400">
+        <b>Pakai</b>: nilainya disimpan bersama data setiap upload. <b>Abaikan</b>: kolom dilewati. Keputusan disimpan dan berlaku untuk
+        upload berikutnya, bisa diubah kapan saja di sini.
+      </p>
+      <ul className="divide-y divide-slate-100 dark:divide-slate-800">
+        {columns.map((col) => {
+          const decision = decisionFor(dataset, col, decisions);
+          return (
+            <li key={col.normalized} className="flex flex-wrap items-center justify-between gap-3 py-2">
+              <div className="min-w-0">
+                <div className="text-sm font-medium text-slate-800 dark:text-slate-100">{col.name}</div>
+                <div className="text-xs text-slate-500 dark:text-slate-400">
+                  {!decision
+                    ? "Kolom baru — belum pernah diputuskan"
+                    : col.knownNonStandard && !decisions.some((d) => d.dataset === dataset && d.normalized === col.normalized)
+                      ? "Non-standar (tercatat di data-schema), default diabaikan"
+                      : decision === "use"
+                        ? "Dipakai"
+                        : "Diabaikan"}
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                {!decision && <Badge tone="amber">Perlu keputusan</Badge>}
+                <SegmentedSwitch
+                  label={`Keputusan kolom ${col.name}`}
+                  options={[
+                    { value: "use", label: "Pakai" },
+                    { value: "ignore", label: "Abaikan" },
+                  ]}
+                  value={(decision ?? "") as Decision}
+                  onChange={(v) => saveDecision(dataset, col, v, decisions)}
+                />
+              </div>
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }
@@ -175,6 +250,7 @@ export function UploadCenterClient() {
   // sorting it in place would mutate that shared reference during render.
   const snapshots = [...useStoreList(zparStore)].sort((a, b) => b.upload_date.localeCompare(a.upload_date));
   const vokasiRecords = useStoreList(vokasiStore);
+  const decisions = useStoreList(columnDecisionStore);
 
   const takenPeriods = new Set(snapshots.map((s) => s.period));
 
@@ -236,52 +312,55 @@ export function UploadCenterClient() {
     }
   }
 
+  const zparValidPeriods = new Set(zparPeriodOptions());
   const zparMultiPeriod = (zparPreview?.periods.length ?? 0) > 1;
   const zparFilePeriods = zparPreview?.periods.map((p) => p.period) ?? [];
-  const zparPeriodMismatch = Boolean(zparPreview && zparFilePeriods.length > 0 && !zparFilePeriods.includes(zparPeriod));
-  const zparValidPeriods = new Set(zparPeriodOptions());
+  const zparPeriodMismatch = Boolean(zparPreview && !zparMultiPeriod && zparFilePeriods.length > 0 && !zparFilePeriods.includes(zparPeriod));
   const zparOffSchedule = zparFilePeriods.filter((p) => !zparValidPeriods.has(p));
-  const zparUploadEmployees = zparPreview
+  /** What one click would upload: every on-schedule, not-yet-uploaded
+   * period of a multi-period (starting) file, or the selected period. */
+  const zparPlan: { period: string; count: number }[] = zparPreview
     ? zparMultiPeriod
-      ? zparPreview.employeesByPeriod[zparPeriod] ?? []
-      : zparPreview.employees
+      ? zparPreview.periods.filter((p) => zparValidPeriods.has(p.period) && !takenPeriods.has(p.period))
+      : takenPeriods.has(zparPeriod)
+        ? []
+        : [{ period: zparPeriod, count: zparPreview.employees.length }]
     : [];
+  const zparPlanRows = zparPlan.reduce((sum, p) => sum + p.count, 0);
+  const zparPendingColumns = zparPreview ? zparPreview.columns.extra.filter((c) => !decisionFor("zpar", c, decisions)).length : 0;
 
   function handleZparUpload() {
-    if (!zparFile || !zparPeriod || !zparPreview) return;
-    if (takenPeriods.has(zparPeriod)) {
-      setZparMsg("Periode ini sudah diupload — pilih periode lain atau hapus snapshot yang ada terlebih dahulu.");
-      return;
+    if (!zparFile || !zparPreview || zparPlan.length === 0 || zparPendingColumns > 0) return;
+    const used = usedColumns("zpar", zparPreview.columns.extra, decisions);
+    const upload_date = new Date().toISOString();
+    const created = zparPlan.map(({ period }) => {
+      const source = zparMultiPeriod ? zparPreview.employeesByPeriod[period] ?? [] : zparPreview.employees;
+      const snapshot = {
+        id: genId("zpar"),
+        period,
+        filename: zparFile.name,
+        upload_date,
+        is_active: false,
+        employees: source.map(({ extra, ...e }) => {
+          const kept = keepUsedExtra(extra, used);
+          return kept ? { ...e, extra: kept } : e;
+        }),
+      };
+      zparStore.insert(snapshot);
+      return snapshot;
+    });
+    // First data in: the latest period becomes the active one. After that
+    // the admin chooses which snapshot is active.
+    if (!snapshots.some((s) => s.is_active)) {
+      const latest = created.reduce((a, b) => (b.period > a.period ? b : a));
+      activateAndRefresh(latest.id);
     }
-    if (zparUploadEmployees.length === 0) {
-      setZparMsg("Tidak ada baris untuk periode ini di file.");
-      return;
-    }
-    const snapshot = {
-      id: genId("zpar"),
-      period: zparPeriod,
-      filename: zparFile.name,
-      upload_date: new Date().toISOString(),
-      is_active: false,
-      employees: zparUploadEmployees,
-    };
-    zparStore.insert(snapshot);
-    if (!snapshots.some((s) => s.is_active)) activateAndRefresh(snapshot.id);
-    const label = format(new Date(`${zparPeriod}-01T00:00:00`), "MMMM yyyy");
-    if (zparMultiPeriod) {
-      // Keep the parsed file so the remaining periods can be uploaded next.
-      const next = zparFilePeriods.find((p) => p !== zparPeriod && !takenPeriods.has(p));
-      setZparMsg(
-        `Periode ${label}: ${zparUploadEmployees.length} employee diupload.${next ? " Pilih periode berikutnya lalu upload lagi." : " Semua periode di file sudah diupload."}`
-      );
-      if (next) setZparPeriod(next);
-      else {
-        setZparFile(null);
-        setZparPreview(null);
-      }
-      return;
-    }
-    setZparMsg(`Berhasil upload ${zparUploadEmployees.length} employee (${label}) dari ${zparPreview.totalRows} baris.`);
+    const labels = created.map((c) => format(new Date(`${c.period}-01T00:00:00`), "MMM yyyy")).join(", ");
+    const skippedTaken = zparMultiPeriod ? zparFilePeriods.filter((p) => takenPeriods.has(p)) : [];
+    setZparMsg(
+      `Berhasil upload ${created.length} periode (${labels}), total ${zparPlanRows} employee.` +
+        (skippedTaken.length ? ` Dilewati karena sudah ada: ${skippedTaken.join(", ")}.` : "")
+    );
     setZparFile(null);
     setZparPreview(null);
   }
@@ -312,19 +391,47 @@ export function UploadCenterClient() {
     }
   }
 
+  const vokasiExistingKeys = new Set(vokasiRecords.map((v) => `${v.noreg}|${v.batch}`));
+  /** Vokasi is cumulative: resolve each row's batch (file column, else the
+   * batch typed above), then drop anything already in the database or
+   * repeated within the file. */
+  const vokasiResolved = vokasiPreview
+    ? vokasiPreview.records.map((r) => ({ ...r, batch: r.batch || vokasiBatch.trim() }))
+    : [];
+  const vokasiMissingBatch = vokasiResolved.filter((r) => !r.batch).length;
+  const vokasiNew: typeof vokasiResolved = [];
+  let vokasiDuplicates = 0;
+  {
+    const seen = new Set<string>();
+    for (const r of vokasiResolved) {
+      if (!r.batch) continue;
+      const key = `${r.noreg}|${r.batch}`;
+      if (vokasiExistingKeys.has(key) || seen.has(key)) vokasiDuplicates++;
+      else {
+        seen.add(key);
+        vokasiNew.push(r);
+      }
+    }
+  }
+  const vokasiPendingColumns = vokasiPreview ? vokasiPreview.columns.extra.filter((c) => !decisionFor("vokasi", c, decisions)).length : 0;
+  const vokasiNewBatches = new Set(vokasiNew.map((r) => r.batch));
+
   function handleVokasiUpload() {
-    if (!vokasiFile || !vokasiBatch || !vokasiPreview) return;
+    if (!vokasiFile || !vokasiPreview || vokasiNew.length === 0 || vokasiMissingBatch > 0 || vokasiPendingColumns > 0) return;
+    const used = usedColumns("vokasi", vokasiPreview.columns.extra, decisions);
     const upload_date = new Date().toISOString();
-    const full: VokasiRecord[] = vokasiPreview.records.map((r) => ({
-      ...r,
-      id: genId("vokasi"),
-      batch: vokasiBatch,
-      upload_date,
-    }));
+    const full: VokasiRecord[] = vokasiNew.map(({ extra, ...r }) => {
+      const kept = keepUsedExtra(extra, used);
+      return { ...r, ...(kept ? { extra: kept } : {}), id: genId("vokasi"), upload_date };
+    });
     vokasiStore.insertMany(full);
     ensureVokasiEndedDemands();
     const matched = autoMatchVokasiBatch(full);
-    setVokasiMsg(`Berhasil upload ${full.length} record dari ${vokasiPreview.totalRows} baris. Auto-matched ke ${matched} demand Vokasi.`);
+    setVokasiMsg(
+      `Berhasil upload ${full.length} record baru dari ${vokasiNewBatches.size} batch.` +
+        (vokasiDuplicates ? ` ${vokasiDuplicates} baris dilewati karena sudah ada (noreg + batch sama).` : "") +
+        ` Auto-matched ke ${matched} demand Vokasi.`
+    );
     setVokasiFile(null);
     setVokasiBatch("");
     setVokasiPreview(null);
@@ -358,12 +465,12 @@ export function UploadCenterClient() {
       </div>
 
       <Card
-        title="Upload ZPAR (Snapshot Bulanan)"
-        subtitle="CSV ZPAR (;) atau .xlsx · hanya EG = Active · Pers Area dikelompokkan Vehicle / Unit KRW / Unit STR / Head Office · periode diambil dari kolom Period"
+        title="Upload ZPAR (Snapshot)"
+        subtitle="Upload awal: satu file berisi Maret 2019–2025, semua periode masuk sekaligus. Mulai 2026: satu file per bulan. Hanya EG = Active; snapshot yang Active dipakai seluruh aplikasi."
       >
         <div className="grid gap-4 sm:grid-cols-3">
-          <Field label="Bulan & Tahun (period)">
-            <Select value={zparPeriod} onChange={(e) => setZparPeriod(e.target.value)}>
+          <Field label={zparMultiPeriod ? "Periode (dari file)" : "Bulan & Tahun (period)"}>
+            <Select value={zparPeriod} disabled={zparMultiPeriod} onChange={(e) => setZparPeriod(e.target.value)}>
               {zparPeriodOptions().map((m) => (
                 <option key={m} value={m} disabled={takenPeriods.has(m)}>
                   {format(new Date(`${m}-01T00:00:00`), "MMMM yyyy")}
@@ -383,11 +490,11 @@ export function UploadCenterClient() {
             {zparPreview ? (
               <Button
                 variant="primary"
-                disabled={zparBusy || takenPeriods.has(zparPeriod) || zparUploadEmployees.length === 0}
+                disabled={zparBusy || zparPlan.length === 0 || zparPendingColumns > 0}
                 onClick={handleZparUpload}
                 className="w-full"
               >
-                Konfirmasi &amp; Upload ({zparUploadEmployees.length})
+                {zparMultiPeriod ? `Upload ${zparPlan.length} periode (${zparPlanRows})` : `Konfirmasi & Upload (${zparPlanRows})`}
               </Button>
             ) : (
               <Button variant="secondary" disabled={!zparFile || zparBusy} onClick={handleCheckZpar} className="w-full">
@@ -404,13 +511,26 @@ export function UploadCenterClient() {
                 kolom Period di file.
               </p>
             )}
-            {(zparMultiPeriod || zparPeriodMismatch) && (
+            {zparMultiPeriod && (
+              <div role="status" className="mt-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-100">
+                <p className="mb-1.5 font-semibold">File berisi {zparPreview.periods.length} periode — semuanya diupload sekaligus sebagai snapshot terpisah:</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {[...zparPreview.periods]
+                    .sort((a, b) => a.period.localeCompare(b.period))
+                    .map((p) => {
+                      const state = !zparValidPeriods.has(p.period) ? "di luar jadwal" : takenPeriods.has(p.period) ? "sudah ada" : "baru";
+                      return (
+                        <Badge key={p.period} tone={state === "baru" ? "blue" : state === "sudah ada" ? "slate" : "red"}>
+                          {format(new Date(`${p.period}-01T00:00:00`), "MMM yyyy")} · {p.count} · {state}
+                        </Badge>
+                      );
+                    })}
+                </div>
+              </div>
+            )}
+            {zparPeriodMismatch && (
               <p role="status" className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
-                {zparMultiPeriod
-                  ? `File berisi ${zparPreview.periods.length} periode (${zparPreview.periods
-                      .map((p) => `${p.period}: ${p.count}`)
-                      .join(", ")}). Upload satu periode per kali — pilih periodenya di atas.`
-                  : `Kolom Period di file berisi ${zparFilePeriods.join(", ")}, tapi yang dipilih ${zparPeriod}. Pastikan periodenya benar sebelum upload.`}
+                Kolom Period di file berisi {zparFilePeriods.join(", ")}, tapi yang dipilih {zparPeriod}. Pastikan periodenya benar sebelum upload.
               </p>
             )}
             <ValidationSummary
@@ -419,6 +539,7 @@ export function UploadCenterClient() {
               skipBreakdown={zparPreview.skipBreakdown}
               columns={zparPreview.columns}
             />
+            <ColumnDecisionPanel dataset="zpar" columns={zparPreview.columns.extra} decisions={decisions} />
           </>
         )}
         {zparMsg && <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">{zparMsg}</p>}
@@ -490,13 +611,17 @@ export function UploadCenterClient() {
 
       <Card
         title="Upload Vokasi (Database Kumulatif)"
-        subtitle="Compiling: setiap upload menambah, tidak menimpa. Pers Area termasuk Vehicle/Unit KRW/Unit STR Plant"
+        subtitle="Data kumulatif: setiap upload menambah, tidak menimpa. Upload awal boleh satu file berisi semua batch (kolom Batch); selanjutnya satu file per batch. Noreg + batch yang sudah ada dilewati."
       >
         <div className="grid gap-4 sm:grid-cols-4">
-          <Field label="Batch (nama/nomor)">
-            <Input value={vokasiBatch} onChange={(e) => setVokasiBatch(e.target.value)} placeholder="Batch 2026-A" />
+          <Field label={vokasiPreview?.hasBatchColumn ? "Batch (untuk baris tanpa Batch)" : "Batch (nama/nomor)"}>
+            <Input
+              value={vokasiBatch}
+              onChange={(e) => setVokasiBatch(e.target.value)}
+              placeholder={vokasiPreview?.hasBatchColumn ? "Opsional — diambil dari file" : "Batch 2026-A"}
+            />
           </Field>
-          <Field label="Tanggal Masuk Batch">
+          <Field label="Tanggal Masuk (jika tidak ada di file)">
             <Input
               type="date"
               value={vokasiTglMasuk}
@@ -515,8 +640,13 @@ export function UploadCenterClient() {
           </Field>
           <div className="flex items-end">
             {vokasiPreview ? (
-              <Button variant="primary" disabled={!vokasiBatch || vokasiBusy} onClick={handleVokasiUpload} className="w-full">
-                Konfirmasi &amp; Upload
+              <Button
+                variant="primary"
+                disabled={vokasiBusy || vokasiNew.length === 0 || vokasiMissingBatch > 0 || vokasiPendingColumns > 0}
+                onClick={handleVokasiUpload}
+                className="w-full"
+              >
+                Konfirmasi &amp; Upload ({vokasiNew.length})
               </Button>
             ) : (
               <Button variant="secondary" disabled={!vokasiFile || vokasiBusy} onClick={handleCheckVokasi} className="w-full">
@@ -526,11 +656,40 @@ export function UploadCenterClient() {
           </div>
         </div>
         {vokasiPreview && (
-          <ValidationSummary
-            totalRows={vokasiPreview.totalRows}
-            included={vokasiPreview.records.length}
-            skipBreakdown={vokasiPreview.skipBreakdown}
-          />
+          <>
+            <div role="status" className="mt-3 space-y-1.5 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-100">
+              {vokasiPreview.hasBatchColumn ? (
+                <>
+                  <p className="font-semibold">Batch diambil dari file ({vokasiPreview.batches.length} batch):</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {vokasiPreview.batches.map((b) => (
+                      <Badge key={b.batch} tone={batches.some((x) => x.batch === b.batch) ? "slate" : "blue"}>
+                        {b.batch} · {b.count}
+                        {batches.some((x) => x.batch === b.batch) ? " · batch sudah ada" : ""}
+                      </Badge>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <p>File tidak punya kolom Batch — semua baris masuk ke batch yang diisi di atas.</p>
+              )}
+              <p>
+                <b>{vokasiNew.length}</b> record baru akan ditambahkan
+                {vokasiDuplicates > 0 && <> · {vokasiDuplicates} dilewati karena sudah ada (noreg + batch sama)</>}
+                {vokasiMissingBatch > 0 && (
+                  <span className="font-semibold text-amber-800 dark:text-amber-200"> · {vokasiMissingBatch} baris belum punya batch — isi kolom Batch di atas</span>
+                )}
+                .
+              </p>
+            </div>
+            <ValidationSummary
+              totalRows={vokasiPreview.totalRows}
+              included={vokasiPreview.records.length}
+              skipBreakdown={vokasiPreview.skipBreakdown}
+              columns={vokasiPreview.columns}
+            />
+            <ColumnDecisionPanel dataset="vokasi" columns={vokasiPreview.columns.extra} decisions={decisions} />
+          </>
         )}
         {vokasiMsg && <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">{vokasiMsg}</p>}
 

@@ -23,7 +23,7 @@ async function readSheet(file: File): Promise<{ rows: Record<string, unknown>[];
  * struktural" vs "Posisi(Struktural) ") and strips a UTF-8 BOM, so real-world
  * header formatting quirks (incl. ZPAR's trailing-space "MPP ") don't break
  * column matching. */
-function normalizeHeader(s: string): string {
+export function normalizeHeader(s: string): string {
   return s.replace(/\uFEFF/g, "").trim().toLowerCase().replace(/[\s()]+/g, "");
 }
 
@@ -134,6 +134,10 @@ function emptySkipBreakdown(): SkipBreakdown {
   return { reasons: {}, unmatchedPersAreaCount: 0, unmatchedPersAreaValues: [], plantCounts: {}, warnings: {} };
 }
 
+function addReason(b: SkipBreakdown, reason: string) {
+  b.reasons[reason] = (b.reasons[reason] ?? 0) + 1;
+}
+
 function addWarning(b: SkipBreakdown, label: string) {
   b.warnings[label] = (b.warnings[label] ?? 0) + 1;
 }
@@ -194,31 +198,65 @@ const ZPAR_REQUIRED: { label: string; aliases: string[] }[] = [
   { label: "Posisi (struktural)", aliases: ZPAR_ALIASES.posisiStruktural },
 ];
 
+export interface ExtraColumn {
+  name: string;
+  normalized: string;
+  /** Seen before per docs/data-schema.md (Ket, Pension, MPP) — defaults to
+   * "ignore" until someone decides otherwise. */
+  knownNonStandard: boolean;
+}
+
 export interface ColumnCheck {
   /** Columns the app reads that aren't in the file — data will be blank. */
   missingRequired: string[];
   /** Baseline columns absent this month (possible export problem). */
   missingBaseline: string[];
-  /** Known occasional columns (Ket, Pension, MPP) — present but ignored. */
-  nonStandard: string[];
-  /** Never-seen columns — review, then record the decision in data-schema.md. */
-  unknown: string[];
+  /** Columns outside the schema — each needs a Pakai/Abaikan decision. */
+  extra: ExtraColumn[];
+}
+
+function extraColumnsOf(headers: string[], isKnown: (normalized: string) => boolean, nonStandard: Set<string>): ExtraColumn[] {
+  const seen = new Set<string>();
+  const out: ExtraColumn[] = [];
+  for (const name of headers) {
+    const normalized = normalizeHeader(name);
+    if (!normalized || isKnown(normalized) || seen.has(normalized)) continue;
+    seen.add(normalized);
+    out.push({ name, normalized, knownNonStandard: nonStandard.has(normalized) });
+  }
+  return out;
+}
+
+/** Raw values of the extra columns for one row, keyed by column name. The
+ * upload keeps only the ones marked "Pakai". */
+function extraValues(row: Record<string, unknown>, extra: ExtraColumn[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (extra.length === 0) return out;
+  const byNorm = new Map(Object.keys(row).map((k) => [normalizeHeader(k), k]));
+  for (const col of extra) {
+    const key = byNorm.get(col.normalized);
+    const v = key !== undefined ? row[key] : "";
+    if (v !== "" && v !== undefined && v !== null) out[col.name] = v instanceof Date ? format(v, "yyyy-MM-dd") : String(v);
+  }
+  return out;
+}
+
+/** Keeps only the extra values whose column was marked "Pakai". */
+export function keepUsedExtra(extra: Record<string, string> | undefined, used: Set<string>): Record<string, string> | undefined {
+  if (!extra) return undefined;
+  const kept = Object.fromEntries(Object.entries(extra).filter(([name]) => used.has(normalizeHeader(name))));
+  return Object.keys(kept).length ? kept : undefined;
 }
 
 function checkZparColumns(headers: string[]): ColumnCheck {
   const present = new Set(headers.map(normalizeHeader));
   const baseline = new Set(ZPAR_BASELINE_COLUMNS.map(normalizeHeader));
-  const known = new Set(ZPAR_KNOWN_NON_STANDARD.map(normalizeHeader));
+  const nonStandard = new Set(ZPAR_KNOWN_NON_STANDARD.map(normalizeHeader));
   return {
     missingRequired: ZPAR_REQUIRED.filter((r) => !r.aliases.some((a) => present.has(normalizeHeader(a)))).map((r) => r.label),
     missingBaseline: ZPAR_BASELINE_COLUMNS.filter((c) => !present.has(normalizeHeader(c))),
-    nonStandard: headers.filter((h) => known.has(normalizeHeader(h))),
-    unknown: headers.filter((h) => !baseline.has(normalizeHeader(h)) && !known.has(normalizeHeader(h))),
+    extra: extraColumnsOf(headers, (n) => baseline.has(n), nonStandard),
   };
-}
-
-function addReason(b: SkipBreakdown, reason: string) {
-  b.reasons[reason] = (b.reasons[reason] ?? 0) + 1;
 }
 
 export interface ZparParseResult {
@@ -236,6 +274,7 @@ export interface ZparParseResult {
 
 export async function parseZparFile(file: File): Promise<ZparParseResult> {
   const { rows, headers } = await readSheet(file);
+  const columns = checkZparColumns(headers);
   const employees: EmployeeRecord[] = [];
   const employeesByPeriod: Record<string, EmployeeRecord[]> = {};
   const skipBreakdown = emptySkipBreakdown();
@@ -288,6 +327,8 @@ export async function parseZparFile(file: File): Promise<ZparParseResult> {
       plant: plant ?? "",
       posisi_struktural: findValue(row, ZPAR_ALIASES.posisiStruktural),
     };
+    const extra = extraValues(row, columns.extra);
+    if (Object.keys(extra).length) employee.extra = extra;
     employees.push(employee);
     const period = toPeriodKey(findValue(row, ZPAR_ALIASES.period)) || "";
     (employeesByPeriod[period] ??= []).push(employee);
@@ -298,44 +339,103 @@ export async function parseZparFile(file: File): Promise<ZparParseResult> {
     .map(([period, list]) => ({ period, count: list.length }))
     .sort((a, b) => b.count - a.count);
   const skipped = rows.length - employees.length;
-  return { employees, totalRows: rows.length, skipped, skipBreakdown, columns: checkZparColumns(headers), periods, employeesByPeriod };
+  return { employees, totalRows: rows.length, skipped, skipBreakdown, columns, periods, employeesByPeriod };
 }
 
+const VOKASI_ALIASES = {
+  noreg: ["noreg", "no reg", "nik", "id"],
+  nama: ["nama", "name"],
+  div: ["div", "division", "divisi"],
+  dept: ["dept", "shop", "department", "departemen"],
+  lokasi: ["lokasi", "location"],
+  tglMasuk: ["tgl masuk", "tanggal masuk"],
+  utilisasi: ["utilisasi", "utilization"],
+  gender: ["gender", "jk", "jenis kelamin", "sex"],
+  laborType: ["labor type", "labor_type", "tipe tenaga kerja"],
+  batch: ["batch", "angkatan", "gelombang"],
+};
+
+/** Vokasi's own schema is still pending (docs/data-schema.md) — until then
+ * every column the parser reads, plus a row number, counts as known and
+ * anything else goes to the Pakai/Abaikan decision. */
+const VOKASI_KNOWN = new Set(
+  [...Object.values(VOKASI_ALIASES).flat(), ...PERS_AREA_ALIASES, "no"].map(normalizeHeader)
+);
+
+export type VokasiParsedRecord = Omit<VokasiRecord, "id" | "upload_date">;
+
 export interface VokasiParseResult {
-  records: Omit<VokasiRecord, "id" | "batch" | "upload_date">[];
+  /** `batch` is filled from the file's Batch column when it has one
+   * (starting file with every batch), otherwise "" until the uploader
+   * names the batch. */
+  records: VokasiParsedRecord[];
   totalRows: number;
   skipped: number;
   skipBreakdown: SkipBreakdown;
+  columns: ColumnCheck;
+  hasBatchColumn: boolean;
+  batches: { batch: string; count: number }[];
 }
 
 export async function parseVokasiFile(file: File, defaultTglMasuk: string): Promise<VokasiParseResult> {
-  const { rows } = await readSheet(file);
-  const records: Omit<VokasiRecord, "id" | "batch" | "upload_date">[] = [];
+  const { rows, headers } = await readSheet(file);
+  const present = new Set(headers.map(normalizeHeader));
+  const hasBatchColumn = VOKASI_ALIASES.batch.some((a) => present.has(normalizeHeader(a)));
+  const columns: ColumnCheck = {
+    missingRequired: [
+      { label: "Noreg", aliases: VOKASI_ALIASES.noreg },
+      { label: "Nama", aliases: VOKASI_ALIASES.nama },
+      { label: "Divisi", aliases: VOKASI_ALIASES.div },
+      { label: "Department", aliases: VOKASI_ALIASES.dept },
+    ]
+      .filter((r) => !r.aliases.some((a) => present.has(normalizeHeader(a))))
+      .map((r) => r.label),
+    missingBaseline: [],
+    extra: extraColumnsOf(headers, (n) => VOKASI_KNOWN.has(n), new Set()),
+  };
+  const records: VokasiParsedRecord[] = [];
   const skipBreakdown = emptySkipBreakdown();
+  const batchCounts = new Map<string, number>();
 
   for (const row of rows) {
+    const noreg = findValue(row, VOKASI_ALIASES.noreg).trim();
+    if (!noreg) {
+      addReason(skipBreakdown, "Noreg kosong");
+      continue;
+    }
     const persAreaRaw = findValue(row, PERS_AREA_ALIASES);
     const plant = mapPersAreaToPlant(persAreaRaw);
     if (!plant) skipBreakdown.unmatchedPersAreaCount++;
     const plantLabel = plant ?? "(Pers Area kosong)";
     skipBreakdown.plantCounts[plantLabel] = (skipBreakdown.plantCounts[plantLabel] ?? 0) + 1;
-    const tglMasuk = toIsoDate(findValue(row, ["tgl masuk", "tanggal masuk"])) || defaultTglMasuk;
-    records.push({
-      noreg: findValue(row, ["noreg", "no reg", "nik", "id"]),
-      nama: findValue(row, ["nama", "name"]),
-      div: findValue(row, ["div", "division", "divisi"]),
-      dept: findValue(row, ["dept", "shop", "department", "departemen"]),
-      lokasi: findValue(row, ["lokasi", "location"]),
+    const tglMasukRaw = findValue(row, VOKASI_ALIASES.tglMasuk);
+    const tglMasukFromFile = toIsoDate(tglMasukRaw);
+    if (tglMasukRaw && !tglMasukFromFile) addWarning(skipBreakdown, "Tgl Masuk tidak terbaca (pakai tanggal default)");
+    const tglMasuk = tglMasukFromFile || defaultTglMasuk;
+    const batch = hasBatchColumn ? findValue(row, VOKASI_ALIASES.batch).trim() : "";
+    if (hasBatchColumn && !batch) addWarning(skipBreakdown, "Batch kosong di file");
+    if (batch) batchCounts.set(batch, (batchCounts.get(batch) ?? 0) + 1);
+    const record: VokasiParsedRecord = {
+      noreg,
+      nama: findValue(row, VOKASI_ALIASES.nama).trim(),
+      batch,
+      div: findValue(row, VOKASI_ALIASES.div),
+      dept: findValue(row, VOKASI_ALIASES.dept),
+      lokasi: findValue(row, VOKASI_ALIASES.lokasi),
       plant: plant ?? "",
       tgl_masuk: tglMasuk,
       // Business rule: Vokasi selalu 6 bulan − 1 hari dari tgl_masuk, bukan dari file upload.
       tgl_ended: computeVokasiEndedDate(tglMasuk),
-      utilisasi: findValue(row, ["utilisasi", "utilization"]),
+      utilisasi: findValue(row, VOKASI_ALIASES.utilisasi),
       status_saat_ini: "Active" as const,
-      gender: normalizeGender(findValue(row, ["gender", "jk", "jenis kelamin", "sex"])),
-      labor_type: normalizeLaborType(findValue(row, ["labor type", "labor_type", "tipe tenaga kerja"])),
-    });
+      gender: normalizeGender(findValue(row, VOKASI_ALIASES.gender)),
+      labor_type: normalizeLaborType(findValue(row, VOKASI_ALIASES.laborType)),
+    };
+    const extra = extraValues(row, columns.extra);
+    if (Object.keys(extra).length) record.extra = extra;
+    records.push(record);
   }
   skipBreakdown.unmatchedPersAreaValues = skipBreakdown.unmatchedPersAreaCount ? ["(kosong)"] : [];
-  return { records, totalRows: rows.length, skipped: rows.length - records.length, skipBreakdown };
+  const batches = Array.from(batchCounts, ([batch, count]) => ({ batch, count })).sort((a, b) => a.batch.localeCompare(b.batch));
+  return { records, totalRows: rows.length, skipped: rows.length - records.length, skipBreakdown, columns, hasBatchColumn, batches };
 }
