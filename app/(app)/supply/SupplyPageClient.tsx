@@ -5,16 +5,16 @@ import { Button } from "@/components/ui/Button";
 import { FullWidthTabs } from "@/components/ui/Tabs";
 import { MultiSelect } from "@/components/ui/MultiSelect";
 import { Select } from "@/components/ui/Form";
-import { EmptyState, TableWrap, Td, Th } from "@/components/ui/Table";
+import { EmptyState, FilteredEmptyState, TableWrap, Td, Th } from "@/components/ui/Table";
 import { BatchTileRow, type BatchTileCategory } from "@/components/ui/BatchTileRow";
 import { SectionHeading } from "@/components/ui/SectionHeading";
 import { SegmentedSwitch } from "@/components/ui/SegmentedSwitch";
 import { KaizenModal } from "@/components/util-pool/KaizenModal";
 import { TaktDownModal } from "@/components/takt/TaktDownModal";
 import { useStoreList } from "@/lib/useStore";
-import { taktStore, utilPoolStore } from "@/lib/repo";
+import { taktStore, utilPoolStore, zparStore } from "@/lib/repo";
 import { contractRemainingLabel, contractUrgency, fmtDate, poolLeadTimeDays } from "@/lib/engine/compute";
-import { getActiveEmployeeByNoreg, naturalRelease } from "@/lib/engine/actions";
+import { naturalRelease } from "@/lib/engine/actions";
 import { useRole } from "@/lib/RoleContext";
 import { useSessionState } from "@/lib/useSessionState";
 import type { TaktCase, UtilPoolEntry, UtilPoolSource } from "@/lib/types";
@@ -32,14 +32,6 @@ const SOURCE_TYPE_LABELS: Record<UtilPoolSource, string> = {
   Kaizen: "Kaizen",
 };
 
-/** Live lookup, not snapshotted — Posisi (Struktural) only exists on the
- * active ZPAR snapshot's EmployeeRecord, not on UtilPoolEntry itself, so
- * this always reflects the latest upload rather than whatever was true when
- * the person entered the pool. Vokasi doesn't carry a posisi_struktural at
- * all, so it resolves to "-" for those entries. */
-function posisiFor(noreg: string): string {
-  return getActiveEmployeeByNoreg(noreg)?.posisi_struktural || "-";
-}
 
 /** ProjectFinish/Kaizen entries have no single owning record to group by —
  * source_label (e.g. "Kaizen 2026 - Assembly (activity)") is the closest
@@ -102,6 +94,17 @@ export function SupplyPageClient() {
   // silently reshuffled mid-render.
   const entries = [...useStoreList(utilPoolStore)].sort((a, b) => b.entered_pool_date.localeCompare(a.entered_pool_date));
   const taktCases = useStoreList(taktStore);
+  const snapshots = useStoreList(zparStore);
+  // Live lookup, not snapshotted — Posisi (Struktural) only exists on the
+  // active ZPAR snapshot's EmployeeRecord, not on UtilPoolEntry itself, so
+  // this always reflects the latest upload rather than whatever was true
+  // when the person entered the pool. Built once per snapshot change instead
+  // of scanning the employee list per row/option.
+  const posisiByNoreg = useMemo(() => {
+    const employees = snapshots.find((s) => s.is_active)?.employees ?? [];
+    return new Map(employees.map((e) => [e.noreg, e.posisi_struktural]));
+  }, [snapshots]);
+  const posisiFor = (noreg: string) => posisiByNoreg.get(noreg) || "-";
 
   const batchCategories = useMemo(() => buildSupplyBatchCategories(entries, taktCases), [entries, taktCases]);
 
@@ -133,8 +136,8 @@ export function SupplyPageClient() {
   );
   const openStatusOptions = useMemo(() => Array.from(new Set(openAllEntries.map((e) => e.type))).sort(), [openAllEntries]);
   const openPosisiOptions = useMemo(
-    () => Array.from(new Set(openAllEntries.map((e) => posisiFor(e.noreg)).filter((p) => p !== "-"))).sort(),
-    [openAllEntries]
+    () => Array.from(new Set(openAllEntries.map((e) => posisiByNoreg.get(e.noreg)).filter((p): p is string => Boolean(p)))).sort(),
+    [openAllEntries, posisiByNoreg]
   );
   const openMonthOptions = useMemo(() => Array.from(new Set(openAllEntries.map((e) => e.entered_pool_date.slice(0, 7)))).sort().reverse(), [openAllEntries]);
 
@@ -146,10 +149,10 @@ export function SupplyPageClient() {
           (selOpenDivs.length === 0 || selOpenDivs.includes(e.prev_div)) &&
           (selOpenDepts.length === 0 || selOpenDepts.includes(e.prev_dept)) &&
           (selOpenStatus.length === 0 || selOpenStatus.includes(e.type)) &&
-          (selOpenPosisi.length === 0 || selOpenPosisi.includes(posisiFor(e.noreg))) &&
+          (selOpenPosisi.length === 0 || selOpenPosisi.includes(posisiByNoreg.get(e.noreg) || "-")) &&
           (selOpenMonth === "" || e.entered_pool_date.slice(0, 7) === selOpenMonth)
       ),
-    [openAllEntries, selOpenSources, selOpenDivs, selOpenDepts, selOpenStatus, selOpenPosisi, selOpenMonth]
+    [openAllEntries, selOpenSources, selOpenDivs, selOpenDepts, selOpenStatus, selOpenPosisi, selOpenMonth, posisiByNoreg]
   );
 
   function handleNaturalRelease(e: UtilPoolEntry) {
@@ -257,7 +260,20 @@ export function SupplyPageClient() {
             </div>
           </div>
           {openEntries.length === 0 ? (
-            <EmptyState text="Tidak ada supply yang masih Open sesuai filter." />
+            openAllEntries.length === 0 ? (
+              <EmptyState text="Tidak ada supply yang masih Open." />
+            ) : (
+              <FilteredEmptyState
+                onReset={() => {
+                  setSelOpenSources([]);
+                  setSelOpenDivs([]);
+                  setSelOpenDepts([]);
+                  setSelOpenStatus([]);
+                  setSelOpenPosisi([]);
+                  setSelOpenMonth("");
+                }}
+              />
+            )
           ) : (
             <TableWrap>
               <thead>

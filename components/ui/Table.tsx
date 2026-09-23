@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Button } from "@/components/ui/Button";
 
 export function TableWrap({ children, maxHeightClass = "" }: { children: ReactNode; maxHeightClass?: string }) {
   const scrollable = Boolean(maxHeightClass);
@@ -48,6 +49,22 @@ export function EmptyState({ text }: { text: string }) {
   return (
     <div className="flex items-center justify-center rounded-2xl border border-dashed border-slate-300 py-10 text-sm text-slate-600 dark:text-slate-400 dark:border-slate-700">
       {text}
+    </div>
+  );
+}
+
+/** Empty state for a table that has real data behind it but the current
+ * filter combination happens to match nothing — distinct from EmptyState
+ * (which covers "there's genuinely no data yet") so the copy can nudge
+ * toward the actual fix (loosen the filter) instead of implying the page
+ * itself is empty. */
+export function FilteredEmptyState({ text = "Belum ada yang cocok. Coba longgarkan filter di atas.", onReset }: { text?: string; onReset: () => void }) {
+  return (
+    <div className="flex flex-col items-center justify-center gap-2.5 rounded-2xl border border-dashed border-slate-300 py-10 text-sm text-slate-600 dark:border-slate-700 dark:text-slate-400">
+      <span>{text}</span>
+      <Button variant="secondary" size="sm" onClick={onReset}>
+        Reset Filter
+      </Button>
     </div>
   );
 }

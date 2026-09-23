@@ -2,7 +2,7 @@
 import { useMemo, useState } from "react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
-import { EmptyState } from "@/components/ui/Table";
+import { EmptyState, FilteredEmptyState } from "@/components/ui/Table";
 import { MultiSelect } from "@/components/ui/MultiSelect";
 import { fmtDate } from "@/lib/engine/compute";
 import { useStoreList } from "@/lib/useStore";
@@ -141,22 +141,38 @@ export function HistoryPageClient() {
   const [divFilter, setDivFilter] = useState<string[]>([]);
   const [deptFilter, setDeptFilter] = useState<string[]>([]);
 
-  const jenisOptions = Array.from(new Set(allBatches.map((b) => b.jenis))).sort();
-  const statusOptions = Array.from(new Set(allBatches.map((b) => b.statusLabel))).sort();
-  const periodeOptions = Array.from(new Set(allBatches.map((b) => b.closureMonth).filter(Boolean))).sort().reverse();
-  const plantOptions = Array.from(new Set(allBatches.map((b) => b.plant).filter((p): p is Plant => Boolean(p)))).sort();
-  const divOptions = Array.from(new Set(allBatches.flatMap((b) => b.rows.map((r) => r.div)).filter(Boolean))).sort();
-  const deptOptions = Array.from(new Set(allBatches.flatMap((b) => b.rows.map((r) => r.dept)).filter(Boolean))).sort();
+  const jenisOptions = useMemo(() => Array.from(new Set(allBatches.map((b) => b.jenis))).sort(), [allBatches]);
+  const statusOptions = useMemo(() => Array.from(new Set(allBatches.map((b) => b.statusLabel))).sort(), [allBatches]);
+  const periodeOptions = useMemo(
+    () => Array.from(new Set(allBatches.map((b) => b.closureMonth).filter(Boolean))).sort().reverse(),
+    [allBatches]
+  );
+  const plantOptions = useMemo(
+    () => Array.from(new Set(allBatches.map((b) => b.plant).filter((p): p is Plant => Boolean(p)))).sort(),
+    [allBatches]
+  );
+  const divOptions = useMemo(
+    () => Array.from(new Set(allBatches.flatMap((b) => b.rows.map((r) => r.div)).filter(Boolean))).sort(),
+    [allBatches]
+  );
+  const deptOptions = useMemo(
+    () => Array.from(new Set(allBatches.flatMap((b) => b.rows.map((r) => r.dept)).filter(Boolean))).sort(),
+    [allBatches]
+  );
 
-  const filtered = allBatches.filter((b) => {
-    if (jenisFilter.length && !jenisFilter.includes(b.jenis)) return false;
-    if (statusFilter.length && !statusFilter.includes(b.statusLabel)) return false;
-    if (periodeFilter.length && !periodeFilter.includes(b.closureMonth)) return false;
-    if (plantFilter.length && (!b.plant || !plantFilter.includes(b.plant))) return false;
-    if (divFilter.length && !b.rows.some((r) => divFilter.includes(r.div))) return false;
-    if (deptFilter.length && !b.rows.some((r) => deptFilter.includes(r.dept))) return false;
-    return true;
-  });
+  const filtered = useMemo(
+    () =>
+      allBatches.filter((b) => {
+        if (jenisFilter.length && !jenisFilter.includes(b.jenis)) return false;
+        if (statusFilter.length && !statusFilter.includes(b.statusLabel)) return false;
+        if (periodeFilter.length && !periodeFilter.includes(b.closureMonth)) return false;
+        if (plantFilter.length && (!b.plant || !plantFilter.includes(b.plant))) return false;
+        if (divFilter.length && !b.rows.some((r) => divFilter.includes(r.div))) return false;
+        if (deptFilter.length && !b.rows.some((r) => deptFilter.includes(r.dept))) return false;
+        return true;
+      }),
+    [allBatches, jenisFilter, statusFilter, periodeFilter, plantFilter, divFilter, deptFilter]
+  );
 
   function matchIndicator(b: HistoryBatch): string | null {
     if (divFilter.length === 0 && deptFilter.length === 0) return null;
@@ -196,7 +212,7 @@ export function HistoryPageClient() {
             Ledger Project/Takt Up/Takt Down/Kaizen yang sudah closed dan sudah lewat bulan berjalan.
           </p>
         </div>
-        <Button variant="secondary" onClick={exportCsv}>
+        <Button variant="secondary" onClick={exportCsv} disabled={filtered.length === 0}>
           Export
         </Button>
       </div>
@@ -220,7 +236,20 @@ export function HistoryPageClient() {
       </div>
 
       {filtered.length === 0 ? (
-        <EmptyState text="Tidak ada batch yang cocok dengan filter ini." />
+        allBatches.length === 0 ? (
+          <EmptyState text="Belum ada batch yang closed." />
+        ) : (
+          <FilteredEmptyState
+            onReset={() => {
+              setJenisFilter([]);
+              setStatusFilter([]);
+              setPeriodeFilter([]);
+              setPlantFilter([]);
+              setDivFilter([]);
+              setDeptFilter([]);
+            }}
+          />
+        )
       ) : (
         <div className="space-y-3">
           {filtered.map((b) => {

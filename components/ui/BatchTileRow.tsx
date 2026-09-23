@@ -25,13 +25,13 @@ export interface BatchTileCategory {
   batches: BatchSummary[];
 }
 
-const TONE_ACCENT: Record<Tone, string> = {
-  slate: "border-l-slate-400",
-  blue: "border-l-blue-500",
-  green: "border-l-emerald-500",
-  amber: "border-l-amber-500",
-  red: "border-l-red-500",
-  violet: "border-l-violet-500",
+const TONE_DOT: Record<Tone, string> = {
+  slate: "bg-slate-400",
+  blue: "bg-blue-500",
+  green: "bg-emerald-500",
+  amber: "bg-amber-500",
+  red: "bg-red-500",
+  violet: "bg-violet-500",
 };
 
 /** Compact "Ringkasan per Batch" row — one small stat tile per category, all
@@ -53,12 +53,15 @@ export function BatchTileRow({ categories }: { categories: BatchTileCategory[] }
               key={cat.key}
               type="button"
               onClick={() => setExpandedKey(isActive ? null : cat.key)}
-              className={`flex items-center justify-between gap-2 rounded-2xl border border-l-4 bg-white px-3.5 py-3 text-left shadow-sm shadow-slate-200/60 transition-all duration-150 hover:-translate-y-0.5 hover:shadow-md dark:border-slate-800 dark:bg-slate-900 dark:shadow-none ${TONE_ACCENT[cat.tone]} ${
+              className={`flex items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-white px-3.5 py-3 text-left shadow-sm shadow-slate-200/60 transition-all duration-150 hover:-translate-y-0.5 hover:shadow-md dark:border-slate-800 dark:bg-slate-900 dark:shadow-none ${
                 isActive ? "ring-2 ring-blue-400/60" : ""
               }`}
             >
               <div>
-                <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400">{cat.label}</div>
+                <div className="flex items-center gap-1.5 text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                  <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${TONE_DOT[cat.tone]}`} />
+                  {cat.label}
+                </div>
                 <div className="text-xl font-bold tabular-nums text-slate-800 dark:text-slate-100">{cat.count}</div>
               </div>
               <ChevronDown
@@ -71,7 +74,7 @@ export function BatchTileRow({ categories }: { categories: BatchTileCategory[] }
       </div>
 
       {expanded && (
-        <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-3 dark:border-slate-800 dark:bg-slate-900/40">
+        <div className="animate-reveal rounded-2xl border border-slate-200 bg-slate-50/60 p-3 dark:border-slate-800 dark:bg-slate-900/40">
           <BatchBreakdown category={expanded} />
         </div>
       )}

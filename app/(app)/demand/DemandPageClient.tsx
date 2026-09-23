@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/Button";
 import { Select } from "@/components/ui/Form";
 import { FullWidthTabs } from "@/components/ui/Tabs";
 import { Badge, statusTone } from "@/components/ui/Badge";
-import { EmptyState, TableWrap, Td, Th } from "@/components/ui/Table";
+import { EmptyState, FilteredEmptyState, TableWrap, Td, Th } from "@/components/ui/Table";
 import { DonutChart } from "@/components/ui/DonutChart";
 import { MultiSelect } from "@/components/ui/MultiSelect";
 import { BatchTileRow, type BatchTileCategory } from "@/components/ui/BatchTileRow";
@@ -289,18 +289,22 @@ export function DemandPageClient() {
     () => tabDemands.filter((d) => demandVisibleDate(demandTargetDate(d)).slice(0, 7) === month),
     [tabDemands, month]
   );
-  const jenisOptions = Array.from(new Set(monthDemands.map((d) => JENIS_LABEL[d.origin_type]))).sort();
-  const divOptions = divisionsOfRows(monthDemands);
-  const deptOptions = deptsOfRows(monthDemands, divs);
+  const jenisOptions = useMemo(() => Array.from(new Set(monthDemands.map((d) => JENIS_LABEL[d.origin_type]))).sort(), [monthDemands]);
+  const divOptions = useMemo(() => divisionsOfRows(monthDemands), [monthDemands]);
+  const deptOptions = useMemo(() => deptsOfRows(monthDemands, divs), [monthDemands, divs]);
   const statusMpOptions = Object.values(EMPLOYMENT_STATUS_LABEL);
   const statusOptions = ["Open", "DELAY", "Need Replace ASAP", "Fulfilled Ontime", "Fulfilled but Delay"];
 
-  const filteredDemands = filterByDivDept(monthDemands, divs, depts)
-    .filter((d) => jenis.length === 0 || jenis.includes(JENIS_LABEL[d.origin_type]))
-    .filter((d) => statusMp.length === 0 || statusMp.includes(EMPLOYMENT_STATUS_LABEL[d.replacement_employment_status]))
-    .filter((d) => statusFilter.length === 0 || statusFilter.includes(demandGranularStatus(d)))
-    .slice()
-    .sort((a, b) => demandTargetDate(a).localeCompare(demandTargetDate(b)));
+  const filteredDemands = useMemo(
+    () =>
+      filterByDivDept(monthDemands, divs, depts)
+        .filter((d) => jenis.length === 0 || jenis.includes(JENIS_LABEL[d.origin_type]))
+        .filter((d) => statusMp.length === 0 || statusMp.includes(EMPLOYMENT_STATUS_LABEL[d.replacement_employment_status]))
+        .filter((d) => statusFilter.length === 0 || statusFilter.includes(demandGranularStatus(d)))
+        .slice()
+        .sort((a, b) => demandTargetDate(a).localeCompare(demandTargetDate(b))),
+    [monthDemands, divs, depts, jenis, statusMp, statusFilter]
+  );
 
   const canEditReplacement = role === "admin" || (role === "shop" && tab === "PKWT");
   const canEditFulfillDate = role === "admin";
@@ -535,10 +539,10 @@ export function DemandPageClient() {
         subtitle="Demand muncul H-4 minggu (hari kerja) dari Arrival to Shop. Bulan yang dipilih adalah bulan demand ini actionable."
         action={
           <div className="flex gap-2">
-            <Button variant="secondary" size="sm" onClick={exportReport}>
+            <Button variant="secondary" size="sm" onClick={exportReport} disabled={filteredDemands.length === 0}>
               Laporan Excel
             </Button>
-            <Button variant="secondary" size="sm" onClick={exportReportPdf}>
+            <Button variant="secondary" size="sm" onClick={exportReportPdf} disabled={filteredDemands.length === 0}>
               Laporan PDF
             </Button>
           </div>
@@ -586,7 +590,19 @@ export function DemandPageClient() {
           </div>
         </div>
         {filteredDemands.length === 0 ? (
-          <EmptyState text="Tidak ada demand pada bulan/filter ini." />
+          monthDemands.length === 0 ? (
+            <EmptyState text="Tidak ada demand pada bulan ini." />
+          ) : (
+            <FilteredEmptyState
+              onReset={() => {
+                setJenis([]);
+                setDivs([]);
+                setDepts([]);
+                setStatusMp([]);
+                setStatusFilter([]);
+              }}
+            />
+          )
         ) : (
           <TableWrap>
             <thead>
