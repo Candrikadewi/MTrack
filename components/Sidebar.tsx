@@ -71,9 +71,9 @@ export function Sidebar({ role, email }: { role: Role; email: string }) {
       <div className="flex items-center gap-2.5 border-b border-slate-100 px-5 py-5 dark:border-slate-800">
         <BrandMark className="h-9 w-9" />
         <div>
-          <div className="text-sm font-bold tracking-tight text-slate-800 dark:text-slate-100">CIRCLE</div>
+          <div className="text-sm font-bold tracking-tight text-slate-800 dark:text-slate-100">CAMP</div>
           <div className="text-[11px] leading-tight text-slate-600 dark:text-slate-400">
-            Centralized Information Record &amp; Control for Labor Excellence
+            Centralized Access for Manpower Planning
           </div>
         </div>
       </div>

@@ -8,7 +8,7 @@ web
 
 ## Users
 
-Two roles use CIRCLE about equally day-to-day:
+Two roles use CAMP about equally day-to-day:
 
 - **HR team** — fills PKWT (fixed-term contract) review decisions as each contract stage comes due (Kontrak 1.1 → 1.2 → 2), manages the Vokasi (vocational/apprentice) program by batch, and tracks demand vs. supply for replacement headcount.
 - **Shop/production supervisors** — map replacement candidates to open demand and confirm receipt of new manpower on the floor; also drive Project Monitoring and Takt Time Monitoring (Plant 1 & Plant 2), where a takt-time change creates or releases manpower demand.
@@ -17,11 +17,11 @@ Two more roles exist with narrower scope: **admin** (full access, including Uplo
 
 ## Product Purpose
 
-CIRCLE (Centralized Information Record & Control for Labor Excellence) centralizes manpower tracking for an automotive/manufacturing plant (Plant 1 & Plant 2; Assembly, Body Shop, and QA divisions) — headcount composition, contract-stage progression, the Vokasi apprentice pipeline, and replacement demand/supply — in one system that HR and the shop floor both read from and act on.
+CAMP (Centralized Access for Manpower Planning) centralizes manpower tracking for an automotive/manufacturing plant (Plant 1 & Plant 2; Assembly, Body Shop, and QA divisions) — headcount composition, contract-stage progression, the Vokasi apprentice pipeline, and replacement demand/supply — in one system that HR and the shop floor both read from and act on.
 
 ## Positioning
 
-Before CIRCLE, this tracking lived entirely in Excel files and PowerPoint decks saved to a shared OneDrive folder — no cross-referencing across HR and the shop floor, and in practice files and their exact names were routinely forgotten, misplaced, or scattered across folders. CIRCLE's mechanism is cross-referencing: a single ZPAR headcount snapshot, PKWT review outcomes, Vokasi batches, and shop-floor demand/supply all resolve against the same roster by `noreg`, so a contract ending, a Vokasi batch ending, a project finishing, or a takt-time change all surface as the same kind of "replacement demand" the shop can act on — instead of separate, unreconciled lists (and files) per team.
+Before CAMP, this tracking lived entirely in Excel files and PowerPoint decks saved to a shared OneDrive folder — no cross-referencing across HR and the shop floor, and in practice files and their exact names were routinely forgotten, misplaced, or scattered across folders. CAMP's mechanism is cross-referencing: a single ZPAR headcount snapshot, PKWT review outcomes, Vokasi batches, and shop-floor demand/supply all resolve against the same roster by `noreg`, so a contract ending, a Vokasi batch ending, a project finishing, or a takt-time change all surface as the same kind of "replacement demand" the shop can act on — instead of separate, unreconciled lists (and files) per team.
 
 ## Operating Context
 
@@ -45,7 +45,7 @@ Before CIRCLE, this tracking lived entirely in Excel files and PowerPoint decks 
 - Labor type is tracked as one of a fixed set of ZPAR codes (A, B1–B4, C1–C2, D, E1–E2, F, T); status_kontrak as Permanen/Kontrak 1.1/1.2/2/AKTI; posisi_struktural as a fixed structural-position hierarchy (Team Member → Department Head).
 - Retirement age is 55, effective the 1st of the month after the birthday, and applies only to Permanen employees.
 - Rollout status is not fully confirmed — some parts may already be live against real employee data, others still in internal validation. Do not assume either way when it matters; ask before treating current data as production-real or as disposable sample data.
-- Vokasi alumni are already documented and assessed on a separate existing platform. CIRCLE deliberately does not integrate with it right now — it keeps tracking Vokasi independently (own upload, own records), a known duplication rather than a planned integration.
+- Vokasi alumni are already documented and assessed on a separate existing platform. CAMP deliberately does not integrate with it right now — it keeps tracking Vokasi independently (own upload, own records), a known duplication rather than a planned integration.
 - The shop's supply recommendation and PAD/admin's verification of it are meant to be tracked as distinct, attributable steps (who proposed, who verified) — not a single unattributed result — because this is specifically where a shop's own excess or under-utilized MP goes unsurfaced today. A cross-shop candidate's TLC training requirement and completion is meant to be tracked as its own explicit step, not folded into the general fulfillment/confirmation fields. (Confirmed as a target for the data model; not yet implemented in the current schema.)
 - Demand's origin taxonomy is meant to name death (meninggal), illness (sakit), and mobility moves as distinct origins rather than folding them into a generic "Others"/"Unfit" bucket. (Confirmed as a target; not yet implemented in the current schema.)
 - Opening a new demand is meant to surface available excess/under-utilized supply (Util Pool) first, rather than leaving that check as an informal, easy-to-skip habit. (Confirmed as a target; not yet implemented in the current flow.)

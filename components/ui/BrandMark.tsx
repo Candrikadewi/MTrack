@@ -1,4 +1,4 @@
-/** CIRCLE's mark: an open ring (the name, literally, and the recurring
+/** CAMP's mark: an open ring (the "C" of the name, and the recurring
  * cycle the product tracks — contract-stage progression, Vokasi batches,
  * takt-time changes, headcount replacement — all the same "one thing
  * completes, another begins" shape) on a solid graphite ground. Replaces a

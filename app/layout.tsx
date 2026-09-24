@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "CIRCLE - Centralized Information Record & Control for Labor Excellence",
+  title: "CAMP - Centralized Access for Manpower Planning",
   description: "Control tower untuk kebutuhan, ketersediaan, dan pergerakan manpower.",
 };
 
