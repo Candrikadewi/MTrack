@@ -17,6 +17,8 @@ type PgError = { message: string } | null;
 type WriteResult = { error: PgError };
 type ReadResult<T> = { data: T[] | null; error: PgError };
 
+const PAGE_SIZE = 1000;
+
 let changeVersion = 0;
 const listeners = new Set<() => void>();
 
@@ -87,16 +89,33 @@ export function createStore<T extends { id: string }>(table: string): Store<T> {
     return createClient();
   }
 
+  /** Supabase (PostgREST) returns at most 1000 rows per request by
+   * default, silently — so read in pages until a short page comes back,
+   * or tables past 1000 rows (Vokasi, reviews, demands) lose data. */
+  async function fetchAll(): Promise<T[]> {
+    const supabase = client();
+    const all: T[] = [];
+    for (let from = 0; ; from += PAGE_SIZE) {
+      const res: ReadResult<T> = await supabase
+        .from(table)
+        .select("*")
+        .order("id")
+        .range(from, from + PAGE_SIZE - 1);
+      if (res.error) throw new Error(res.error.message);
+      const page = res.data ?? [];
+      all.push(...page);
+      if (page.length < PAGE_SIZE) return all;
+    }
+  }
+
   function start() {
     if (started || typeof window === "undefined") return;
     started = true;
     const supabase = client();
 
-    supabase
-      .from(table)
-      .select("*")
-      .then((res: ReadResult<T>) => {
-        if (!res.error && res.data) cache = res.data;
+    fetchAll()
+      .then((rows) => {
+        cache = rows;
         initialized = true;
         notify();
       })
@@ -129,14 +148,10 @@ export function createStore<T extends { id: string }>(table: string): Store<T> {
 
   function refetch() {
     if (typeof window === "undefined") return;
-    client()
-      .from(table)
-      .select("*")
-      .then((res: ReadResult<T>) => {
-        if (!res.error && res.data) {
-          cache = res.data;
-          notify();
-        }
+    fetchAll()
+      .then((rows) => {
+        cache = rows;
+        notify();
       })
       .catch((err: unknown) => console.error(`refetch ${table} failed:`, err));
   }
