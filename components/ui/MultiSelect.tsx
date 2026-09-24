@@ -9,6 +9,8 @@ export function MultiSelect({
   onChange,
   placeholder = "Semua",
   className = "",
+  labelOf = (v: string) => v,
+  inlineLabel = false,
 }: {
   label?: string;
   options: string[];
@@ -16,6 +18,10 @@ export function MultiSelect({
   onChange: (values: string[]) => void;
   placeholder?: string;
   className?: string;
+  /** Display text for a value (e.g. "2026-03" → "Mar 2026"). */
+  labelOf?: (value: string) => string;
+  /** Compact trigger: the label sits inside the button instead of above it. */
+  inlineLabel?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -41,11 +47,11 @@ export function MultiSelect({
   }
 
   const summary =
-    selected.length === 0 ? placeholder : selected.length === 1 ? selected[0] : `${selected.length} dipilih`;
+    selected.length === 0 ? placeholder : selected.length === 1 ? labelOf(selected[0]) : `${selected.length} dipilih`;
 
   return (
     <div ref={ref} className={`relative ${className}`}>
-      {label && (
+      {label && !inlineLabel && (
         <span id={labelId} className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">
           {label}
         </span>
@@ -64,12 +70,21 @@ export function MultiSelect({
             closeAndReturnFocus();
           }
         }}
-        className={`flex w-full items-center justify-between gap-2 rounded-xl border border-slate-300 bg-white px-3 py-2 text-left text-sm text-slate-700 transition-colors hover:border-slate-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 ${
-          selected.length > 0 ? "pr-8" : ""
-        }`}
+        className={`flex w-full items-center justify-between gap-2 rounded-xl border text-left text-sm text-slate-700 transition-colors dark:text-slate-200 ${
+          inlineLabel
+            ? `px-2.5 py-1.5 ${selected.length > 0 ? "border-blue-200 bg-blue-50/70 hover:border-blue-300 dark:border-blue-500/30 dark:bg-blue-500/10" : "border-slate-200 bg-white/70 hover:border-slate-300 dark:border-slate-700 dark:bg-slate-900/70"}`
+            : "border-slate-300 bg-white px-3 py-2 hover:border-slate-400 dark:border-slate-700 dark:bg-slate-900"
+        } ${selected.length > 0 ? "pr-8" : ""}`}
       >
-        <span id={`${panelId}-value`} className={selected.length === 0 ? "text-slate-500" : ""}>
-          {summary}
+        <span className="flex min-w-0 items-baseline gap-1.5">
+          {label && inlineLabel && (
+            <span id={labelId} className="shrink-0 text-xs font-medium text-slate-500 dark:text-slate-400">
+              {label}
+            </span>
+          )}
+          <span id={`${panelId}-value`} className={`truncate ${selected.length === 0 ? "text-slate-500" : inlineLabel ? "font-medium text-blue-700 dark:text-blue-300" : ""}`}>
+            {summary}
+          </span>
         </span>
         <ChevronDown size={15} className={`shrink-0 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
@@ -110,7 +125,7 @@ export function MultiSelect({
                   onChange={() => toggle(opt)}
                   className="h-3.5 w-3.5 rounded border-slate-300 text-blue-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-blue-500"
                 />
-                {opt}
+                {labelOf(opt)}
               </label>
             ))
           )}

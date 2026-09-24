@@ -31,8 +31,10 @@ export function fmtDate(date: string | null | undefined): string {
 
 /** §12: tgl_review = tgl_masuk + 24 bulan − 1 hari (Kontrak 1.1/1.2) atau +36 bulan − 1 hari (Kontrak 2) */
 export function computeReviewDate(tglMasuk: string, statusKontrak: StatusKontrak): string {
+  const start = tglMasuk ? parseISO(tglMasuk) : null;
+  if (!start || Number.isNaN(start.getTime())) return "";
   const months = statusKontrak === "Kontrak 2" ? 36 : 24;
-  return format(addDays(addMonths(parseISO(tglMasuk), months), -1), "yyyy-MM-dd");
+  return format(addDays(addMonths(start, months), -1), "yyyy-MM-dd");
 }
 
 /** §12: Vokasi tgl_ended = tgl_masuk + 6 bulan − 1 hari. */

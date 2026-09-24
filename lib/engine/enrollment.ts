@@ -21,6 +21,16 @@ export function demandTargetDate(d: Demand): string {
   return d.tgl_ended_outgoing || "";
 }
 
+/** A Vokasi Ended demand only becomes active demand in the month its batch
+ * ends (or later, while still open) — the ones ending in, say, March next
+ * year exist already but aren't counted yet. Every other origin is active
+ * from creation. */
+export function isDemandDue(d: Demand, refMonth: string = format(new Date(), "yyyy-MM")): boolean {
+  if (d.origin_type !== "VokasiEnded") return true;
+  const ended = d.tgl_ended_outgoing || demandTargetDate(d);
+  return !ended || ended.slice(0, 7) <= refMonth;
+}
+
 /** Supply-Demand: the category a demand should actually be tracked/tabbed
  * under. Normally this matches its origin category, but picking "Vokasi New
  * Hire" as the Source on a PKWT-origin demand means the vacancy is being

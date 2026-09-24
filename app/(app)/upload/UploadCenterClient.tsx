@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { addMonths, format } from "date-fns";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -9,8 +9,17 @@ import { Modal } from "@/components/ui/Modal";
 import { MultiSelect } from "@/components/ui/MultiSelect";
 import { EmptyState, TableWrap, Td, Th } from "@/components/ui/Table";
 import { SegmentedSwitch } from "@/components/ui/SegmentedSwitch";
-import { useStoreList } from "@/lib/useStore";
-import { zparStore, vokasiStore, columnDecisionStore, valueMappingStore, activateSnapshot, clearAllData } from "@/lib/repo";
+import { useStoreList, useStoreReady } from "@/lib/useStore";
+import {
+  zparStore,
+  vokasiStore,
+  columnDecisionStore,
+  valueMappingStore,
+  demandStore,
+  pkwtReviewStore,
+  activateSnapshot,
+  clearAllData,
+} from "@/lib/repo";
 import { genId } from "@/lib/storage";
 import {
   VOKASI_SHOPS,
@@ -29,6 +38,7 @@ import {
   deleteZparSnapshot,
   ensureVokasiEndedDemands,
   generatePkwtReviews,
+  pruneStaleVokasiDemands,
 } from "@/lib/engine/actions";
 import { fmtDate } from "@/lib/engine/compute";
 import { createClient } from "@/lib/supabase/client";
@@ -344,7 +354,11 @@ function zparPeriodOptions(): string[] {
 export function UploadCenterClient() {
   // Copy before sort — list() returns the store's live cache array, and
   // sorting it in place would mutate that shared reference during render.
-  const snapshots = [...useStoreList(zparStore)].sort((a, b) => b.upload_date.localeCompare(a.upload_date));
+  // Newest period first — a starting file lands many periods with the same
+  // upload time, so upload_date alone leaves them in arbitrary order.
+  const snapshots = [...useStoreList(zparStore)].sort(
+    (a, b) => b.period.localeCompare(a.period) || b.upload_date.localeCompare(a.upload_date)
+  );
   const vokasiRecords = useStoreList(vokasiStore);
   const decisions = useStoreList(columnDecisionStore);
   const valueMappings = useStoreList(valueMappingStore);
@@ -372,6 +386,23 @@ export function UploadCenterClient() {
   const [vokasiPreview, setVokasiPreview] = useState<Awaited<ReturnType<typeof parseVokasiFile>> | null>(null);
 
   const [resetModalOpen, setResetModalOpen] = useState(false);
+
+  // Self-healing on open, once every store it reads is hydrated (the
+  // existing-row checks would otherwise duplicate): PKWT reviews for the
+  // active snapshot are (re)generated — a single bad Tgl Masuk used to abort
+  // the whole run — and stale history demands from an earlier Vokasi
+  // starting upload are cleaned up. Both are idempotent.
+  const storesReady = [
+    useStoreReady(zparStore),
+    useStoreReady(pkwtReviewStore),
+    useStoreReady(demandStore),
+    useStoreReady(vokasiStore),
+  ].every(Boolean);
+  useEffect(() => {
+    if (!storesReady) return;
+    generatePkwtReviews();
+    pruneStaleVokasiDemands();
+  }, [storesReady]);
 
   function activateAndRefresh(id: string) {
     activateSnapshot(id);
@@ -523,25 +554,41 @@ export function UploadCenterClient() {
 
   const vokasiBlocked = vokasiNew.length === 0 || vokasiMissingBatch > 0 || vokasiPendingColumns > 0 || vokasiPendingShops > 0;
 
-  function handleVokasiUpload() {
-    if (!vokasiFile || !vokasiPreview || vokasiBlocked) return;
+  async function handleVokasiUpload() {
+    if (!vokasiFile || !vokasiPreview || vokasiBlocked || vokasiBusy) return;
     const used = usedColumns("vokasi", vokasiPreview.columns.extra, decisions);
     const upload_date = new Date().toISOString();
     const full: VokasiRecord[] = vokasiNew.map(({ extra, ...r }) => {
       const kept = keepUsedExtra(extra, used);
       return { ...r, ...(kept ? { extra: kept } : {}), id: genId("vokasi"), upload_date };
     });
-    vokasiStore.insertMany(full);
-    ensureVokasiEndedDemands();
-    const matched = autoMatchVokasiBatch(full);
-    setVokasiMsg(
-      `Berhasil upload ${full.length} record baru dari ${vokasiNewBatches.size} batch.` +
-        (vokasiDuplicates ? ` ${vokasiDuplicates} baris dilewati karena sudah ada (noreg + batch sama).` : "") +
-        ` Auto-matched ke ${matched} demand Vokasi.`
-    );
-    setVokasiFile(null);
-    setVokasiBatch("");
-    setVokasiPreview(null);
+    const batchCount = vokasiNewBatches.size;
+    const duplicates = vokasiDuplicates;
+    setVokasiBusy(true);
+    setVokasiMsg("Menyimpan data Vokasi…");
+    try {
+      // Each step waits for the previous one to land in the database: the
+      // auto-match RPC looks the new demands up server-side, and firing it
+      // before their insert finished is what produced "Demand not found".
+      const error = await vokasiStore.insertManyPersisted(full);
+      if (error) {
+        vokasiStore.refetch();
+        setVokasiMsg(`Gagal upload Vokasi: ${error}`);
+        return;
+      }
+      const created = await ensureVokasiEndedDemands();
+      const matched = autoMatchVokasiBatch(full);
+      setVokasiMsg(
+        `Berhasil upload ${full.length} record baru dari ${batchCount} batch.` +
+          (duplicates ? ` ${duplicates} baris dilewati karena sudah ada (noreg + batch sama).` : "") +
+          ` ${created} demand Vokasi baru (yang berakhir bulan ini atau sesudahnya), ${matched} langsung dapat kandidat.`
+      );
+      setVokasiFile(null);
+      setVokasiBatch("");
+      setVokasiPreview(null);
+    } finally {
+      setVokasiBusy(false);
+    }
   }
 
   function handleDeleteBatch(batch: string) {

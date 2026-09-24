@@ -32,6 +32,7 @@ import {
   effectiveDemandCategory,
   eligiblePoolEntriesForDemand,
   filterByDivDept,
+  isDemandDue,
 } from "@/lib/engine/enrollment";
 import {
   confirmDemandFulfillment,
@@ -161,7 +162,9 @@ function buildDemandBatchCategories(
   projects: Project[],
   taktCases: TaktCase[]
 ): BatchTileCategory[] {
-  const open = demands.filter((d) => d.status !== "Fulfilled");
+  // Still-open demand that needs a replacement now: Vokasi only counts from
+  // the month its batch ends, and No Replace has nothing left to fill.
+  const open = demands.filter((d) => d.status !== "Fulfilled" && d.replacement_status !== "No Replace" && isDemandDue(d));
 
   function groupBy(items: Demand[], keyOf: (d: Demand) => string) {
     const map = new Map<string, Demand[]>();
@@ -330,7 +333,9 @@ export function DemandPageClient() {
 
   const tabDemands = useMemo(() => demands.filter((d) => effectiveDemandCategory(d) === tab), [demands, tab]);
   const monthDemands = useMemo(
-    () => (month ? tabDemands.filter((d) => demandVisibleDate(demandTargetDate(d)).slice(0, 7) === month) : tabDemands),
+    // "Semua bulan" means everything active so far — a Vokasi ending months
+    // from now shows up once its month is picked, not in the all-months list.
+    () => (month ? tabDemands.filter((d) => demandVisibleDate(demandTargetDate(d)).slice(0, 7) === month) : tabDemands.filter((d) => isDemandDue(d))),
     [tabDemands, month]
   );
   const jenisOptions = useMemo(() => Array.from(new Set(monthDemands.map((d) => JENIS_LABEL[d.origin_type]))).sort(), [monthDemands]);
@@ -369,7 +374,9 @@ export function DemandPageClient() {
 
   function showCategoryInTable(key: string) {
     const labels = TILE_JENIS[key] ?? [];
-    const open = demands.filter((d) => d.status !== "Fulfilled" && labels.includes(JENIS_LABEL[d.origin_type]));
+    const open = demands.filter(
+      (d) => d.status !== "Fulfilled" && d.replacement_status !== "No Replace" && isDemandDue(d) && labels.includes(JENIS_LABEL[d.origin_type])
+    );
     const inTab = (c: DemandCategory) => open.filter((d) => effectiveDemandCategory(d) === c).length;
     const nextTab: DemandCategory =
       key === "pkwt" ? "PKWT" : key === "vokasi" ? "Vokasi" : inTab(tab) > 0 ? tab : inTab("PKWT") > 0 ? "PKWT" : "Vokasi";
@@ -461,7 +468,7 @@ export function DemandPageClient() {
         </p>
       </div>
 
-      <SectionHeading n={1} title="Ringkasan per Batch" subtitle="Demand yang belum terpenuhi, semua bulan. Klik tile untuk rincian." divider={false} />
+      <SectionHeading n={1} title="Ringkasan per Batch" subtitle="Demand yang belum terpenuhi sampai bulan ini (Vokasi dihitung mulai bulan berakhirnya). Klik tile untuk rincian." divider={false} />
       <BatchTileRow categories={batchCategories} onShowInTable={showCategoryInTable} />
 
       {canReview && (

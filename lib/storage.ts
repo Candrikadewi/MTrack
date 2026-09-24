@@ -58,6 +58,10 @@ export interface Store<T extends { id: string }> {
   get(id: string): T | undefined;
   insert(item: T): T;
   insertMany(items: T[]): T[];
+  /** insertMany, but resolves once Supabase has the rows (null) or rejected
+   * them (error message) — for follow-up RPCs that look those rows up
+   * server-side and would otherwise race the insert. */
+  insertManyPersisted(items: T[]): Promise<string | null>;
   update(id: string, patch: Partial<T>): T | undefined;
   /** Cache-only patch, no table write — for optimistic UI ahead of an RPC
    * that does the real (role-checked) write server-side. */
@@ -137,6 +141,23 @@ export function createStore<T extends { id: string }>(table: string): Store<T> {
       .catch((err: unknown) => console.error(`refetch ${table} failed:`, err));
   }
 
+  function insertManyPersisted(items: T[]): Promise<string | null> {
+    cache = [...cache, ...items];
+    notify();
+    if (items.length === 0) return Promise.resolve(null);
+    return client()
+      .from(table)
+      .insert(items)
+      .then((res: WriteResult) => {
+        if (res.error) console.error(`insertMany into ${table} failed:`, res.error.message);
+        return res.error?.message ?? null;
+      })
+      .catch((err: unknown) => {
+        console.error(`insertMany into ${table} failed:`, err);
+        return String(err);
+      });
+  }
+
   return {
     key: table,
     init: start,
@@ -163,17 +184,10 @@ export function createStore<T extends { id: string }>(table: string): Store<T> {
       return item;
     },
     insertMany(items) {
-      cache = [...cache, ...items];
-      notify();
-      client()
-        .from(table)
-        .insert(items)
-        .then((res: WriteResult) => {
-          if (res.error) console.error(`insertMany into ${table} failed:`, res.error.message);
-        })
-        .catch((err: unknown) => console.error(`insertMany into ${table} failed:`, err));
+      void insertManyPersisted(items);
       return items;
     },
+    insertManyPersisted,
     update(id, patch) {
       const idx = cache.findIndex((i) => i.id === id);
       if (idx === -1) return undefined;

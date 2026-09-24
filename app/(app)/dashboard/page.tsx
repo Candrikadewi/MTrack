@@ -1,5 +1,5 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { format } from "date-fns";
 import { useSessionState } from "@/lib/useSessionState";
@@ -13,6 +13,7 @@ import {
   UserPlus,
   UserMinus,
   Shuffle,
+  SlidersHorizontal,
   FileText,
   GraduationCap,
   HardHat,
@@ -200,24 +201,15 @@ export default function DashboardPage() {
         </p>
       </div>
 
-      {/* Org filter — applies to every section below. */}
-      <Card
-        action={
-          activeOrgFilterCount > 0 && (
-            <button
-              type="button"
-              onClick={() => {
-                setSelDirectorates([]);
-                setSelDivisions([]);
-                setSelDepts([]);
-              }}
-              className="flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700 transition-colors hover:bg-blue-100 dark:bg-blue-500/10 dark:text-blue-300 dark:hover:bg-blue-500/20"
-            >
-              {activeOrgFilterCount} filter aktif
-              <X size={12} />
-            </button>
-          )
-        }
+      {/* Org filter — applies to every section below, and stays reachable
+          while scrolling through them. */}
+      <StickyOrgFilterBar
+        activeCount={activeOrgFilterCount}
+        onReset={() => {
+          setSelDirectorates([]);
+          setSelDivisions([]);
+          setSelDepts([]);
+        }}
       >
         <OrgCascadeFilter
           employees={employees}
@@ -228,7 +220,7 @@ export default function DashboardPage() {
           selDepts={selDepts}
           setSelDepts={setSelDepts}
         />
-      </Card>
+      </StickyOrgFilterBar>
 
       {/* 0. Action Needed */}
       <ActionNeededBlock reviews={reviews} demands={demands} role={role} hasActiveFilter={activeOrgFilterCount > 0} />
@@ -534,8 +526,9 @@ function OrgCascadeFilter({
   const divisionOptions = divisionsOfAny(employees, selDirectorates);
   const deptOptions = deptsOfAny(employees, selDivisions);
   return (
-    <div className="mb-4 grid gap-3 sm:grid-cols-3">
+    <div className="grid min-w-0 flex-1 grid-cols-1 gap-2 sm:grid-cols-3">
       <MultiSelect
+        inlineLabel
         label="Directorate"
         options={directorates(employees)}
         selected={selDirectorates}
@@ -546,6 +539,7 @@ function OrgCascadeFilter({
         }}
       />
       <MultiSelect
+        inlineLabel
         label="Division"
         options={divisionOptions}
         selected={selDivisions}
@@ -554,8 +548,65 @@ function OrgCascadeFilter({
           setSelDepts([]);
         }}
       />
-      <MultiSelect label="Department" options={deptOptions} selected={selDepts} onChange={setSelDepts} />
+      <MultiSelect inlineLabel label="Department" options={deptOptions} selected={selDepts} onChange={setSelDepts} />
     </div>
+  );
+}
+
+/** Slim filter bar pinned under the top edge while the page scrolls. It sits
+ * flush like any card at rest and only lifts (blur + soft shadow) once it is
+ * actually floating over content, so it never looks bolted on. */
+function StickyOrgFilterBar({
+  activeCount,
+  onReset,
+  children,
+}: {
+  activeCount: number;
+  onReset: () => void;
+  children: ReactNode;
+}) {
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  const [stuck, setStuck] = useState(false);
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(([entry]) => setStuck(!entry.isIntersecting), { rootMargin: "-12px 0px 0px 0px" });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    <>
+      <div ref={sentinelRef} aria-hidden className="h-0" />
+      <div
+        role="region"
+        aria-label="Filter organisasi"
+        className={`relative z-30 rounded-2xl border px-3 py-2 sm:sticky sm:top-3 transition-[background-color,box-shadow,border-color] duration-200 motion-reduce:transition-none ${
+          stuck
+            ? "border-slate-200/80 bg-white/80 shadow-lg shadow-slate-900/[0.06] backdrop-blur-md dark:border-slate-700/80 dark:bg-slate-900/80 dark:shadow-black/30"
+            : "border-slate-200/70 bg-white shadow-sm shadow-slate-200/60 dark:border-slate-800 dark:bg-slate-900 dark:shadow-none"
+        }`}
+      >
+        <div className="flex items-center gap-2">
+          <span className="hidden shrink-0 items-center gap-1.5 pr-1 text-xs font-semibold text-slate-500 lg:flex dark:text-slate-400">
+            <SlidersHorizontal size={14} aria-hidden />
+            Filter
+          </span>
+          {children}
+          {activeCount > 0 && (
+            <button
+              type="button"
+              onClick={onReset}
+              aria-label={`Hapus ${activeCount} filter aktif`}
+              className="flex shrink-0 items-center gap-1 self-start rounded-full bg-blue-50 px-2.5 py-1.5 text-xs font-medium text-blue-700 transition-colors hover:bg-blue-100 sm:self-center dark:bg-blue-500/10 dark:text-blue-300 dark:hover:bg-blue-500/20"
+            >
+              <span className="tabular-nums">{activeCount}</span>
+              <X size={12} aria-hidden />
+            </button>
+          )}
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -628,11 +679,16 @@ function ManpowerMovementBlock({
 }) {
   const [selLaborTypes, setSelLaborTypes] = useSessionState<string[]>("dash.movement.laborTypes", []);
   const [selStatuses, setSelStatuses] = useSessionState<MovementStatus[]>("dash.movement.statuses", []);
+  const [selPeriods, setSelPeriods] = useSessionState<string[]>("dash.movement.periods", []);
 
-  // The FY window anchors to real "today" — not a page-level viewing-month
-  // pick — since this chart's job is "where movement stands right now", with
-  // "Lihat Perubahan" below as the dedicated control for historical diffing.
+  // Default window is the fiscal year around real "today"; the Periode
+  // filter swaps it for any mix of months — every uploaded snapshot (e.g.
+  // Mar 2019…Mar 2025) plus this FY's months — drawn oldest → newest.
   const refDate = useMemo(() => new Date(), []);
+  const periodOptions = useMemo(
+    () => Array.from(new Set([...snapshotsByPeriod.keys(), ...fiscalYearMonths(refDate)])).sort().reverse(),
+    [snapshotsByPeriod, refDate]
+  );
   const movementRows = useMemo(
     () =>
       manpowerMovementByFiscalYear(
@@ -643,9 +699,10 @@ function ManpowerMovementBlock({
           laborTypes: selLaborTypes,
           statuses: selStatuses,
         },
-        refDate
+        refDate,
+        selPeriods.filter((p) => periodOptions.includes(p))
       ),
-    [snapshotsByPeriod, vokasi, selDirectorates, selDivisions, selDepts, selLaborTypes, selStatuses, refDate]
+    [snapshotsByPeriod, vokasi, selDirectorates, selDivisions, selDepts, selLaborTypes, selStatuses, refDate, selPeriods, periodOptions]
   );
 
   const [diffMonth, setDiffMonth] = useSessionState<string>("dash.movement.diffMonth", "");
@@ -668,7 +725,7 @@ function ManpowerMovementBlock({
   return (
     <Card
       title="Manpower Movement"
-      subtitle="Bulan bertanda “–” belum ada snapshot ZPAR-nya."
+      subtitle={`${selPeriods.length ? `${selPeriods.length} periode dipilih` : "Tahun fiskal berjalan (Apr–Mar)"} · bulan bertanda “–” belum ada snapshot ZPAR-nya.`}
       action={
         availableMonths.length > 0 && (
           <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 dark:border-slate-800 dark:bg-slate-900">
@@ -691,7 +748,15 @@ function ManpowerMovementBlock({
         )
       }
     >
-      <div className="mb-4 grid gap-3 sm:grid-cols-2">
+      <div className="mb-4 grid gap-3 sm:grid-cols-3">
+        <MultiSelect
+          label="Periode"
+          options={periodOptions}
+          selected={selPeriods}
+          onChange={setSelPeriods}
+          placeholder="Tahun fiskal berjalan"
+          labelOf={(m) => format(new Date(`${m}-01T00:00:00`), "MMM yyyy")}
+        />
         <MultiSelect
           label="Labor Type"
           options={[...LABOR_TYPES]}

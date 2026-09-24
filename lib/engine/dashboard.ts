@@ -216,19 +216,23 @@ export interface MovementFilter {
 /** Movement per FY month, sourced from the ZPAR snapshot whose `period` matches
  * that month (0 if no snapshot uploaded for it) + Vokasi active as of month-end.
  * `filter` scopes both the ZPAR employees and the Vokasi records — Vokasi has no
- * `directorat`, so only its div/dept are matched against `filter.org`. */
+ * `directorat`, so only its div/dept are matched against `filter.org`.
+ * `months` ("yyyy-MM", any order) replaces the default FY window with a
+ * chosen set of periods, drawn oldest → newest. */
 export function manpowerMovementByFiscalYear(
   snapshotsByPeriod: Map<string, EmployeeRecord[]>,
   vokasi: VokasiRecord[],
   filter: MovementFilter = { org: { directorates: [], divisions: [], depts: [] }, laborTypes: [], statuses: [] },
-  refDate: Date = new Date()
+  refDate: Date = new Date(),
+  months: string[] = []
 ): CompositionRow[] {
   const statuses = filter.statuses.length ? filter.statuses : (["Permanen", "Kontrak", "Vokasi"] as MovementStatus[]);
   const showPermanen = statuses.includes("Permanen");
   const showKontrak = statuses.includes("Kontrak");
   const showVokasi = statuses.includes("Vokasi");
 
-  return fiscalYearMonths(refDate).map((month) => {
+  const window = months.length ? [...months].sort() : fiscalYearMonths(refDate);
+  return window.map((month) => {
     const scoped = filterEmployees(snapshotsByPeriod.get(month) ?? [], filter.org).filter(
       (e) => filter.laborTypes.length === 0 || filter.laborTypes.includes(e.labor_type)
     );
