@@ -9,7 +9,8 @@ import { Badge, statusTone } from "@/components/ui/Badge";
 import { EmptyState, FilteredEmptyState, TableWrap, Td, Th } from "@/components/ui/Table";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { MultiSelect } from "@/components/ui/MultiSelect";
-import { BatchTileRow, type BatchTileCategory } from "@/components/ui/BatchTileRow";
+import { BatchTileRow } from "@/components/ui/BatchTileRow";
+import { DEMAND_JENIS_LABEL as JENIS_LABEL, buildDemandBatchCategories } from "@/lib/engine/batches";
 import { RatioWidget, RatioScenarioCompare } from "@/components/ui/RatioWidget";
 import { CollapsibleSection } from "@/components/ui/Collapsible";
 import { SectionHeading } from "@/components/ui/SectionHeading";
@@ -55,9 +56,7 @@ import type {
   DemandOriginType,
   EmployeeRecord,
   EmploymentStatus,
-  Project,
   ReplacementStatus,
-  TaktCase,
   UtilPoolEntry,
   VokasiRecord,
 } from "@/lib/types";
@@ -67,19 +66,6 @@ const POOL_SOURCES: ReplacementStatus[] = ["MP Excess", "MP Back Up"];
 const PKWT_SOURCE_OPTIONS: ReplacementStatus[] = ["PKWT New Hire", "Vokasi New Hire", "MP Excess", "MP Back Up", "No Replace"];
 const VOKASI_SOURCE_OPTIONS: ReplacementStatus[] = ["Vokasi New Hire", "MP Excess", "MP Back Up", "No Replace"];
 
-const JENIS_LABEL: Record<DemandOriginType, string> = {
-  VokasiEnded: "Vokasi Ended",
-  PkwtTerminate: "PKWT Terminate",
-  Project: "Project",
-  TaktUp: "Takt Up",
-  Resign: "Resign",
-  Pension: "Pensiun",
-  PensionDini: "Pensiun Dini",
-  GST: "GST",
-  Unfit: "Unfit",
-  Others: "Others",
-  Manual: "Manual",
-};
 
 const EMPLOYMENT_STATUS_LABEL: Record<EmploymentStatus, string> = {
   "": "Belum diisi",
@@ -160,95 +146,6 @@ function demandRatioDelta(d: Demand, empByNoreg: Map<string, EmployeeRecord>, vo
 // ---------------------------------------------------------------------------
 // Section 1 — Ringkasan per Batch
 // ---------------------------------------------------------------------------
-
-/** Every tile and batch counts MP still to fulfil (not yet verified), out
- * of the demand it has. Vokasi counts from the month its batch ends, and
- * No Replace has nothing to fill, so neither is in the total. Batches with
- * nothing left are not listed. */
-function buildDemandBatchCategories(
-  demands: Demand[],
-  projects: Project[],
-  taktCases: TaktCase[]
-): BatchTileCategory[] {
-  const active = demands.filter((d) => d.replacement_status !== "No Replace" && isDemandDue(d));
-  const isOpen = (d: Demand) => d.status !== "Fulfilled";
-
-  function batchesOf(
-    items: Demand[],
-    keyOf: (d: Demand) => string,
-    describe: (key: string) => { label: string; meta?: string; href?: string },
-    order: (a: string, b: string) => number = () => 0
-  ) {
-    const map = new Map<string, Demand[]>();
-    for (const d of items) {
-      const key = keyOf(d);
-      map.set(key, [...(map.get(key) ?? []), d]);
-    }
-    return Array.from(map.entries())
-      .map(([key, list]) => ({ id: key, ...describe(key), count: list.filter(isOpen).length, total: list.length }))
-      .filter((b) => b.count > 0)
-      .sort((a, b) => order(a.id, b.id));
-  }
-
-  function category(key: string, label: string, tone: BatchTileCategory["tone"], items: Demand[], batches: BatchTileCategory["batches"]) {
-    return { key, label, tone, count: items.filter(isOpen).length, total: items.length, batches };
-  }
-
-  const byMonthDesc = (a: string, b: string) => b.localeCompare(a);
-  const monthLabel = (prefix: string, month: string) =>
-    month === "-" ? prefix : `${prefix} — ${format(new Date(`${month}-01T00:00:00`), "MMM yyyy")}`;
-
-  const projectDemands = active.filter((d) => d.origin_type === "Project");
-  const taktUpDemands = active.filter((d) => d.origin_type === "TaktUp");
-  const pkwtDemands = active.filter((d) => d.origin_type === "PkwtTerminate");
-  const vokasiDemands = active.filter((d) => d.origin_type === "VokasiEnded");
-  const lainnyaTypes: DemandOriginType[] = ["Resign", "Pension", "PensionDini", "GST", "Unfit", "Others", "Manual"];
-  const lainnyaDemands = active.filter((d) => lainnyaTypes.includes(d.origin_type));
-
-  return [
-    category(
-      "project",
-      "Project",
-      "blue",
-      projectDemands,
-      batchesOf(projectDemands, (d) => d.origin_ref, (ref) => {
-        const p = projects.find((x) => x.id === ref);
-        return { label: p?.name ?? "Project", meta: p ? `SOP ${fmtDate(p.start_date)}` : undefined, href: "/projects" };
-      })
-    ),
-    category(
-      "taktup",
-      "Takt Up",
-      "blue",
-      taktUpDemands,
-      batchesOf(taktUpDemands, (d) => d.origin_ref, (ref) => {
-        const t = taktCases.find((x) => x.id === ref);
-        return { label: t ? `Takt Up — ${t.plant}` : "Takt Up", meta: t ? fmtDate(t.date) : undefined };
-      })
-    ),
-    category(
-      "pkwt",
-      "PKWT",
-      "amber",
-      pkwtDemands,
-      batchesOf(pkwtDemands, (d) => demandTargetDate(d).slice(0, 7) || "-", (m) => ({ label: monthLabel("Review PKWT", m) }), byMonthDesc)
-    ),
-    category(
-      "vokasi",
-      "Vokasi",
-      "violet",
-      vokasiDemands,
-      batchesOf(vokasiDemands, (d) => demandTargetDate(d).slice(0, 7) || "-", (m) => ({ label: monthLabel("Vokasi Ended", m) }), byMonthDesc)
-    ),
-    category(
-      "lainnya",
-      "Lainnya",
-      "slate",
-      lainnyaDemands,
-      batchesOf(lainnyaDemands, (d) => d.origin_type, (type) => ({ label: JENIS_LABEL[type as DemandOriginType] }))
-    ),
-  ];
-}
 
 const TILE_JENIS: Record<string, string[]> = {
   project: [JENIS_LABEL.Project],
