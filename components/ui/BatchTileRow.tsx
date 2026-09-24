@@ -10,6 +10,8 @@ export interface BatchSummary {
   label: string;
   meta?: string;
   count: number;
+  /** What `count` is out of (e.g. 30 left of 45), when known. */
+  total?: number;
   tone?: Tone;
   /** Where to edit/delete this batch — the list page that still owns that
    * capability (e.g. /projects, /takt) now that there's no separate "Kelola"
@@ -21,6 +23,7 @@ export interface BatchTileCategory {
   key: string;
   label: string;
   count: number;
+  total?: number;
   tone: Tone;
   batches: BatchSummary[];
 }
@@ -41,9 +44,12 @@ const TONE_DOT: Record<Tone, string> = {
  * accordion, never a separate rollup UI). */
 export function BatchTileRow({
   categories,
+  pendingLabel,
   onShowInTable,
 }: {
   categories: BatchTileCategory[];
+  /** What each count means, shown under it ("belum terpenuhi"). */
+  pendingLabel?: string;
   /** When given, the expanded panel offers a jump that filters the page's
    * detail table down to this category. */
   onShowInTable?: (categoryKey: string) => void;
@@ -73,7 +79,19 @@ export function BatchTileRow({
                   <span aria-hidden className={`h-1.5 w-1.5 shrink-0 rounded-full ${TONE_DOT[cat.tone]}`} />
                   {cat.label}
                 </div>
-                <div className="text-xl font-bold tabular-nums text-slate-800 dark:text-slate-100">{cat.count}</div>
+                <div
+                  className={`text-xl font-bold tabular-nums ${
+                    pendingLabel && cat.count > 0 ? "text-slate-900 dark:text-white" : "text-slate-800 dark:text-slate-100"
+                  }`}
+                >
+                  {cat.count}
+                </div>
+                {pendingLabel && (
+                  <div className="text-[11px] leading-tight text-slate-500 dark:text-slate-400">
+                    {pendingLabel}
+                    {cat.total !== undefined && <> · dari {cat.total}</>}
+                  </div>
+                )}
               </div>
               <ChevronDown
                 size={15}
@@ -138,7 +156,10 @@ function BatchBreakdown({ category }: { category: BatchTileCategory }) {
                 Kelola →
               </Link>
             )}
-            <Badge tone={b.tone ?? category.tone}>{b.count}</Badge>
+            <Badge tone={b.tone ?? category.tone}>
+              {b.count}
+              {b.total !== undefined && <span className="font-normal opacity-70"> / {b.total}</span>}
+            </Badge>
           </div>
         </div>
       ))}

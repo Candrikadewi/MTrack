@@ -67,9 +67,11 @@ function tileByJenis(entries: UtilPoolEntry[], jenis: string, tone: BatchTileCat
       label,
       meta: `${list.filter((e) => e.status === "Assigned").length} diutilize dari ${list.length}`,
       count: list.filter((e) => e.status === "Open").length,
+      total: list.length,
     }))
+    .filter((b) => b.count > 0)
     .sort((a, b) => b.count - a.count);
-  return { key: jenis, label: jenis, count: openEntries.length, tone, batches };
+  return { key: jenis, label: jenis, count: openEntries.length, total: sourceEntries.length, tone, batches };
 }
 
 function tileForTaktDown(entries: UtilPoolEntry[], taktCases: TaktCase[]): BatchTileCategory {
@@ -83,13 +85,15 @@ function tileForTaktDown(entries: UtilPoolEntry[], taktCases: TaktCase[]): Batch
         label: `Takt Down — ${c.plant}`,
         meta: fmtDate(c.date),
         count: linked.filter((e) => e.status === "Open").length,
+        total: linked.length,
         href: "/takt",
       };
     })
     .filter((b) => b.count > 0)
     .sort((a, b) => b.count - a.count);
   const totalOpen = batches.reduce((sum, b) => sum + b.count, 0);
-  return { key: "TaktDown", label: SOURCE_TYPE_LABELS.TaktDown, count: totalOpen, tone: "blue", batches };
+  const total = entries.filter((e) => e.source === "TaktDown").length;
+  return { key: "TaktDown", label: SOURCE_TYPE_LABELS.TaktDown, count: totalOpen, total, tone: "blue", batches };
 }
 
 function buildSupplyBatchCategories(entries: UtilPoolEntry[], taktCases: TaktCase[]): BatchTileCategory[] {
@@ -208,8 +212,8 @@ export function SupplyPageClient() {
         </p>
       </div>
 
-      <SectionHeading n={1} title="Ringkasan per Batch" subtitle="Supply yang masih Open, semua bulan. Klik tile untuk rincian." divider={false} />
-      <BatchTileRow categories={batchCategories} />
+      <SectionHeading n={1} title="Ringkasan per Batch" subtitle="Jumlah MP di Supply Pool yang belum diutilize, dari total yang masuk. Klik tile untuk rincian." divider={false} />
+      <BatchTileRow categories={batchCategories} pendingLabel="belum diutilize" />
 
       {role === "admin" && (
         <div className="space-y-4 border-t border-slate-200 pt-6 dark:border-slate-800">

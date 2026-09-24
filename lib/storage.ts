@@ -19,6 +19,25 @@ type ReadResult<T> = { data: T[] | null; error: PgError };
 
 const PAGE_SIZE = 1000;
 
+/** Postgres rejects "" for a `date` column, and the app models "no date
+ * yet" as "" — so every insert/update carrying a blank date failed, and
+ * with it the whole batch (e.g. every new Demand, whose confirmation dates
+ * start blank). Date columns are named tgl_* / *_date / date across the
+ * schema; a blank there is sent as null. Reads already hand nulls back,
+ * which the app treats the same as "". */
+const DATE_KEY = /(^|_)(tgl|date)(_|$)/;
+
+function toRow<T extends object>(item: T): T {
+  let out: T | null = null;
+  for (const [key, value] of Object.entries(item)) {
+    if (value === "" && DATE_KEY.test(key)) {
+      out ??= { ...item };
+      (out as Record<string, unknown>)[key] = null;
+    }
+  }
+  return out ?? item;
+}
+
 let changeVersion = 0;
 const listeners = new Set<() => void>();
 
@@ -162,7 +181,7 @@ export function createStore<T extends { id: string }>(table: string): Store<T> {
     if (items.length === 0) return Promise.resolve(null);
     return client()
       .from(table)
-      .insert(items)
+      .insert(items.map(toRow))
       .then((res: WriteResult) => {
         if (res.error) console.error(`insertMany into ${table} failed:`, res.error.message);
         return res.error?.message ?? null;
@@ -191,7 +210,7 @@ export function createStore<T extends { id: string }>(table: string): Store<T> {
       notify();
       client()
         .from(table)
-        .insert(item)
+        .insert(toRow(item))
         .then((res: WriteResult) => {
           if (res.error) console.error(`insert into ${table} failed:`, res.error.message);
         })
@@ -211,7 +230,7 @@ export function createStore<T extends { id: string }>(table: string): Store<T> {
       notify();
       client()
         .from(table)
-        .update(patch)
+        .update(toRow(patch))
         .eq("id", id)
         .then((res: WriteResult) => {
           if (res.error) console.error(`update ${table} failed:`, res.error.message);
@@ -231,7 +250,7 @@ export function createStore<T extends { id: string }>(table: string): Store<T> {
       notify();
       client()
         .from(table)
-        .upsert(item)
+        .upsert(toRow(item))
         .then((res: WriteResult) => {
           if (res.error) console.error(`upsert into ${table} failed:`, res.error.message);
         })

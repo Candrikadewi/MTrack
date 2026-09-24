@@ -14,6 +14,7 @@ import { logout } from "@/app/login/actions";
 import { canAccessModule, type Role } from "@/lib/roles";
 import { clearSessionState } from "@/lib/useSessionState";
 import { BrandMark } from "@/components/ui/BrandMark";
+import { usePendingCounts } from "@/lib/usePendingCounts";
 
 const NAV_TOP = [
   { href: "/upload", label: "Upload Center", icon: Upload },
@@ -39,7 +40,25 @@ const ROLE_TONE: Record<Role, string> = {
 
 type NavItem = { href: string; label: string; icon: typeof Upload };
 
-function NavLink({ item, isActive }: { item: NavItem; isActive: boolean }) {
+/** Pending work on a menu item: MP still to fulfil (Demand) or to
+ * utilize (Supply). Hidden at zero so it only appears when there's
+ * something to do. */
+function PendingBadge({ count, isActive, label }: { count: number; isActive: boolean; label: string }) {
+  if (count <= 0) return null;
+  return (
+    <span
+      aria-label={`${count} ${label}`}
+      title={`${count} ${label}`}
+      className={`ml-auto min-w-[1.5rem] rounded-full px-1.5 py-0.5 text-center text-[11px] font-bold tabular-nums ${
+        isActive ? "bg-white/20 text-white" : "bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300"
+      }`}
+    >
+      {count > 999 ? "999+" : count}
+    </span>
+  );
+}
+
+function NavLink({ item, isActive, badge }: { item: NavItem; isActive: boolean; badge?: { count: number; label: string } }) {
   const Icon = item.icon;
   return (
     <Link
@@ -56,6 +75,7 @@ function NavLink({ item, isActive }: { item: NavItem; isActive: boolean }) {
         className={isActive ? "text-white" : "text-slate-400 group-hover:text-slate-600 dark:group-hover:text-slate-300"}
       />
       {item.label}
+      {badge && <PendingBadge count={badge.count} isActive={isActive} label={badge.label} />}
     </Link>
   );
 }
@@ -65,6 +85,13 @@ export function Sidebar({ role, email }: { role: Role; email: string }) {
   const isActive = (href: string) => pathname === href || pathname?.startsWith(href + "/");
   const navTop = NAV_TOP.filter((item) => canAccessModule(role, item.href));
   const navBottom = NAV_BOTTOM.filter((item) => canAccessModule(role, item.href));
+  const pending = usePendingCounts();
+  const badgeFor = (href: string) =>
+    href === "/demand"
+      ? { count: pending.demand, label: "MP belum terpenuhi" }
+      : href === "/supply"
+        ? { count: pending.supply, label: "MP belum diutilize" }
+        : undefined;
 
   return (
     <aside className="fixed inset-y-0 left-0 z-40 hidden w-64 flex-col border-r border-slate-200/80 bg-white/80 backdrop-blur-xl dark:border-slate-800/80 dark:bg-slate-950/80 md:flex">
@@ -79,7 +106,7 @@ export function Sidebar({ role, email }: { role: Role; email: string }) {
       </div>
       <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
         {navTop.map((item) => (
-          <NavLink key={item.href} item={item} isActive={isActive(item.href)} />
+          <NavLink key={item.href} item={item} isActive={isActive(item.href)} badge={badgeFor(item.href)} />
         ))}
 
         {navBottom.map((item) => (

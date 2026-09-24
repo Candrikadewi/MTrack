@@ -22,7 +22,7 @@ import { TaktUpModal } from "@/components/takt/TaktUpModal";
 import { Check, Circle } from "lucide-react";
 import { useStoreList, useStoreReady } from "@/lib/useStore";
 import { demandStore, pkwtReviewStore, projectStore, taktStore, utilPoolStore, vokasiStore, zparStore } from "@/lib/repo";
-import { fmtDate, sisaHari, demandVisibleDate, fulfillmentDeadline, supplyDemandStatus, computeVokasiStatus } from "@/lib/engine/compute";
+import { fmtDate, sisaHari, fulfillmentDeadline, supplyDemandStatus, computeVokasiStatus } from "@/lib/engine/compute";
 import {
   demandGranularStatus,
   demandStatusLabel,
@@ -43,6 +43,8 @@ import {
   setDemandReplacementByNoreg,
   syncProjectSeatDemands,
   autoProjectFinishCheck,
+  ensureVokasiEndedDemands,
+  repairMissingPlanDemands,
 } from "@/lib/engine/actions";
 import { pushToast } from "@/lib/toast";
 import { useRole } from "@/lib/RoleContext";
@@ -159,81 +161,92 @@ function demandRatioDelta(d: Demand, empByNoreg: Map<string, EmployeeRecord>, vo
 // Section 1 — Ringkasan per Batch
 // ---------------------------------------------------------------------------
 
+/** Every tile and batch counts MP still to fulfil (not yet verified), out
+ * of the demand it has. Vokasi counts from the month its batch ends, and
+ * No Replace has nothing to fill, so neither is in the total. Batches with
+ * nothing left are not listed. */
 function buildDemandBatchCategories(
   demands: Demand[],
   projects: Project[],
   taktCases: TaktCase[]
 ): BatchTileCategory[] {
-  // Still-open demand that needs a replacement now: Vokasi only counts from
-  // the month its batch ends, and No Replace has nothing left to fill.
-  const open = demands.filter((d) => d.status !== "Fulfilled" && d.replacement_status !== "No Replace" && isDemandDue(d));
+  const active = demands.filter((d) => d.replacement_status !== "No Replace" && isDemandDue(d));
+  const isOpen = (d: Demand) => d.status !== "Fulfilled";
 
-  function groupBy(items: Demand[], keyOf: (d: Demand) => string) {
+  function batchesOf(
+    items: Demand[],
+    keyOf: (d: Demand) => string,
+    describe: (key: string) => { label: string; meta?: string; href?: string },
+    order: (a: string, b: string) => number = () => 0
+  ) {
     const map = new Map<string, Demand[]>();
     for (const d of items) {
       const key = keyOf(d);
-      const arr = map.get(key) ?? [];
-      arr.push(d);
-      map.set(key, arr);
+      map.set(key, [...(map.get(key) ?? []), d]);
     }
-    return map;
+    return Array.from(map.entries())
+      .map(([key, list]) => ({ id: key, ...describe(key), count: list.filter(isOpen).length, total: list.length }))
+      .filter((b) => b.count > 0)
+      .sort((a, b) => order(a.id, b.id));
   }
 
-  const projectDemands = open.filter((d) => d.origin_type === "Project");
-  const projectGroups = groupBy(projectDemands, (d) => d.origin_ref);
-  const projectBatches = Array.from(projectGroups.entries()).map(([ref, items]) => {
-    const p = projects.find((x) => x.id === ref);
-    return {
-      id: ref,
-      label: p?.name ?? "Project",
-      meta: p ? `SOP ${fmtDate(p.start_date)}` : undefined,
-      count: items.length,
-      href: "/projects",
-    };
-  });
+  function category(key: string, label: string, tone: BatchTileCategory["tone"], items: Demand[], batches: BatchTileCategory["batches"]) {
+    return { key, label, tone, count: items.filter(isOpen).length, total: items.length, batches };
+  }
 
-  const taktUpDemands = open.filter((d) => d.origin_type === "TaktUp");
-  const taktUpGroups = groupBy(taktUpDemands, (d) => d.origin_ref);
-  const taktUpBatches = Array.from(taktUpGroups.entries()).map(([ref, items]) => {
-    const t = taktCases.find((x) => x.id === ref);
-    return { id: ref, label: t ? `Takt Up — ${t.plant}` : "Takt Up", meta: t ? fmtDate(t.date) : undefined, count: items.length };
-  });
+  const byMonthDesc = (a: string, b: string) => b.localeCompare(a);
+  const monthLabel = (prefix: string, month: string) =>
+    month === "-" ? prefix : `${prefix} — ${format(new Date(`${month}-01T00:00:00`), "MMM yyyy")}`;
 
-  const pkwtDemands = open.filter((d) => d.origin_type === "PkwtTerminate");
-  const pkwtGroups = groupBy(pkwtDemands, (d) => demandTargetDate(d).slice(0, 7) || "-");
-  const pkwtBatches = Array.from(pkwtGroups.entries())
-    .sort((a, b) => b[0].localeCompare(a[0]))
-    .map(([month, items]) => ({
-      id: month,
-      label: month === "-" ? "Review PKWT" : `Review PKWT — ${format(new Date(`${month}-01T00:00:00`), "MMM yyyy")}`,
-      count: items.length,
-    }));
-
-  const vokasiDemands = open.filter((d) => d.origin_type === "VokasiEnded");
-  const vokasiGroups = groupBy(vokasiDemands, (d) => demandTargetDate(d).slice(0, 7) || "-");
-  const vokasiBatches = Array.from(vokasiGroups.entries())
-    .sort((a, b) => b[0].localeCompare(a[0]))
-    .map(([month, items]) => ({
-      id: month,
-      label: month === "-" ? "Vokasi Ended" : `Vokasi Ended — ${format(new Date(`${month}-01T00:00:00`), "MMM yyyy")}`,
-      count: items.length,
-    }));
-
+  const projectDemands = active.filter((d) => d.origin_type === "Project");
+  const taktUpDemands = active.filter((d) => d.origin_type === "TaktUp");
+  const pkwtDemands = active.filter((d) => d.origin_type === "PkwtTerminate");
+  const vokasiDemands = active.filter((d) => d.origin_type === "VokasiEnded");
   const lainnyaTypes: DemandOriginType[] = ["Resign", "Pension", "PensionDini", "GST", "Unfit", "Others", "Manual"];
-  const lainnyaDemands = open.filter((d) => lainnyaTypes.includes(d.origin_type));
-  const lainnyaGroups = groupBy(lainnyaDemands, (d) => d.origin_type);
-  const lainnyaBatches = Array.from(lainnyaGroups.entries()).map(([type, items]) => ({
-    id: type,
-    label: JENIS_LABEL[type as DemandOriginType],
-    count: items.length,
-  }));
+  const lainnyaDemands = active.filter((d) => lainnyaTypes.includes(d.origin_type));
 
   return [
-    { key: "project", label: "Project", count: projectDemands.length, tone: "blue", batches: projectBatches },
-    { key: "taktup", label: "Takt Up", count: taktUpDemands.length, tone: "blue", batches: taktUpBatches },
-    { key: "pkwt", label: "PKWT", count: pkwtDemands.length, tone: "amber", batches: pkwtBatches },
-    { key: "vokasi", label: "Vokasi", count: vokasiDemands.length, tone: "violet", batches: vokasiBatches },
-    { key: "lainnya", label: "Lainnya", count: lainnyaDemands.length, tone: "slate", batches: lainnyaBatches },
+    category(
+      "project",
+      "Project",
+      "blue",
+      projectDemands,
+      batchesOf(projectDemands, (d) => d.origin_ref, (ref) => {
+        const p = projects.find((x) => x.id === ref);
+        return { label: p?.name ?? "Project", meta: p ? `SOP ${fmtDate(p.start_date)}` : undefined, href: "/projects" };
+      })
+    ),
+    category(
+      "taktup",
+      "Takt Up",
+      "blue",
+      taktUpDemands,
+      batchesOf(taktUpDemands, (d) => d.origin_ref, (ref) => {
+        const t = taktCases.find((x) => x.id === ref);
+        return { label: t ? `Takt Up — ${t.plant}` : "Takt Up", meta: t ? fmtDate(t.date) : undefined };
+      })
+    ),
+    category(
+      "pkwt",
+      "PKWT",
+      "amber",
+      pkwtDemands,
+      batchesOf(pkwtDemands, (d) => demandTargetDate(d).slice(0, 7) || "-", (m) => ({ label: monthLabel("Review PKWT", m) }), byMonthDesc)
+    ),
+    category(
+      "vokasi",
+      "Vokasi",
+      "violet",
+      vokasiDemands,
+      batchesOf(vokasiDemands, (d) => demandTargetDate(d).slice(0, 7) || "-", (m) => ({ label: monthLabel("Vokasi Ended", m) }), byMonthDesc)
+    ),
+    category(
+      "lainnya",
+      "Lainnya",
+      "slate",
+      lainnyaDemands,
+      batchesOf(lainnyaDemands, (d) => d.origin_type, (type) => ({ label: JENIS_LABEL[type as DemandOriginType] }))
+    ),
   ];
 }
 
@@ -249,6 +262,11 @@ const STATUS_OPTIONS = ["Open", "DELAY", "Need Replace ASAP", "Fulfilled Ontime"
 
 function todayKey(): string {
   return format(new Date(), "yyyy-MM-dd");
+}
+
+/** Nothing left to do: received by the shop, or not being replaced. */
+function isDemandDone(d: Demand): boolean {
+  return Boolean(d.shop_confirmed_date) || d.replacement_status === "No Replace";
 }
 
 function whoOf(d: Demand): string {
@@ -287,11 +305,16 @@ export function DemandPageClient() {
   const poolReady = useStoreReady(utilPoolStore);
   const vokasiReady = useStoreReady(vokasiStore);
   const zparReady = useStoreReady(zparStore);
-  const releaseInputsReady = demandsReady && projectsReady && poolReady && vokasiReady && zparReady;
+  const taktReady = useStoreReady(taktStore);
+  const releaseInputsReady = demandsReady && projectsReady && poolReady && vokasiReady && zparReady && taktReady;
   useEffect(() => {
     if (!isAdmin || !releaseInputsReady) return;
-    autoProjectFinishCheck();
-    syncProjectSeatDemands();
+    // Recreate demands whose insert was rejected before blank dates were
+    // sent as null, then run the usual release/sync passes over them.
+    Promise.all([repairMissingPlanDemands(), ensureVokasiEndedDemands()]).then(() => {
+      autoProjectFinishCheck();
+      syncProjectSeatDemands();
+    });
   }, [isAdmin, releaseInputsReady]);
 
   const batchCategories = useMemo(() => buildDemandBatchCategories(demands, projects, taktCases), [demands, projects, taktCases]);
@@ -338,7 +361,7 @@ export function DemandPageClient() {
 
   // ---- Detail dan Mapping Demand ----
   const [tab, setTab] = useSessionState<DemandCategory>("demand.detail.tab", "PKWT");
-  const [month, setMonth] = useSessionState<string>("demand.detail.month", currentMonthKey());
+  const [showDone, setShowDone] = useSessionState<boolean>("demand.detail.showDone", false);
   const [jenis, setJenis] = useSessionState<string[]>("demand.detail.jenis", []);
   const [divs, setDivs] = useSessionState<string[]>("demand.detail.divs", []);
   const [depts, setDepts] = useSessionState<string[]>("demand.detail.depts", []);
@@ -348,11 +371,13 @@ export function DemandPageClient() {
   const detailRef = useRef<HTMLElement>(null);
 
   const tabDemands = useMemo(() => demands.filter((d) => effectiveDemandCategory(d) === tab), [demands, tab]);
+  // Every active demand, whatever its month — a period filter could hide
+  // one that's still open in another month. Done (received by the shop, or
+  // No Replace) is hidden unless asked for; Vokasi counts from the month
+  // its batch ends.
   const monthDemands = useMemo(
-    // "Semua bulan" means everything active so far — a Vokasi ending months
-    // from now shows up once its month is picked, not in the all-months list.
-    () => (month ? tabDemands.filter((d) => demandVisibleDate(demandTargetDate(d)).slice(0, 7) === month) : tabDemands.filter((d) => isDemandDue(d))),
-    [tabDemands, month]
+    () => tabDemands.filter((d) => isDemandDue(d) && (showDone || !isDemandDone(d))),
+    [tabDemands, showDone]
   );
   const jenisOptions = useMemo(() => Array.from(new Set(monthDemands.map((d) => JENIS_LABEL[d.origin_type]))).sort(), [monthDemands]);
   const divOptions = useMemo(() => divisionsOfRows(monthDemands), [monthDemands]);
@@ -397,7 +422,6 @@ export function DemandPageClient() {
     const nextTab: DemandCategory =
       key === "pkwt" ? "PKWT" : key === "vokasi" ? "Vokasi" : inTab(tab) > 0 ? tab : inTab("PKWT") > 0 ? "PKWT" : "Vokasi";
     setTab(nextTab);
-    setMonth("");
     resetDetailFilters();
     setJenis(labels);
     detailRef.current?.scrollIntoView({ block: "start" });
@@ -440,7 +464,7 @@ export function DemandPageClient() {
     };
   }, [demands, divs, depts, empByNoreg, vokasiNoregs, scenarioBase]);
 
-  const monthLabel = month ? format(new Date(`${month}-01T00:00:00`), "MMMM yyyy") : "Semua bulan";
+  const monthLabel = showDone ? "Semua demand" : "Demand aktif";
 
   function exportReport() {
     import("xlsx").then((XLSX) => {
@@ -471,7 +495,7 @@ export function DemandPageClient() {
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, summarySheet, "Summary");
       XLSX.utils.book_append_sheet(wb, detailSheet, "Detail");
-      XLSX.writeFile(wb, `Demand-Report-${tab}-${month || "semua-bulan"}.xlsx`);
+      XLSX.writeFile(wb, `Demand-Report-${tab}-${showDone ? "semua" : "aktif"}.xlsx`);
     });
   }
 
@@ -484,8 +508,8 @@ export function DemandPageClient() {
         </p>
       </div>
 
-      <SectionHeading n={1} title="Ringkasan per Batch" subtitle="Demand yang belum terpenuhi sampai bulan ini (Vokasi dihitung mulai bulan berakhirnya). Klik tile untuk rincian." divider={false} />
-      <BatchTileRow categories={batchCategories} onShowInTable={showCategoryInTable} />
+      <SectionHeading n={1} title="Ringkasan per Batch" subtitle="Jumlah MP yang belum terpenuhi (belum diverifikasi) dari total demand sampai bulan ini. Vokasi dihitung mulai bulan berakhirnya. Klik tile untuk rincian." divider={false} />
+      <BatchTileRow categories={batchCategories} pendingLabel="belum terpenuhi" onShowInTable={showCategoryInTable} />
 
       {canReview && (
         <CollapsibleSection
@@ -610,22 +634,18 @@ export function DemandPageClient() {
 
         <Card
           title={`Detail Demand — ${monthLabel}`}
-          subtitle="Demand muncul H-4 minggu (hari kerja) sebelum Tiba di Shop."
+          subtitle="Semua demand yang masih berjalan dari bulan mana pun, urut dari Tiba di Shop terdekat. Selesai = sudah diterima shop atau No Replace."
           action={
             <div className="flex flex-wrap items-center justify-end gap-2">
-              <Select
-                value={month}
-                aria-label="Bulan demand"
-                onChange={(e) => setMonth(e.target.value)}
-                className="w-40"
-              >
-                <option value="">Semua bulan</option>
-                {monthOptions().map((m) => (
-                  <option key={m} value={m}>
-                    {format(new Date(`${m}-01T00:00:00`), "MMM yyyy")}
-                  </option>
-                ))}
-              </Select>
+              <label className="flex min-h-9 cursor-pointer items-center gap-2 rounded-lg px-2 text-xs font-medium text-slate-600 dark:text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={showDone}
+                  onChange={(e) => setShowDone(e.target.checked)}
+                  className="h-3.5 w-3.5 rounded border-slate-300 text-blue-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-blue-500"
+                />
+                Tampilkan yang sudah selesai
+              </label>
               <Button variant="secondary" size="sm" onClick={exportReport} disabled={filteredDemands.length === 0}>
                 Laporan Excel
               </Button>
@@ -694,7 +714,7 @@ export function DemandPageClient() {
             </div>
           ) : filteredDemands.length === 0 ? (
             monthDemands.length === 0 ? (
-              <EmptyState text={month ? `Tidak ada demand ${tab === "PKWT" ? "Kontrak" : "Vokasi"} di ${monthLabel}.` : "Belum ada demand."} />
+              <EmptyState text={`Tidak ada demand ${tab === "PKWT" ? "Kontrak" : "Vokasi"} yang ${showDone ? "tercatat" : "masih aktif"}.`} />
             ) : (
               <FilteredEmptyState onReset={resetDetailFilters} />
             )

@@ -2,6 +2,7 @@
 import { usePathname, useRouter } from "next/navigation";
 import { canAccessModule, type Role } from "@/lib/roles";
 import { BrandMark } from "@/components/ui/BrandMark";
+import { usePendingCounts } from "@/lib/usePendingCounts";
 
 const NAV = [
   { href: "/upload", label: "Upload Center" },
@@ -16,6 +17,13 @@ export function MobileNav({ role }: { role: Role }) {
   const pathname = usePathname();
   const router = useRouter();
   const nav = NAV.filter((item) => canAccessModule(role, item.href));
+  const pending = usePendingCounts();
+  const suffix = (href: string) =>
+    href === "/demand" && pending.demand > 0
+      ? ` (${pending.demand} belum terpenuhi)`
+      : href === "/supply" && pending.supply > 0
+        ? ` (${pending.supply} belum diutilize)`
+        : "";
   return (
     <div className="flex items-center gap-3 border-b border-slate-200 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-950 md:hidden">
       <BrandMark className="h-7 w-7 rounded-md" />
@@ -28,6 +36,7 @@ export function MobileNav({ role }: { role: Role }) {
         {nav.map((item) => (
           <option key={item.href} value={item.href}>
             {item.label}
+            {suffix(item.href)}
           </option>
         ))}
       </select>

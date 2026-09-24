@@ -17,6 +17,7 @@ import {
   valueMappingStore,
   demandStore,
   pkwtReviewStore,
+  utilPoolStore,
   activateSnapshot,
   clearAllData,
 } from "@/lib/repo";
@@ -514,6 +515,7 @@ export function UploadCenterClient() {
     useStoreReady(pkwtReviewStore),
     useStoreReady(demandStore),
     useStoreReady(vokasiStore),
+    useStoreReady(utilPoolStore),
   ].every(Boolean);
   const reviews = useStoreList(pkwtReviewStore);
   const [reviewRun, setReviewRun] = useState<PkwtReviewRun | null>(null);
@@ -528,6 +530,9 @@ export function UploadCenterClient() {
     if (!storesReady) return;
     generatePkwtReviews().then(setReviewRun);
     pruneStaleVokasiDemands();
+    // Vokasi uploaded while new demands were still being rejected (blank
+    // dates) never got theirs; idempotent, so safe on every open.
+    void ensureVokasiEndedDemands();
   }, [storesReady]);
 
   function activateAndRefresh(id: string) {
