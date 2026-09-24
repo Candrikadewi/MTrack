@@ -1,34 +1,15 @@
 "use client";
 import { useId, useState } from "react";
 import Link from "next/link";
-import { ArrowDown, ChevronDown } from "lucide-react";
-import { Badge, type Tone } from "@/components/ui/Badge";
+import { AlertCircle, ArrowDown, CheckCircle2, ChevronDown } from "lucide-react";
+import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/Table";
 
-export interface BatchSummary {
-  id: string;
-  label: string;
-  meta?: string;
-  count: number;
-  /** What `count` is out of (e.g. 30 left of 45), when known. */
-  total?: number;
-  tone?: Tone;
-  /** Where to edit/delete this batch — the list page that still owns that
-   * capability (e.g. /projects, /takt) now that there's no separate "Kelola"
-   * menu entry pointing at it. Omit when the batch has no such page. */
-  href?: string;
-}
+import type { BatchTileCategory, BatchTone } from "@/lib/engine/batches";
 
-export interface BatchTileCategory {
-  key: string;
-  label: string;
-  count: number;
-  total?: number;
-  tone: Tone;
-  batches: BatchSummary[];
-}
+export type { BatchSummary, BatchTileCategory } from "@/lib/engine/batches";
 
-const TONE_DOT: Record<Tone, string> = {
+const TONE_DOT: Record<BatchTone, string> = {
   slate: "bg-slate-400",
   blue: "bg-blue-500",
   green: "bg-emerald-500",
@@ -70,27 +51,38 @@ export function BatchTileRow({
               onClick={() => setExpandedKey(isActive ? null : cat.key)}
               aria-expanded={isActive}
               aria-controls={isActive ? panelId : undefined}
-              className={`flex min-h-11 items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-white px-3.5 py-3 text-left shadow-sm shadow-slate-200/60 transition-all duration-150 hover:-translate-y-0.5 hover:shadow-md dark:border-slate-800 dark:bg-slate-900 dark:shadow-none ${
-                isActive ? "ring-2 ring-blue-400/60" : ""
-              }`}
+              aria-label={
+                pendingLabel && cat.total !== undefined
+                  ? `${cat.label}: ${cat.count} dari ${cat.total} ${pendingLabel}`
+                  : undefined
+              }
+              className={`flex min-h-11 items-center justify-between gap-2 rounded-2xl border px-3.5 py-3 text-left shadow-sm transition-all duration-150 hover:-translate-y-0.5 hover:shadow-md dark:shadow-none ${
+                pendingLabel && cat.count > 0
+                  ? "border-amber-300 bg-amber-50 shadow-amber-200/50 dark:border-amber-500/40 dark:bg-amber-500/10"
+                  : "border-slate-200 bg-white shadow-slate-200/60 dark:border-slate-800 dark:bg-slate-900"
+              } ${isActive ? "ring-2 ring-blue-400/60" : ""}`}
             >
-              <div>
+              <div className="min-w-0">
                 <div className="flex items-center gap-1.5 text-xs font-medium text-slate-600 dark:text-slate-400">
                   <span aria-hidden className={`h-1.5 w-1.5 shrink-0 rounded-full ${TONE_DOT[cat.tone]}`} />
                   {cat.label}
                 </div>
-                <div
-                  className={`text-xl font-bold tabular-nums ${
-                    pendingLabel && cat.count > 0 ? "text-slate-900 dark:text-white" : "text-slate-800 dark:text-slate-100"
-                  }`}
-                >
-                  {cat.count}
-                </div>
-                {pendingLabel && (
-                  <div className="text-[11px] leading-tight text-slate-500 dark:text-slate-400">
-                    {pendingLabel}
-                    {cat.total !== undefined && <> · dari {cat.total}</>}
-                  </div>
+                {pendingLabel && cat.total !== undefined ? (
+                  <>
+                    <div className="mt-0.5 flex items-baseline gap-0.5 tabular-nums">
+                      <span
+                        className={`text-xl font-bold ${
+                          cat.count > 0 ? "text-amber-700 dark:text-amber-300" : "text-slate-800 dark:text-slate-100"
+                        }`}
+                      >
+                        {cat.count}
+                      </span>
+                      <span className="text-sm font-semibold text-slate-400 dark:text-slate-500">/{cat.total}</span>
+                    </div>
+                    <PendingNote count={cat.count} total={cat.total} pendingLabel={pendingLabel} />
+                  </>
+                ) : (
+                  <div className="text-xl font-bold tabular-nums text-slate-800 dark:text-slate-100">{cat.count}</div>
                 )}
               </div>
               <ChevronDown
@@ -127,6 +119,24 @@ export function BatchTileRow({
   );
 }
 
+/** Under each tile's number: a loud "still N to go" while anything is
+ * left, a quiet all-clear once it's done, nothing when there's no demand. */
+function PendingNote({ count, total, pendingLabel }: { count: number; total: number; pendingLabel: string }) {
+  if (total === 0) return <div className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">Belum ada</div>;
+  if (count === 0) {
+    return (
+      <div className="mt-0.5 inline-flex items-center gap-1 text-[11px] font-medium text-emerald-700 dark:text-emerald-400">
+        <CheckCircle2 size={11} aria-hidden /> Semua selesai
+      </div>
+    );
+  }
+  return (
+    <div className="mt-1 inline-flex items-center gap-1 rounded-full bg-amber-500 px-2 py-0.5 text-[11px] font-semibold text-white dark:bg-amber-500/90">
+      <AlertCircle size={11} aria-hidden /> {count} {pendingLabel}
+    </div>
+  );
+}
+
 function BatchBreakdown({ category }: { category: BatchTileCategory }) {
   const [showAll, setShowAll] = useState(false);
   if (category.batches.length === 0) {
@@ -156,9 +166,11 @@ function BatchBreakdown({ category }: { category: BatchTileCategory }) {
                 Kelola →
               </Link>
             )}
-            <Badge tone={b.tone ?? category.tone}>
-              {b.count}
-              {b.total !== undefined && <span className="font-normal opacity-70"> / {b.total}</span>}
+            <Badge tone={b.total !== undefined ? (b.count > 0 ? "amber" : "green") : (b.tone ?? category.tone)}>
+              <span className="tabular-nums">
+                {b.count}
+                {b.total !== undefined && <span className="font-normal opacity-70">/{b.total}</span>}
+              </span>
             </Badge>
           </div>
         </div>

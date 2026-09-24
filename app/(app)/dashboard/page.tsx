@@ -63,6 +63,7 @@ import {
   type MovementStatus,
 } from "@/lib/engine/dashboard";
 import { demandTargetDate, filterByDivDept } from "@/lib/engine/enrollment";
+import { buildDemandBatchCategories, buildSupplyBatchCategories, type BatchTileCategory } from "@/lib/engine/batches";
 import { computeVokasiStatus, demandVisibleDate } from "@/lib/engine/compute";
 import { LABOR_TYPES, isPermanenForRatio } from "@/lib/types";
 import { useRole } from "@/lib/RoleContext";
@@ -223,7 +224,15 @@ export default function DashboardPage() {
       </StickyOrgFilterBar>
 
       {/* 0. Action Needed */}
-      <ActionNeededBlock reviews={reviews} demands={demands} role={role} hasActiveFilter={activeOrgFilterCount > 0} />
+      <ActionNeededBlock
+        reviews={reviews}
+        demands={demands}
+        projects={projects}
+        taktCases={taktCases}
+        utilPool={utilPool}
+        role={role}
+        hasActiveFilter={activeOrgFilterCount > 0}
+      />
 
       <FullWidthTabs
         tabs={[
@@ -366,17 +375,35 @@ const ROLE_ACTION_KEYS: Record<Role, string[] | null> = {
   guest: [],
 };
 
+/** Which remaining-work summaries each role acts on: HR verifies demand
+ * candidates, Shop maps demand and utilizes supply, admin sees both. */
+const ROLE_PENDING: Record<Role, { demand: boolean; supply: boolean }> = {
+  admin: { demand: true, supply: true },
+  hr: { demand: true, supply: false },
+  shop: { demand: true, supply: true },
+  guest: { demand: false, supply: false },
+};
+
 function ActionNeededBlock({
   reviews,
   demands,
+  projects,
+  taktCases,
+  utilPool,
   role,
   hasActiveFilter,
 }: {
   reviews: PkwtReview[];
   demands: Demand[];
+  projects: Project[];
+  taktCases: TaktCase[];
+  utilPool: UtilPoolEntry[];
   role: Role;
   hasActiveFilter: boolean;
 }) {
+  const demandCategories = useMemo(() => buildDemandBatchCategories(demands, projects, taktCases), [demands, projects, taktCases]);
+  const supplyCategories = useMemo(() => buildSupplyBatchCategories(utilPool, taktCases), [utilPool, taktCases]);
+  const pendingFor = ROLE_PENDING[role];
   const reviewBatches = useMemo(() => reviewBatchesNeedingAction(reviews), [reviews]);
   const candidatePkwt = useMemo(() => candidateBatchesNeedingAction(demands, "PKWT"), [demands]);
   const candidateVokasi = useMemo(() => candidateBatchesNeedingAction(demands, "Vokasi"), [demands]);
@@ -393,7 +420,7 @@ function ActionNeededBlock({
   const allowedKeys = ROLE_ACTION_KEYS[role];
   const sections = allowedKeys === null ? allSections : allSections.filter((s) => allowedKeys.includes(s.key));
 
-  if (sections.length === 0) return null;
+  if (sections.length === 0 && !pendingFor.demand && !pendingFor.supply) return null;
 
   // Urgency should be scannable without reading every row: most-overdue
   // first, and the routine "nothing to do here" rows collapsed out of the
@@ -412,6 +439,16 @@ function ActionNeededBlock({
           : "Progres tiap tahap review, candidate mapping, dan shop confirmation — real-time."
       }
     >
+      {(pendingFor.demand || pendingFor.supply) && (
+        <div className={`mb-3 grid gap-2.5 ${pendingFor.demand && pendingFor.supply ? "md:grid-cols-2" : ""}`}>
+          {pendingFor.demand && (
+            <PendingWorkCard title="Demand belum terpenuhi" href="/demand" pendingLabel="belum terpenuhi" categories={demandCategories} />
+          )}
+          {pendingFor.supply && (
+            <PendingWorkCard title="Supply belum diutilize" href="/supply" pendingLabel="belum diutilize" categories={supplyCategories} />
+          )}
+        </div>
+      )}
       <div className="divide-y divide-slate-100 dark:divide-slate-800">
         {sortedActive.map((section) => (
           <ActionSummaryRow key={section.key} section={section} />
@@ -419,6 +456,74 @@ function ActionNeededBlock({
         {safe.length > 0 && <SafeSectionsRow sections={safe} />}
       </div>
     </Card>
+  );
+}
+
+/** Remaining MP out of the total, the same numbers and batch names as
+ * Ringkasan per Batch on the Demand / Supply page, highlighted while any
+ * is left. Lists the batches with the most left first. */
+function PendingWorkCard({
+  title,
+  href,
+  pendingLabel,
+  categories,
+}: {
+  title: string;
+  href: string;
+  pendingLabel: string;
+  categories: BatchTileCategory[];
+}) {
+  const left = categories.reduce((sum, c) => sum + c.count, 0);
+  const total = categories.reduce((sum, c) => sum + (c.total ?? 0), 0);
+  const batches = categories
+    .flatMap((c) => c.batches.map((b) => ({ ...b, key: `${c.key}:${b.id}`, label: c.key === "project" ? `Project ${b.label}` : b.label })))
+    .sort((a, b) => b.count - a.count);
+  const shown = batches.slice(0, 4);
+  const pending = left > 0;
+  return (
+    <Link
+      href={href}
+      className={`block rounded-2xl border p-3.5 transition-colors ${
+        pending
+          ? "border-amber-300 bg-amber-50 hover:bg-amber-100/70 dark:border-amber-500/40 dark:bg-amber-500/10 dark:hover:bg-amber-500/15"
+          : "border-slate-200 bg-white hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800/60"
+      }`}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-xs font-semibold text-slate-600 dark:text-slate-300">{title}</div>
+          <div className="mt-0.5 flex items-baseline gap-0.5 tabular-nums">
+            <span className={`text-2xl font-bold ${pending ? "text-amber-700 dark:text-amber-300" : "text-slate-800 dark:text-slate-100"}`}>
+              {left}
+            </span>
+            <span className="text-sm font-semibold text-slate-400 dark:text-slate-500">/{total}</span>
+          </div>
+        </div>
+        {pending ? (
+          <span className="inline-flex items-center gap-1 rounded-full bg-amber-500 px-2 py-0.5 text-[11px] font-semibold text-white">
+            {left} {pendingLabel}
+          </span>
+        ) : (
+          <Badge tone="green">{total > 0 ? "Semua selesai" : "Belum ada"}</Badge>
+        )}
+      </div>
+      {shown.length > 0 && (
+        <ul className="mt-2 space-y-1">
+          {shown.map((b) => (
+            <li key={b.key} className="flex items-center justify-between gap-2 text-xs">
+              <span className="truncate text-slate-700 dark:text-slate-200">{b.label}</span>
+              <span className="shrink-0 font-semibold tabular-nums text-amber-800 dark:text-amber-200">
+                {b.count}
+                {b.total !== undefined && <span className="font-normal text-slate-500 dark:text-slate-400">/{b.total}</span>}
+              </span>
+            </li>
+          ))}
+          {batches.length > shown.length && (
+            <li className="text-xs text-slate-500 dark:text-slate-400">+{batches.length - shown.length} batch lainnya</li>
+          )}
+        </ul>
+      )}
+    </Link>
   );
 }
 
