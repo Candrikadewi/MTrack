@@ -22,7 +22,7 @@ import { TaktUpModal } from "@/components/takt/TaktUpModal";
 import { Check, Circle } from "lucide-react";
 import { useStoreList, useStoreReady } from "@/lib/useStore";
 import { demandStore, pkwtReviewStore, projectStore, taktStore, utilPoolStore, vokasiStore, zparStore } from "@/lib/repo";
-import { fmtDate, sisaHari, demandVisibleDate, fulfillmentDeadline, supplyDemandStatus, computeVokasiStatus } from "@/lib/engine/compute";
+import { fmtDate, sisaHari, fulfillmentDeadline, supplyDemandStatus, computeVokasiStatus } from "@/lib/engine/compute";
 import {
   demandGranularStatus,
   demandStatusLabel,
@@ -264,6 +264,11 @@ function todayKey(): string {
   return format(new Date(), "yyyy-MM-dd");
 }
 
+/** Nothing left to do: received by the shop, or not being replaced. */
+function isDemandDone(d: Demand): boolean {
+  return Boolean(d.shop_confirmed_date) || d.replacement_status === "No Replace";
+}
+
 function whoOf(d: Demand): string {
   if (d.origin_type === "Project" || d.origin_type === "TaktUp") return `${d.outgoing_label} (${d.dept})`;
   return d.outgoing_nama || d.outgoing_noreg || d.dept;
@@ -356,7 +361,7 @@ export function DemandPageClient() {
 
   // ---- Detail dan Mapping Demand ----
   const [tab, setTab] = useSessionState<DemandCategory>("demand.detail.tab", "PKWT");
-  const [month, setMonth] = useSessionState<string>("demand.detail.month", currentMonthKey());
+  const [showDone, setShowDone] = useSessionState<boolean>("demand.detail.showDone", false);
   const [jenis, setJenis] = useSessionState<string[]>("demand.detail.jenis", []);
   const [divs, setDivs] = useSessionState<string[]>("demand.detail.divs", []);
   const [depts, setDepts] = useSessionState<string[]>("demand.detail.depts", []);
@@ -366,11 +371,13 @@ export function DemandPageClient() {
   const detailRef = useRef<HTMLElement>(null);
 
   const tabDemands = useMemo(() => demands.filter((d) => effectiveDemandCategory(d) === tab), [demands, tab]);
+  // Every active demand, whatever its month — a period filter could hide
+  // one that's still open in another month. Done (received by the shop, or
+  // No Replace) is hidden unless asked for; Vokasi counts from the month
+  // its batch ends.
   const monthDemands = useMemo(
-    // "Semua bulan" means everything active so far — a Vokasi ending months
-    // from now shows up once its month is picked, not in the all-months list.
-    () => (month ? tabDemands.filter((d) => demandVisibleDate(demandTargetDate(d)).slice(0, 7) === month) : tabDemands.filter((d) => isDemandDue(d))),
-    [tabDemands, month]
+    () => tabDemands.filter((d) => isDemandDue(d) && (showDone || !isDemandDone(d))),
+    [tabDemands, showDone]
   );
   const jenisOptions = useMemo(() => Array.from(new Set(monthDemands.map((d) => JENIS_LABEL[d.origin_type]))).sort(), [monthDemands]);
   const divOptions = useMemo(() => divisionsOfRows(monthDemands), [monthDemands]);
@@ -415,7 +422,6 @@ export function DemandPageClient() {
     const nextTab: DemandCategory =
       key === "pkwt" ? "PKWT" : key === "vokasi" ? "Vokasi" : inTab(tab) > 0 ? tab : inTab("PKWT") > 0 ? "PKWT" : "Vokasi";
     setTab(nextTab);
-    setMonth("");
     resetDetailFilters();
     setJenis(labels);
     detailRef.current?.scrollIntoView({ block: "start" });
@@ -458,7 +464,7 @@ export function DemandPageClient() {
     };
   }, [demands, divs, depts, empByNoreg, vokasiNoregs, scenarioBase]);
 
-  const monthLabel = month ? format(new Date(`${month}-01T00:00:00`), "MMMM yyyy") : "Semua bulan";
+  const monthLabel = showDone ? "Semua demand" : "Demand aktif";
 
   function exportReport() {
     import("xlsx").then((XLSX) => {
@@ -489,7 +495,7 @@ export function DemandPageClient() {
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, summarySheet, "Summary");
       XLSX.utils.book_append_sheet(wb, detailSheet, "Detail");
-      XLSX.writeFile(wb, `Demand-Report-${tab}-${month || "semua-bulan"}.xlsx`);
+      XLSX.writeFile(wb, `Demand-Report-${tab}-${showDone ? "semua" : "aktif"}.xlsx`);
     });
   }
 
@@ -628,22 +634,18 @@ export function DemandPageClient() {
 
         <Card
           title={`Detail Demand — ${monthLabel}`}
-          subtitle="Demand muncul H-4 minggu (hari kerja) sebelum Tiba di Shop."
+          subtitle="Semua demand yang masih berjalan dari bulan mana pun, urut dari Tiba di Shop terdekat. Selesai = sudah diterima shop atau No Replace."
           action={
             <div className="flex flex-wrap items-center justify-end gap-2">
-              <Select
-                value={month}
-                aria-label="Bulan demand"
-                onChange={(e) => setMonth(e.target.value)}
-                className="w-40"
-              >
-                <option value="">Semua bulan</option>
-                {monthOptions().map((m) => (
-                  <option key={m} value={m}>
-                    {format(new Date(`${m}-01T00:00:00`), "MMM yyyy")}
-                  </option>
-                ))}
-              </Select>
+              <label className="flex min-h-9 cursor-pointer items-center gap-2 rounded-lg px-2 text-xs font-medium text-slate-600 dark:text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={showDone}
+                  onChange={(e) => setShowDone(e.target.checked)}
+                  className="h-3.5 w-3.5 rounded border-slate-300 text-blue-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-blue-500"
+                />
+                Tampilkan yang sudah selesai
+              </label>
               <Button variant="secondary" size="sm" onClick={exportReport} disabled={filteredDemands.length === 0}>
                 Laporan Excel
               </Button>
@@ -712,7 +714,7 @@ export function DemandPageClient() {
             </div>
           ) : filteredDemands.length === 0 ? (
             monthDemands.length === 0 ? (
-              <EmptyState text={month ? `Tidak ada demand ${tab === "PKWT" ? "Kontrak" : "Vokasi"} di ${monthLabel}.` : "Belum ada demand."} />
+              <EmptyState text={`Tidak ada demand ${tab === "PKWT" ? "Kontrak" : "Vokasi"} yang ${showDone ? "tercatat" : "masih aktif"}.`} />
             ) : (
               <FilteredEmptyState onReset={resetDetailFilters} />
             )
