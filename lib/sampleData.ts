@@ -185,20 +185,18 @@ export function seedSampleData(): void {
   const anyDivision = DIRECTORATES.Manufacturing[0];
   createProject({
     name: "Project Alpha",
-    start_date: iso(subMonths(now(), 3)),
-    end_date: iso(addDays(now(), 20)),
+    sop_date: iso(addDays(now(), 30)),
     rows: [
-      { division: anyDivision.division, dept: anyDivision.depts[0], status_mp: "Vokasi", mp_role: "Proses", qty: 2, fulfill_date: iso(addDays(now(), 25)) },
-      { division: anyDivision.division, dept: anyDivision.depts[1], status_mp: "PKWT", mp_role: "Backup", qty: 1, fulfill_date: iso(addDays(now(), 30)) },
+      { division: anyDivision.division, dept: anyDivision.depts[0], status_mp: "Vokasi", mp_role: "Project", qty: 2, fulfill_date: iso(addDays(now(), 25)), release_date: iso(addMonths(now(), 12)), no_release: false },
+      { division: anyDivision.division, dept: anyDivision.depts[1], status_mp: "PKWT", mp_role: "Setting", qty: 1, fulfill_date: iso(addDays(now(), 30)), no_release: true },
     ],
   });
 
   const finishedProject = createProject({
     name: "Project Beta (selesai)",
-    start_date: iso(subMonths(now(), 6)),
-    end_date: iso(subMonths(now(), 1)),
+    sop_date: iso(subMonths(now(), 2)),
     rows: [
-      { division: anyDivision.division, dept: anyDivision.depts[0], status_mp: "Vokasi", mp_role: "Proses", qty: 1, fulfill_date: iso(subMonths(now(), 2)) },
+      { division: anyDivision.division, dept: anyDivision.depts[0], status_mp: "Vokasi", mp_role: "Project", qty: 1, fulfill_date: iso(subMonths(now(), 2)), release_date: iso(subMonths(now(), 1)), no_release: false },
     ],
   });
   const betaDemand = demandStore.list().find((d) => finishedProject.demand_ids.includes(d.id));

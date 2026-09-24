@@ -101,7 +101,7 @@ function ProjectCard({
               <Badge tone={statusTone(p.status)}>{p.status}</Badge>
             </div>
             <div className="text-xs text-slate-500">
-              {fmtDate(p.start_date)} - {fmtDate(p.end_date)} · Supplied {supplied}/{needed}
+              SOP {fmtDate(p.start_date)} · Supplied {supplied}/{needed}
             </div>
           </div>
         </Link>

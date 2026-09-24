@@ -1,5 +1,5 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { FullWidthTabs } from "@/components/ui/Tabs";
@@ -15,9 +15,9 @@ import { KaizenModal } from "@/components/util-pool/KaizenModal";
 import { TaktDownModal } from "@/components/takt/TaktDownModal";
 import { useStoreList, useStoreReady } from "@/lib/useStore";
 import { pushToast } from "@/lib/toast";
-import { taktStore, utilPoolStore, zparStore } from "@/lib/repo";
+import { demandStore, projectStore, taktStore, utilPoolStore, vokasiStore, zparStore } from "@/lib/repo";
 import { contractRemainingLabel, contractUrgency, fmtDate, poolLeadTimeDays } from "@/lib/engine/compute";
-import { naturalRelease } from "@/lib/engine/actions";
+import { autoProjectFinishCheck, naturalRelease } from "@/lib/engine/actions";
 import { useRole } from "@/lib/RoleContext";
 import { useSessionState } from "@/lib/useSessionState";
 import { kaizenLaborGroupOf, type TaktCase, type UtilPoolEntry, type UtilPoolSource } from "@/lib/types";
@@ -110,6 +110,16 @@ export function SupplyPageClient() {
   const [taktDownOpen, setTaktDownOpen] = useState(false);
   const poolList = useStoreList(utilPoolStore);
   const poolReady = useStoreReady(utilPoolStore);
+  // Admin only: project rows whose release date has come put their MP into
+  // the pool as MP Excess (see autoProjectFinishCheck).
+  const projectsReady = useStoreReady(projectStore);
+  const demandsReady = useStoreReady(demandStore);
+  const vokasiReady = useStoreReady(vokasiStore);
+  const zparReady = useStoreReady(zparStore);
+  const releaseInputsReady = poolReady && projectsReady && demandsReady && vokasiReady && zparReady;
+  useEffect(() => {
+    if (role === "admin" && releaseInputsReady) autoProjectFinishCheck();
+  }, [role, releaseInputsReady]);
   // Copy before sorting: list() hands back the store's live cache, and an
   // in-place sort would reshuffle it for every other reader mid-render.
   const entries = useMemo(

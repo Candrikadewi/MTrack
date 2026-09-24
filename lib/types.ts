@@ -313,12 +313,38 @@ export interface ProjectMpNeedRow {
   /** Demands expanded from this row (stored inside projects.rows). Older
    * projects don't have it; see projectRowOfDemand for the fallback. */
   demand_ids?: string[];
+  /** When this row's MP is released (holders still under contract become MP
+   * Excess). no_release: the seat stays and keeps being refilled like
+   * regular enrollment. Rows from before per-row release have neither; see
+   * rowReleaseDate. */
+  release_date?: string;
+  no_release?: boolean;
+  /** Set once the release has been processed (autoProjectFinishCheck). */
+  released?: boolean;
+}
+
+/** A row's release date, or null when it is never released. Older rows
+ * fall back to the project end for MP Project/Backup. */
+export function rowReleaseDate(row: ProjectMpNeedRow, project: Pick<Project, "end_date">): string | null {
+  if (row.no_release) return null;
+  if (row.release_date) return row.release_date;
+  if (row.no_release === undefined && releasedAtProjectEnd(row.mp_role)) return project.end_date || null;
+  return null;
+}
+
+/** projects.end_date is not null in the database: the latest release date,
+ * or the SOP date when every row is No Release. */
+export function projectEndDate(rows: Pick<ProjectMpNeedRow, "release_date" | "no_release">[], sopDate: string): string {
+  const dates = rows.filter((r) => !r.no_release && r.release_date).map((r) => r.release_date as string);
+  return dates.length ? dates.sort().at(-1)! : sopDate;
 }
 
 export interface Project {
   id: string;
   name: string;
+  /** Tanggal SOP of the project. */
   start_date: string;
+  /** Derived: the latest row release date (see projectEndDate). */
   end_date: string;
   status: ProjectStatus;
   rows: ProjectMpNeedRow[];

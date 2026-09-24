@@ -1434,7 +1434,7 @@ function ProjectSummaryBlock({ projects, demands }: { projects: Project[]; deman
                 <div>
                   <div className="font-medium text-slate-800 dark:text-slate-100">{p.name}</div>
                   <div className="text-xs text-slate-500">
-                    Kebutuhan: {needed} orang · selesai {p.end_date}
+                    Kebutuhan: {needed} orang · SOP {p.start_date}
                   </div>
                 </div>
                 {gap === 0 ? (

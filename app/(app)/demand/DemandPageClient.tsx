@@ -42,6 +42,7 @@ import {
   setDemandNoReplace,
   setDemandReplacementByNoreg,
   syncProjectSeatDemands,
+  autoProjectFinishCheck,
 } from "@/lib/engine/actions";
 import { pushToast } from "@/lib/toast";
 import { useRole } from "@/lib/RoleContext";
@@ -185,7 +186,7 @@ function buildDemandBatchCategories(
     return {
       id: ref,
       label: p?.name ?? "Project",
-      meta: p ? `${fmtDate(p.start_date)} — ${fmtDate(p.end_date)}` : undefined,
+      meta: p ? `SOP ${fmtDate(p.start_date)}` : undefined,
       count: items.length,
       href: "/projects",
     };
@@ -279,12 +280,19 @@ export function DemandPageClient() {
   const empByNoreg = useMemo(() => new Map(employees.map((e) => [e.noreg, e])), [employees]);
   const vokasiNoregs = useMemo(() => new Set(vokasi.map((v) => v.noreg)), [vokasi]);
 
-  // Admin only (the fixes go through admin-scoped writes): bring project
-  // seats' replacement demands in line with each project's end date.
+  // Admin only (the fixes go through admin-scoped writes): process project
+  // releases that are due and bring project seats' replacement demands in
+  // line with each row's release date.
   const projectsReady = useStoreReady(projectStore);
+  const poolReady = useStoreReady(utilPoolStore);
+  const vokasiReady = useStoreReady(vokasiStore);
+  const zparReady = useStoreReady(zparStore);
+  const releaseInputsReady = demandsReady && projectsReady && poolReady && vokasiReady && zparReady;
   useEffect(() => {
-    if (isAdmin && demandsReady && projectsReady) syncProjectSeatDemands();
-  }, [isAdmin, demandsReady, projectsReady]);
+    if (!isAdmin || !releaseInputsReady) return;
+    autoProjectFinishCheck();
+    syncProjectSeatDemands();
+  }, [isAdmin, releaseInputsReady]);
 
   const batchCategories = useMemo(() => buildDemandBatchCategories(demands, projects, taktCases), [demands, projects, taktCases]);
 

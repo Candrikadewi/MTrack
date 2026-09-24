@@ -74,7 +74,7 @@ export function ProjectDetailPageClient({ id }: { id: string }) {
           <Badge tone={statusTone(project.status)}>{project.status}</Badge>
         </div>
         <p className="text-sm text-slate-500 dark:text-slate-400">
-          {fmtDate(project.start_date)} - {fmtDate(project.end_date)} · Supplied {supplied}/{needed}
+          SOP {fmtDate(project.start_date)} · Supplied {supplied}/{needed}
         </p>
       </div>
 

@@ -6,9 +6,15 @@ import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { TableWrap, Th, Td } from "@/components/ui/Table";
 import { CompositionRowsEditor, emptyCompositionRow, type CompositionRow } from "@/components/takt/CompositionRowsEditor";
-import { addProjectRow, createProject, increaseProjectRowQty, updateProjectDetails } from "@/lib/engine/actions";
+import {
+  addProjectRow,
+  createProject,
+  increaseProjectRowQty,
+  updateProjectDetails,
+  updateProjectRowRelease,
+} from "@/lib/engine/actions";
 import { fmtDate, projectFillCount } from "@/lib/engine/compute";
-import { CONTRACT_MONTHS, mpRoleLabel, releasedAtProjectEnd, type Project, type ProjectMpNeedRow } from "@/lib/types";
+import { CONTRACT_MONTHS, mpRoleLabel, rowReleaseDate, type Project, type ProjectMpNeedRow } from "@/lib/types";
 
 function toNeedRow(row: CompositionRow): Omit<ProjectMpNeedRow, "id"> {
   return {
@@ -18,10 +24,13 @@ function toNeedRow(row: CompositionRow): Omit<ProjectMpNeedRow, "id"> {
     mp_role: row.mp_role ?? "Project",
     qty: row.qty,
     fulfill_date: row.date,
+    release_date: row.noRelease ? "" : row.releaseDate ?? "",
+    no_release: Boolean(row.noRelease),
   };
 }
 
-function fromNeedRow(row: ProjectMpNeedRow): CompositionRow {
+function fromNeedRow(row: ProjectMpNeedRow, project: Project): CompositionRow {
+  const release = rowReleaseDate(row, project);
   return {
     id: row.id,
     division: row.division,
@@ -30,20 +39,33 @@ function fromNeedRow(row: ProjectMpNeedRow): CompositionRow {
     mp_role: row.mp_role,
     qty: row.qty,
     date: row.fulfill_date,
+    releaseDate: release ?? "",
+    noRelease: release === null,
   };
 }
 
-/** "2x · 6 orang" — how many times one seat of this row is filled before the
- * project ends (see projectFillCount), and the total people across its qty. */
-function fillLabel(row: CompositionRow, startDate: string, endDate: string): string {
-  const count = projectFillCount(row.status_mp, row.date || startDate, endDate);
-  if (count === null) return row.status_mp === "Permanen" ? "1x (tanpa kontrak)" : "—";
-  const cycle = CONTRACT_MONTHS[row.status_mp];
-  return `${count}x · tiap ${cycle} bln${row.qty > 1 ? ` · ${count * row.qty} orang` : ""}`;
+/** New rows start as MP Project, which is released on a date. */
+function newProjectRow(patch: Partial<CompositionRow> = {}): CompositionRow {
+  return emptyCompositionRow({ mp_role: "Project", noRelease: false, releaseDate: "", ...patch });
 }
 
-function afterProjectLabel(row: CompositionRow): string {
-  return releasedAtProjectEnd(row.mp_role) ? "Dirilis → MP Excess bila kontrak masih ada" : "Tetap di shop";
+/** "2x · tiap 6 bln · 6 orang" — how many times one seat of this row is
+ * filled between its fulfilment and release (see projectFillCount), and the
+ * total people across its qty. No Release rows keep going as regular
+ * enrollment. */
+function fillLabel(row: CompositionRow): string {
+  if (row.noRelease) return "Terus · reguler";
+  const count = projectFillCount(row.status_mp, row.date, row.releaseDate ?? "");
+  if (count === null) return row.status_mp === "Permanen" ? "1x (tanpa kontrak)" : "—";
+  return `${count}x · tiap ${CONTRACT_MONTHS[row.status_mp]} bln${row.qty > 1 ? ` · ${count * row.qty} orang` : ""}`;
+}
+
+function rowProblem(row: CompositionRow): string | null {
+  if (!row.date) return "Tanggal Pemenuhan belum diisi";
+  if (row.noRelease) return null;
+  if (!row.releaseDate) return "Tanggal Release belum diisi (atau centang No Release)";
+  if (row.releaseDate <= row.date) return "Tanggal Release harus setelah Tanggal Pemenuhan";
+  return null;
 }
 
 /**
@@ -56,45 +78,54 @@ export function NewProjectModal({ open, onClose, project }: { open: boolean; onC
   const isEdit = !!project;
 
   const [name, setName] = useState(project?.name ?? "");
-  const [startDate, setStartDate] = useState(project?.start_date ?? "");
-  const [endDate, setEndDate] = useState(project?.end_date ?? "");
+  const [sopDate, setSopDate] = useState(project?.start_date ?? "");
   const [rows, setRows] = useState<CompositionRow[]>(
-    project ? project.rows.map(fromNeedRow) : [emptyCompositionRow()]
+    project ? project.rows.map((r) => fromNeedRow(r, project)) : [newProjectRow()]
   );
   const [step, setStep] = useState<"form" | "preview">("form");
+  const [showErrors, setShowErrors] = useState(false);
 
   // Rows that already existed when the project loaded can only have their
-  // qty increased — every other field is locked (see CompositionRowsEditor)
-  // so demand records that may already be Fulfilled never get reshuffled.
-  const originalQtyById = new Map((project?.rows ?? []).map((r) => [r.id, r.qty]));
-  const isRowLocked = (row: CompositionRow) => originalQtyById.has(row.id);
-  const minQtyFor = (row: CompositionRow) => originalQtyById.get(row.id) ?? 1;
+  // qty increased and their release changed — every other field is locked
+  // (see CompositionRowsEditor) so demand records that may already be
+  // Fulfilled never get reshuffled. A release that already happened is
+  // locked too.
+  const originalById = new Map((project?.rows ?? []).map((r) => [r.id, r]));
+  const isRowLocked = (row: CompositionRow) => originalById.has(row.id);
+  const isReleaseLocked = (row: CompositionRow) => Boolean(originalById.get(row.id)?.released);
+  const minQtyFor = (row: CompositionRow) => originalById.get(row.id)?.qty ?? 1;
 
-  function validRows() {
-    return rows.filter((r) => r.division && r.dept && r.qty > 0);
-  }
+  const validRows = rows.filter((r) => r.division && r.dept && r.qty > 0);
+  const problems = validRows
+    .map((r) => ({ row: r, problem: rowProblem(r) }))
+    .filter((p): p is { row: CompositionRow; problem: string } => p.problem !== null);
+  const headerMissing = !name.trim() || !sopDate;
+  const blocked = headerMissing || validRows.length === 0 || problems.length > 0;
 
   function goToPreview() {
-    if (!name || !startDate || !endDate || endDate < startDate) return;
-    if (validRows().length === 0) return;
-    setStep("preview");
+    setShowErrors(true);
+    if (!blocked) setStep("preview");
   }
 
   function register() {
-    createProject({ name, start_date: startDate, end_date: endDate, rows: validRows().map(toNeedRow) });
+    createProject({ name: name.trim(), sop_date: sopDate, rows: validRows.map(toNeedRow) });
     onClose();
   }
 
   function saveEdits() {
     if (!project) return;
-    updateProjectDetails(project.id, { name, start_date: startDate, end_date: endDate });
+    setShowErrors(true);
+    if (blocked) return;
+    updateProjectDetails(project.id, { name: name.trim(), sop_date: sopDate });
     for (const row of rows) {
-      const originalQty = originalQtyById.get(row.id);
-      if (originalQty === undefined) {
+      const original = originalById.get(row.id);
+      if (!original) {
         if (row.division && row.dept && row.qty > 0) addProjectRow(project.id, toNeedRow(row));
-      } else if (row.qty > originalQty) {
-        increaseProjectRowQty(project.id, row.id, row.qty);
+        continue;
       }
+      if (row.qty > original.qty) increaseProjectRowQty(project.id, row.id, row.qty);
+      const { release_date = "", no_release = false } = toNeedRow(row);
+      updateProjectRowRelease(project.id, row.id, { release_date, no_release });
     }
     onClose();
   }
@@ -102,46 +133,56 @@ export function NewProjectModal({ open, onClose, project }: { open: boolean; onC
   const title = isEdit ? `Edit Project: ${project!.name}` : step === "preview" ? "Preview Project" : "+ New Project";
 
   return (
-    <Modal open={open} onClose={onClose} title={title} width="max-w-5xl">
+    <Modal open={open} onClose={onClose} title={title} width="max-w-6xl">
       {step === "form" || isEdit ? (
         <div className="space-y-4">
-          <div className="grid grid-cols-3 gap-4">
-            <Field label="Nama Project">
-              <Input value={name} onChange={(e) => setName(e.target.value)} />
+          <div className="grid gap-4 sm:grid-cols-[2fr_1fr]">
+            <Field label="Nama Projek">
+              <Input value={name} onChange={(e) => setName(e.target.value)} data-autofocus />
             </Field>
-            <Field label="Tanggal Mulai">
-              <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-            </Field>
-            <Field label="Tanggal Selesai">
-              <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+            <Field label="Tanggal SOP">
+              <Input type="date" value={sopDate} onChange={(e) => setSopDate(e.target.value)} />
             </Field>
           </div>
-          <p className="-mt-1 text-xs text-slate-500 dark:text-slate-400">
-            Tanggal selesai menentukan berapa kali tiap kursi MP harus diisi (mis. projek 1 tahun dengan Vokasi = 2 kali). Saat
-            projek selesai, <b className="font-semibold text-slate-600 dark:text-slate-300">MP Project</b> dan{" "}
-            <b className="font-semibold text-slate-600 dark:text-slate-300">MP Backup</b> yang kontraknya masih ada masuk Supply Pool
-            sebagai MP Excess; <b className="font-semibold text-slate-600 dark:text-slate-300">MP Setting</b> tetap di shop.
-            {endDate && startDate && endDate < startDate && (
-              <span className="mt-1 block font-medium text-red-600 dark:text-red-400">Tanggal selesai harus setelah tanggal mulai.</span>
-            )}
-          </p>
 
           <div>
-            <h4 className="mb-2 text-xs font-semibold text-slate-500">Kebutuhan MP</h4>
+            <h4 className="mb-1 text-xs font-semibold text-slate-500">Komposisi MP</h4>
+            <p className="mb-2 text-xs text-slate-500 dark:text-slate-400">
+              Tiap baris punya tanggal release sendiri. Pada tanggal itu, MP yang kontraknya masih ada masuk Supply Pool sebagai MP
+              Excess, dan kontrak yang habis setelahnya tidak diganti. Centang <b className="font-semibold">No Release</b> bila MP
+              tetap di shop: kebutuhannya terus dipenuhi seperti regular enrollment. MP Setting otomatis No Release.
+            </p>
             <CompositionRowsEditor
               rows={rows}
               onChange={setRows}
               dateLabel="Tanggal Pemenuhan"
               withRole
+              withRelease
               isRowLocked={isRowLocked}
+              isReleaseLocked={isReleaseLocked}
               minQtyFor={minQtyFor}
             />
             {isEdit && (
-              <p className="mt-2 text-xs text-slate-400">
-                Baris yang sudah terdaftar hanya bisa ditambah qty-nya (tidak bisa dikurangi/dihapus) agar data demand yang sudah fulfilled tidak hilang.
+              <p className="mt-2 text-xs text-slate-500">
+                Baris yang sudah terdaftar hanya bisa ditambah qty-nya dan diubah tanggal release-nya (sebelum rilis terjadi), agar
+                data demand yang sudah fulfilled tidak hilang.
               </p>
             )}
           </div>
+
+          {showErrors && (headerMissing || validRows.length === 0 || problems.length > 0) && (
+            <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-800 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200">
+              <ul className="list-disc space-y-0.5 pl-4">
+                {headerMissing && <li>Isi Nama Projek dan Tanggal SOP.</li>}
+                {validRows.length === 0 && <li>Tambahkan minimal satu baris MP (divisi, department, qty).</li>}
+                {problems.map(({ row, problem }) => (
+                  <li key={row.id}>
+                    {row.dept} · {row.status_mp}: {problem}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="secondary" onClick={onClose}>
@@ -159,9 +200,7 @@ export function NewProjectModal({ open, onClose, project }: { open: boolean; onC
               <h3 className="font-semibold text-slate-800 dark:text-slate-100">{name}</h3>
               <Badge tone="blue">Ongoing</Badge>
             </div>
-            <div className="text-xs text-slate-500">
-              {fmtDate(startDate)} - {fmtDate(endDate)}
-            </div>
+            <div className="text-xs text-slate-500">SOP {fmtDate(sopDate)}</div>
           </div>
 
           <TableWrap>
@@ -173,31 +212,28 @@ export function NewProjectModal({ open, onClose, project }: { open: boolean; onC
                 <Th>Jenis MP</Th>
                 <Th>Qty</Th>
                 <Th>Tanggal Pemenuhan</Th>
-                <Th>Pengisian selama projek</Th>
-                <Th>Setelah projek selesai</Th>
+                <Th>Tanggal Release</Th>
+                <Th>Pengisian</Th>
               </tr>
             </thead>
             <tbody>
-              {validRows().map((r, i) => (
-                <tr key={i}>
+              {validRows.map((r) => (
+                <tr key={r.id}>
                   <Td>{r.division}</Td>
                   <Td>{r.dept}</Td>
                   <Td>{r.status_mp}</Td>
                   <Td>{mpRoleLabel(r.mp_role)}</Td>
                   <Td>{r.qty}</Td>
                   <Td>{fmtDate(r.date)}</Td>
-                  <Td className="whitespace-nowrap">{fillLabel(r, startDate, endDate)}</Td>
-                  <Td>
-                    <Badge tone={releasedAtProjectEnd(r.mp_role) ? "amber" : "green"}>{afterProjectLabel(r)}</Badge>
-                  </Td>
+                  <Td>{r.noRelease ? <Badge tone="green">No Release · reguler</Badge> : fmtDate(r.releaseDate)}</Td>
+                  <Td className="whitespace-nowrap">{fillLabel(r)}</Td>
                 </tr>
               ))}
             </tbody>
           </TableWrap>
-          <p className="text-xs text-slate-400">
-            Total kebutuhan awal: {validRows().reduce((sum, r) => sum + r.qty, 0)} orang. Demand awal langsung dibuat begitu di-register;
-            demand penggantian muncul sendiri saat kontrak pengisinya habis sebelum projek selesai (berlabel nama projek). Kontrak yang
-            habis setelah projek selesai tidak diganti untuk MP Project/Backup.
+          <p className="text-xs text-slate-500">
+            Total kebutuhan awal: {validRows.reduce((sum, r) => sum + r.qty, 0)} orang. Demand awal langsung dibuat begitu
+            di-register; demand pengganti muncul sendiri saat kontrak pengisinya habis sebelum tanggal release (berlabel nama projek).
           </p>
 
           <div className="flex justify-end gap-2 pt-2">

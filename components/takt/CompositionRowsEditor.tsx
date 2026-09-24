@@ -18,6 +18,10 @@ export interface CompositionRow {
   date: string;
   /** Kaizen only — which improvement activity released this row. */
   activity?: string;
+  /** Project only — when this row's MP is released, or noRelease when the
+   * seat stays for good (it keeps being refilled like regular enrollment). */
+  releaseDate?: string;
+  noRelease?: boolean;
 }
 
 export function emptyCompositionRow(patch: Partial<CompositionRow> = {}): CompositionRow {
@@ -81,7 +85,9 @@ export function CompositionRowsEditor({
   laborTypeFilter,
   withRole = false,
   withActivity = false,
+  withRelease = false,
   isRowLocked,
+  isReleaseLocked,
   minQtyFor,
 }: {
   rows: CompositionRow[];
@@ -93,8 +99,13 @@ export function CompositionRowsEditor({
    * employee of a matching ZPAR labor_type — a single code (Takt Down: "A")
    * or a predicate (Kaizen: its labor group). */
   laborTypeFilter?: string | ((laborType: string) => boolean);
-  /** Shows the MP Role (Proses/Backup) select — Project only. */
+  /** Shows the Jenis MP select — Project only. */
   withRole?: boolean;
+  /** Shows the Tanggal Release / No Release control — Project only.
+   * Picking MP Setting defaults it to No Release, MP Project/Backup to a date. */
+  withRelease?: boolean;
+  /** Release stays editable on locked rows until the release has happened. */
+  isReleaseLocked?: (row: CompositionRow) => boolean;
   /** Shows a per-row Activity field — Kaizen only. New rows copy the
    * activity and date of the row they're added next to. */
   withActivity?: boolean;
@@ -198,7 +209,10 @@ export function CompositionRowsEditor({
                             <Select
                               value={row.mp_role === "Proses" ? "Project" : row.mp_role}
                               disabled={locked}
-                              onChange={(e) => update(row.id, { mp_role: e.target.value as MpRole })}
+                              onChange={(e) => {
+                                const mp_role = e.target.value as MpRole;
+                                update(row.id, withRelease ? { mp_role, noRelease: mp_role === "Setting" } : { mp_role });
+                              }}
                             >
                               {MP_ROLE_OPTIONS.map((o) => (
                                 <option key={o.value} value={o.value}>
@@ -240,6 +254,13 @@ export function CompositionRowsEditor({
                               onChange={(e) => update(row.id, { date: e.target.value })}
                             />
                           </div>
+                        )}
+                        {withRelease && (
+                          <ReleaseField
+                            row={row}
+                            disabled={isReleaseLocked?.(row) ?? false}
+                            onChange={(patch) => update(row.id, patch)}
+                          />
                         )}
                         {locked ? (
                           <span className="mb-1.5 text-[10px] text-slate-400">qty awal: {minQtyFor?.(row)}</span>
@@ -285,6 +306,54 @@ export function CompositionRowsEditor({
       >
         + Divisi
       </button>
+    </div>
+  );
+}
+
+/** Tanggal Release with a "No Release" switch beside it. No Release swaps
+ * the date for a note, so it reads as a decision rather than a blank date. */
+function ReleaseField({
+  row,
+  disabled,
+  onChange,
+}: {
+  row: CompositionRow;
+  disabled: boolean;
+  onChange: (patch: Partial<CompositionRow>) => void;
+}) {
+  const noRelease = Boolean(row.noRelease);
+  const invalid = !noRelease && Boolean(row.releaseDate && row.date && row.releaseDate <= row.date);
+  return (
+    <div className="min-w-[230px]">
+      <span className="mb-0.5 block text-[10px] font-medium text-slate-500 dark:text-slate-400">Tanggal Release</span>
+      <div className="flex items-center gap-2">
+        {noRelease ? (
+          <div className="flex h-[38px] flex-1 items-center rounded-xl border border-dashed border-emerald-300 bg-emerald-50/70 px-2.5 text-xs font-medium text-emerald-800 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-300">
+            Tidak dirilis · jadi reguler
+          </div>
+        ) : (
+          <Input
+            type="date"
+            disabled={disabled}
+            value={row.releaseDate ?? ""}
+            aria-label="Tanggal Release"
+            aria-invalid={invalid || undefined}
+            className={`flex-1 ${invalid ? "border-red-400 dark:border-red-500" : ""}`}
+            onChange={(e) => onChange({ releaseDate: e.target.value })}
+          />
+        )}
+        <label className="flex shrink-0 cursor-pointer items-center gap-1 text-[11px] font-medium text-slate-600 dark:text-slate-300">
+          <input
+            type="checkbox"
+            disabled={disabled}
+            checked={noRelease}
+            onChange={(e) => onChange({ noRelease: e.target.checked })}
+            className="h-3.5 w-3.5 rounded border-slate-300 text-emerald-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-blue-500"
+          />
+          No Release
+        </label>
+      </div>
+      {invalid && <span className="mt-0.5 block text-[10px] text-red-600 dark:text-red-400">Harus setelah tanggal pemenuhan</span>}
     </div>
   );
 }

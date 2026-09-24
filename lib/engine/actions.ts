@@ -17,7 +17,7 @@ import {
 import { createClient } from "../supabase/client";
 import { pushToast } from "../toast";
 import { computeFsStatus, computeReviewDate, sisaHari, today } from "./compute";
-import { KONTRAK_REVIEW_STATUSES, isPermanenForRatio, releasedAtProjectEnd } from "../types";
+import { KONTRAK_REVIEW_STATUSES, isPermanenForRatio, projectEndDate, rowReleaseDate } from "../types";
 import type {
   Demand,
   DemandCategory,
@@ -608,17 +608,18 @@ export function estimateContractEnd(noreg: string, type: MpStatusKategori): stri
   return null;
 }
 
+/** Registers a project from its name, Tanggal SOP and MP need-rows. Each
+ * row carries its own release (date or No Release); end_date is derived. */
 export function createProject(input: {
   name: string;
-  start_date: string;
-  end_date: string;
+  sop_date: string;
   rows: Omit<ProjectMpNeedRow, "id">[];
 }): Project {
   const project: Project = {
     id: genId("project"),
     name: input.name,
-    start_date: input.start_date,
-    end_date: input.end_date,
+    start_date: input.sop_date,
+    end_date: projectEndDate(input.rows, input.sop_date),
     status: "Ongoing",
     rows: input.rows.map((r) => ({ ...r, id: genId("row") })),
     demand_ids: [],
@@ -659,36 +660,34 @@ export function projectSeatOccupants(seat: Demand, demands: Demand[] = demandSto
   return chain;
 }
 
-const projectEndReason = (project: Project) => `Projek ${project.name} selesai ${project.end_date}`;
 const pendingProjectNoReplace = new Set<string>();
 
-/** Keeps the replacement demands of project seats in line with the
- * project's end date. When a Vokasi holding a seat ends before the project
- * does, their Vokasi Ended demand is the seat's next fill (labelled with
- * the project). When they end on/after the project's end, an MP Project or
- * MP Backup seat is not refilled, so that demand becomes No Replace. MP
- * Setting seats keep the normal cycle. Idempotent; call when demands or
- * projects may have changed. */
+/** Keeps the replacement demands of project seats in line with each row's
+ * release. When a Vokasi holding a seat ends before the row's release date,
+ * their Vokasi Ended demand is the seat's next fill (labelled with the
+ * project). When they end on/after it, the seat is not refilled, so that
+ * demand becomes No Replace. No Release rows keep the regular cycle.
+ * Idempotent; call when demands or projects may have changed. */
 export function syncProjectSeatDemands(): void {
   const demands = demandStore.list();
   for (const project of projectStore.list()) {
     const label = `Project ${project.name}`;
     for (const seat of demands.filter((d) => d.origin_type === "Project" && d.origin_ref === project.id)) {
       const row = projectRowOfDemand(project, seat);
+      const releaseDate = row ? rowReleaseDate(row, project) : null;
       for (const holder of projectSeatOccupants(seat, demands)) {
         const next = demands.find((d) => d.origin_type === "VokasiEnded" && d.outgoing_noreg === holder.replacement_noreg);
         if (!next) continue;
         if (!next.outgoing_label) demandStore.update(next.id, { outgoing_label: label });
-        const endsWithProject = next.tgl_ended_outgoing >= project.end_date;
         if (
-          endsWithProject &&
-          releasedAtProjectEnd(row?.mp_role) &&
+          releaseDate &&
+          next.tgl_ended_outgoing >= releaseDate &&
           next.replacement_status !== "No Replace" &&
           !next.fulfillment_confirmed_date &&
           !pendingProjectNoReplace.has(next.id)
         ) {
           pendingProjectNoReplace.add(next.id);
-          setDemandNoReplace(next.id, projectEndReason(project));
+          setDemandNoReplace(next.id, `Rilis projek ${project.name} ${releaseDate}`);
         }
       }
     }
@@ -699,14 +698,31 @@ export function projectSuppliedCount(project: Project): number {
   return demandStore.list().filter((d) => project.demand_ids.includes(d.id) && d.status === "Fulfilled").length;
 }
 
-/** Edit-after-registration: name/dates only — rows/demands are handled by
- * addProjectRow / increaseProjectRowQty below, which never delete or shrink
- * existing demand records (only additive changes are safe post-registration). */
-export function updateProjectDetails(
-  projectId: string,
-  input: { name?: string; start_date?: string; end_date?: string }
-): void {
-  projectStore.update(projectId, input);
+/** Edit-after-registration: name/Tanggal SOP only — rows/demands are handled
+ * by addProjectRow / increaseProjectRowQty / updateProjectRowRelease below,
+ * which never delete or shrink existing demand records (only additive
+ * changes are safe post-registration). */
+export function updateProjectDetails(projectId: string, input: { name?: string; sop_date?: string }): void {
+  const project = projectStore.get(projectId);
+  if (!project) return;
+  const sop = input.sop_date ?? project.start_date;
+  projectStore.update(projectId, {
+    ...(input.name !== undefined ? { name: input.name } : {}),
+    start_date: sop,
+    end_date: projectEndDate(project.rows, sop),
+  });
+}
+
+/** Changes a registered row's release (date or No Release) until it has
+ * actually been released, then re-syncs its seats' replacement demands. */
+export function updateProjectRowRelease(projectId: string, rowId: string, release: { release_date: string; no_release: boolean }): void {
+  const project = projectStore.get(projectId);
+  const row = project?.rows.find((r) => r.id === rowId);
+  if (!project || !row || row.released) return;
+  if (row.no_release === release.no_release && (row.release_date ?? "") === release.release_date) return;
+  const rows = project.rows.map((r) => (r.id === rowId ? { ...r, ...release } : r));
+  projectStore.update(projectId, { rows, end_date: projectEndDate(rows, project.start_date) });
+  syncProjectSeatDemands();
 }
 
 /** Adds a brand-new MP need row to an already-registered project, expanding
@@ -756,44 +772,71 @@ export function deleteProject(projectId: string): boolean {
   return true;
 }
 
-/** §7 / §12 Auto Project Finish: run when Project Monitoring module is opened.
- * For every MP Project / MP Backup seat, whoever holds it at the end (the
- * last verified fill in the seat's chain) goes to Supply Pool as MP Excess
- * if their contract is still running. MP Setting seats stay in the shop. */
+/** §7 / §12 project releases, run when Demand/Supply/Project pages open
+ * (admin). Each row is released on its own date: whoever holds each of its
+ * seats at that point (the last verified fill in the seat's chain) goes to
+ * Supply Pool as MP Excess if their contract is still running. No Release
+ * rows are never released — they carry on as regular enrollment.
+ *
+ * A project counts as Finish (History) once nothing about it is pending in
+ * either menu: every release date has passed, every demand it raised is
+ * fulfilled (or No Replace), and everyone it released has been utilized. */
 export function autoProjectFinishCheck(): void {
+  // Releasing marks rows as done for good — never do it against a cache
+  // that hasn't loaded yet (it would release nobody and still mark them).
+  const needed = [projectStore, demandStore, utilPoolStore, vokasiStore, zparStore];
+  needed.forEach((store) => store.init());
+  if (!needed.every((store) => store.ready())) return;
   const demands = demandStore.list();
   for (const project of projectStore.list()) {
     if (project.status !== "Ongoing") continue;
-    if (sisaHari(project.end_date) >= 0) continue;
-    projectStore.update(project.id, { status: "Finish" });
+    const seats = demands.filter((d) => project.demand_ids.includes(d.id));
 
-    for (const seat of demands.filter((d) => project.demand_ids.includes(d.id))) {
-      if (!releasedAtProjectEnd(projectRowOfDemand(project, seat)?.mp_role)) continue;
-      const holder = projectSeatOccupants(seat, demands).at(-1);
-      if (!holder) continue;
-      const employment = getEmploymentStatus(holder.replacement_noreg);
-      const type: MpStatusKategori =
-        employment === "Vokasi" || (!employment && (holder.replacement_status === "Vokasi New Hire" || holder.replacement_batch))
-          ? "Vokasi"
-          : employment === "Permanen"
-            ? "Permanen"
-            : "PKWT";
-      const contractEnd = estimateContractEnd(holder.replacement_noreg, type);
-      const stillValid = contractEnd === null || sisaHari(contractEnd) >= 0;
-      if (!stillValid) continue;
-      pushToUtilPool({
-        noreg: holder.replacement_noreg,
-        nama: holder.replacement_nama,
-        type,
-        source: "ProjectFinish",
-        source_label: project.name,
-        prev_div: seat.div,
-        prev_dept: seat.dept,
-        contract_end: contractEnd,
-      });
-    }
+    let releasedAny = false;
+    const rows = project.rows.map((row) => {
+      const releaseDate = rowReleaseDate(row, project);
+      if (row.released || !releaseDate || sisaHari(releaseDate) > 0) return row;
+      releasedAny = true;
+      for (const seat of seats.filter((d) => projectRowOfDemand(project, d)?.id === row.id)) {
+        releaseSeatHolder(project, seat, demands);
+      }
+      return { ...row, released: true };
+    });
+    if (releasedAny) projectStore.update(project.id, { rows });
+
+    const allReleased = rows.every((r) => r.released || !rowReleaseDate(r, project));
+    const allFulfilled = seats.every((d) => d.status === "Fulfilled" || d.replacement_status === "No Replace");
+    const allUtilized = !utilPoolStore
+      .list()
+      .some((e) => e.source === "ProjectFinish" && e.source_label === project.name && e.status === "Open");
+    if (allReleased && allFulfilled && allUtilized) projectStore.update(project.id, { status: "Finish" });
   }
   syncProjectSeatDemands();
+}
+
+function releaseSeatHolder(project: Project, seat: Demand, demands: Demand[]): void {
+  const holder = projectSeatOccupants(seat, demands).at(-1);
+  if (!holder) return;
+  const employment = getEmploymentStatus(holder.replacement_noreg);
+  const type: MpStatusKategori =
+    employment === "Vokasi" || (!employment && (holder.replacement_status === "Vokasi New Hire" || holder.replacement_batch))
+      ? "Vokasi"
+      : employment === "Permanen"
+        ? "Permanen"
+        : "PKWT";
+  const contractEnd = estimateContractEnd(holder.replacement_noreg, type);
+  const stillValid = contractEnd === null || sisaHari(contractEnd) >= 0;
+  if (!stillValid) return;
+  pushToUtilPool({
+    noreg: holder.replacement_noreg,
+    nama: holder.replacement_nama,
+    type,
+    source: "ProjectFinish",
+    source_label: project.name,
+    prev_div: seat.div,
+    prev_dept: seat.dept,
+    contract_end: contractEnd,
+  });
 }
 
 // ---------------------------------------------------------------------------

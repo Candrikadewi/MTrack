@@ -48,7 +48,7 @@ function buildHistoryBatches(
       id: `project-${p.id}`,
       jenis: "Project",
       label: p.name,
-      meta: `${fmtDate(p.start_date)} — ${fmtDate(p.end_date)}`,
+      meta: `SOP ${fmtDate(p.start_date)} · release terakhir ${fmtDate(p.end_date)}`,
       statusLabel: "Finish",
       closureMonth: monthOf(p.end_date),
       rows: p.rows.map((r) => ({ div: r.division, dept: r.dept })),
