@@ -328,25 +328,43 @@ export function createManualDemand(input: {
 // PKWT Review generation & terminate -> demand
 // ---------------------------------------------------------------------------
 
-export function generatePkwtReviews(): void {
+export interface PkwtReviewRun {
+  /** Active snapshot period the run read, or null when none is active. */
+  period: string | null;
+  /** Kontrak 1.1 / 1.2 / 2 employees in that snapshot. */
+  eligible: number;
+  /** Of those, how many have no readable Tgl Masuk (no review date). */
+  noTglMasuk: number;
+  created: number;
+  error?: string;
+}
+
+/** Creates the PKWT review for every Kontrak 1.1/1.2/2 employee of the
+ * active snapshot that doesn't have one yet (idempotent). Resolves once
+ * Supabase has the rows; an insert failure is surfaced as a toast instead
+ * of only reaching the console, since it otherwise leaves the review chart
+ * empty with no hint why. */
+export async function generatePkwtReviews(): Promise<PkwtReviewRun> {
   const snap = getActiveSnapshot();
-  if (!snap) return;
-  const existing = pkwtReviewStore.list();
-  // Collected into one insertMany() call — firing one insert() per employee
-  // (previously up to hundreds of concurrent requests) risked silent partial
-  // failures where a review would show up locally (optimistic cache) but
-  // never actually land in Supabase, later failing set_review_result with
-  // "Review not found".
+  if (!snap) return { period: null, eligible: 0, noTglMasuk: 0, created: 0 };
+  const existing = new Set(pkwtReviewStore.list().map((r) => `${r.noreg}|${r.tgl_review}`));
   const toCreate: PkwtReview[] = [];
+  let eligible = 0;
+  let noTglMasuk = 0;
   for (const emp of snap.employees) {
     if (!KONTRAK_REVIEW_STATUSES.includes(emp.status_kontrak)) continue;
+    eligible++;
     // A blank/unreadable Tgl Masuk has no review date — skipping it keeps one
     // bad row from throwing (date-fns) or failing the whole batch insert
     // (Postgres rejects "" for a date column).
     const tgl_review = computeReviewDate(emp.tgl_masuk, emp.status_kontrak);
-    if (!tgl_review) continue;
-    const prior = existing.find((r) => r.noreg === emp.noreg && r.tgl_review === tgl_review);
-    if (prior) continue; // keep as-is (preserves review_result / demand_id)
+    if (!tgl_review) {
+      noTglMasuk++;
+      continue;
+    }
+    const key = `${emp.noreg}|${tgl_review}`;
+    if (existing.has(key)) continue; // keep as-is (preserves review_result / demand_id)
+    existing.add(key);
     toCreate.push({
       id: genId("pkwtrev"),
       noreg: emp.noreg,
@@ -360,7 +378,17 @@ export function generatePkwtReviews(): void {
       labor_type: emp.labor_type,
     });
   }
-  if (toCreate.length) pkwtReviewStore.insertMany(toCreate);
+  const base = { period: snap.period, eligible, noTglMasuk };
+  if (toCreate.length === 0) return { ...base, created: 0 };
+  // One insertMany call, not one insert per employee: hundreds of
+  // concurrent requests risked partial failures (see set_review_result).
+  const error = await pkwtReviewStore.insertManyPersisted(toCreate);
+  if (error) {
+    pkwtReviewStore.refetch();
+    pushToast(`Gagal membuat review PKWT: ${error}`);
+    return { ...base, created: 0, error };
+  }
+  return { ...base, created: toCreate.length };
 }
 
 /**
