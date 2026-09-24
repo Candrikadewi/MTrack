@@ -6,10 +6,12 @@ export function NoregInput({
   value,
   onCommit,
   placeholder = "Ketik noreg...",
+  ariaLabel,
 }: {
   value: string;
   onCommit: (noreg: string) => void;
   placeholder?: string;
+  ariaLabel?: string;
 }) {
   const [draft, setDraft] = useState(value);
 
@@ -17,6 +19,7 @@ export function NoregInput({
     <Input
       value={draft}
       placeholder={placeholder}
+      aria-label={ariaLabel}
       className="min-w-[120px]"
       onChange={(e) => setDraft(e.target.value)}
       onBlur={() => {
@@ -29,11 +32,20 @@ export function NoregInput({
   );
 }
 
-export function DateInput({ value, onCommit }: { value: string; onCommit: (date: string) => void }) {
+export function DateInput({
+  value,
+  onCommit,
+  ariaLabel,
+}: {
+  value: string;
+  onCommit: (date: string) => void;
+  ariaLabel?: string;
+}) {
   return (
     <Input
       type="date"
       value={value || ""}
+      aria-label={ariaLabel}
       className="min-w-[150px]"
       onChange={(e) => onCommit(e.target.value)}
     />

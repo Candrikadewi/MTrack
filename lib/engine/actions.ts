@@ -1,7 +1,9 @@
 // Orchestration / mutating business logic — the "engine" that keeps the
 // Demand Pool, Enrollment, Project/Takt, and Utilization Pool consistent.
 // See MTRACK_SPEC.md §11 (data flow) and §12 (business rules reference).
+import { addDays, format, parseISO } from "date-fns";
 import { genId } from "../storage";
+import { demandTargetDate } from "./enrollment";
 import {
   demandStore,
   pkwtReviewStore,
@@ -9,25 +11,71 @@ import {
   taktStore,
   utilPoolStore,
   vokasiStore,
+  zparStore,
   getActiveSnapshot,
 } from "../repo";
 import { createClient } from "../supabase/client";
+import { pushToast } from "../toast";
 import { computeFsStatus, computeReviewDate, sisaHari, today } from "./compute";
+import { KONTRAK_REVIEW_STATUSES, isPermanenForRatio, projectEndDate, rowReleaseDate } from "../types";
 import type {
   Demand,
   DemandCategory,
   DemandOriginType,
   EmployeeRecord,
   EmploymentStatus,
+  KaizenLaborGroup,
   MpStatusKategori,
+  PkwtReview,
   Project,
   ProjectMpNeedRow,
   ReplacementStatus,
   ReviewResult,
   TaktCase,
+  TaktDownPerson,
+  TaktDownPlanRow,
   UtilPoolEntry,
   VokasiRecord,
 } from "../types";
+
+// ---------------------------------------------------------------------------
+// Upload Center — scoped delete (per snapshot / per batch, not "delete all")
+// ---------------------------------------------------------------------------
+
+export interface DeleteResult {
+  ok: boolean;
+  error?: string;
+}
+
+/** Refuses to delete the Active snapshot — every other page reads from it,
+ * so silently leaving nothing active (or auto-picking a replacement) would
+ * be a worse surprise than just asking the admin to activate another
+ * period first. */
+export function deleteZparSnapshot(id: string): DeleteResult {
+  const snapshot = zparStore.get(id);
+  if (!snapshot) return { ok: false, error: "Snapshot tidak ditemukan." };
+  if (snapshot.is_active) {
+    return { ok: false, error: "Tidak bisa menghapus snapshot yang sedang Active — aktifkan periode lain dulu." };
+  }
+  zparStore.remove(id);
+  return { ok: true };
+}
+
+/** Refuses to delete a Vokasi batch once any of its records already
+ * produced a VokasiEnded demand (ensureVokasiEndedDemands) — deleting the
+ * source record out from under a live demand would orphan it. */
+export function deleteVokasiBatch(batch: string): DeleteResult {
+  const records = vokasiStore.list().filter((v) => v.batch === batch);
+  if (records.length === 0) return { ok: false, error: "Batch tidak ditemukan." };
+  const recordIds = new Set(records.map((r) => r.id));
+  pruneStaleVokasiDemands();
+  const hasLinkedDemand = demandStore.list().some((d) => d.origin_type === "VokasiEnded" && recordIds.has(d.origin_ref));
+  if (hasLinkedDemand) {
+    return { ok: false, error: "Batch ini sudah menghasilkan demand replacement, tidak bisa dihapus." };
+  }
+  for (const r of records) vokasiStore.remove(r.id);
+  return { ok: true };
+}
 
 export function mapMpStatusToDemandCategory(status: MpStatusKategori): DemandCategory {
   return status === "Vokasi" ? "Vokasi" : "PKWT";
@@ -50,7 +98,7 @@ export function getEmploymentStatus(noreg: string): EmploymentStatus {
   if (getVokasiByNoreg(noreg)) return "Vokasi";
   const emp = getActiveEmployeeByNoreg(noreg);
   if (!emp) return "";
-  return emp.status_kontrak === "Permanen" ? "Permanen" : "Kontrak";
+  return isPermanenForRatio(emp.status_kontrak) ? "Permanen" : "Kontrak";
 }
 
 // ---------------------------------------------------------------------------
@@ -81,6 +129,8 @@ function baseDemand(overrides: Partial<Demand>): Demand {
     replacement_employment_status: "",
     fs_status: "",
     status: "Open",
+    fulfillment_confirmed_date: "",
+    shop_confirmed_date: "",
     created_at: new Date().toISOString(),
     ...overrides,
   };
@@ -110,7 +160,7 @@ export function expandRowToDemands(
 }
 
 export function createDemandsFromProjectRow(project: Project, row: ProjectMpNeedRow): Demand[] {
-  return expandRowToDemands(row, "Project", project.id, `${project.name} — ${row.division} — ${row.dept}`);
+  return expandRowToDemands(row, "Project", project.id, project.name);
 }
 
 export function createDemandsFromTaktRow(takt: TaktCase, row: ProjectMpNeedRow): Demand[] {
@@ -118,17 +168,72 @@ export function createDemandsFromTaktRow(takt: TaktCase, row: ProjectMpNeedRow):
     row,
     "TaktUp",
     takt.id,
-    `Takt Up ${takt.plant} — ${row.division} — ${row.dept}`
+    `Takt Up ${takt.plant} - ${row.division} - ${row.dept}`
   );
 }
 
-/** Ensures every VokasiRecord with a tgl_ended has exactly one Vokasi-category Demand. */
-export function ensureVokasiEndedDemands(): void {
+function monthStartKey(date: Date = new Date()): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-01`;
+}
+
+/** Supply Pool sources that release a person for good — a Vokasi released
+ * this way leaves naturally at the end of their batch, so their seat is not
+ * backfilled. */
+const NATURAL_RELEASE_SOURCES: UtilPoolEntry["source"][] = ["TaktDown", "Kaizen"];
+
+function naturalReleaseEntry(noreg: string): UtilPoolEntry | undefined {
+  return utilPoolStore.list().find((e) => e.noreg === noreg && NATURAL_RELEASE_SOURCES.includes(e.source));
+}
+
+function naturalReleaseReason(entry: UtilPoolEntry): string {
+  return `Natural release — ${entry.source_label}`;
+}
+
+/** A VokasiEnded demand nobody has worked on yet: still the auto-created
+ * default (Vokasi New Hire, no candidate, nothing confirmed). */
+function untouchedVokasiDemand(d: Demand): boolean {
+  return (
+    d.origin_type === "VokasiEnded" &&
+    d.status === "Open" &&
+    !d.replacement_noreg &&
+    !d.fulfillment_confirmed_date &&
+    !d.shop_confirmed_date &&
+    (d.replacement_status === "" || d.replacement_status === "Vokasi New Hire")
+  );
+}
+
+/** Removes untouched VokasiEnded demands that the creation rule below would
+ * never have made: the outgoing batch had already ended in an earlier month
+ * than the one the demand was created in (history from the starting file,
+ * already replaced in real life). Returns how many were removed. */
+export function pruneStaleVokasiDemands(): number {
+  let removed = 0;
+  for (const d of demandStore.list()) {
+    if (!untouchedVokasiDemand(d) || !d.tgl_ended_outgoing) continue;
+    const createdMonthStart = monthStartKey(new Date(d.created_at));
+    if (d.tgl_ended_outgoing < createdMonthStart) {
+      demandStore.remove(d.id);
+      removed++;
+    }
+  }
+  return removed;
+}
+
+/** Ensures every Vokasi that ends this month or later has exactly one
+ * Vokasi-category Demand. Batches that already ended before this month are
+ * history (the starting file carries every past batch) and get no demand.
+ * A Vokasi already released through Takt Down/Kaizen starts as No Replace.
+ * Resolves once the new demands are in the database, so follow-up RPCs
+ * (auto-matching) can find them. */
+export async function ensureVokasiEndedDemands(): Promise<number> {
+  pruneStaleVokasiDemands();
   const demands = demandStore.list();
   const existingRefs = new Set(demands.filter((d) => d.origin_type === "VokasiEnded").map((d) => d.origin_ref));
+  const thisMonth = monthStartKey();
   const toCreate: Demand[] = [];
   for (const v of vokasiStore.list()) {
-    if (!v.tgl_ended || existingRefs.has(v.id)) continue;
+    if (!v.tgl_ended || v.tgl_ended < thisMonth || existingRefs.has(v.id)) continue;
+    const released = naturalReleaseEntry(v.noreg);
     toCreate.push(
       baseDemand({
         category: "Vokasi",
@@ -140,15 +245,63 @@ export function ensureVokasiEndedDemands(): void {
         dept: v.dept,
         tgl_masuk_outgoing: v.tgl_masuk,
         tgl_ended_outgoing: v.tgl_ended,
+        // Regular enrollment default: most vokasi seats get backfilled by a
+        // fresh vokasi intake, so pre-select the Source rather than forcing
+        // every row through the picker — still changeable to MP Excess/Back
+        // Up/No Replace on the Supply-Demand page.
+        replacement_status: released ? "No Replace" : "Vokasi New Hire",
+        no_replace_reason: released ? naturalReleaseReason(released) : "",
       })
     );
   }
-  if (toCreate.length) demandStore.insertMany(toCreate);
+  if (toCreate.length === 0) return 0;
+  const error = await demandStore.insertManyPersisted(toCreate);
+  if (error) {
+    pushToast(`Gagal membuat demand Vokasi: ${error}`);
+    demandStore.refetch();
+    return 0;
+  }
+  syncProjectSeatDemands();
+  return toCreate.length;
+}
+
+/** Vokasi released through Takt Down/Kaizen: their VokasiEnded demand
+ * switches to No Replace (natural release) unless a replacement is already
+ * verified. */
+function applyVokasiNaturalRelease(entry: UtilPoolEntry): void {
+  if (entry.type !== "Vokasi" || !NATURAL_RELEASE_SOURCES.includes(entry.source)) return;
+  for (const d of demandStore.list()) {
+    if (d.origin_type !== "VokasiEnded" || d.outgoing_noreg !== entry.noreg) continue;
+    if (d.fulfillment_confirmed_date || d.replacement_status === "No Replace") continue;
+    setDemandNoReplace(d.id, naturalReleaseReason(entry));
+  }
+}
+
+/** Undoes applyVokasiNaturalRelease once the person is taken back out of
+ * Takt Down/Kaizen (and no other release still covers them): the demand
+ * returns to the regular Vokasi New Hire default. */
+function revertVokasiNaturalRelease(noreg: string, removedEntryId: string): void {
+  const stillReleased = utilPoolStore
+    .list()
+    .some((e) => e.id !== removedEntryId && e.noreg === noreg && NATURAL_RELEASE_SOURCES.includes(e.source));
+  if (stillReleased) return;
+  for (const d of demandStore.list()) {
+    if (d.origin_type !== "VokasiEnded" || d.outgoing_noreg !== noreg) continue;
+    if (d.replacement_status !== "No Replace" || !d.no_replace_reason.startsWith("Natural release")) continue;
+    setDemandReplacementByNoreg(d.id, "", "Vokasi New Hire");
+  }
+}
+
+function removePoolEntry(entry: UtilPoolEntry): void {
+  utilPoolStore.remove(entry.id);
+  if (entry.type === "Vokasi" && NATURAL_RELEASE_SOURCES.includes(entry.source)) {
+    revertVokasiNaturalRelease(entry.noreg, entry.id);
+  }
 }
 
 export function createManualDemand(input: {
   category: DemandCategory;
-  origin_type: Extract<DemandOriginType, "Resign" | "Pension" | "GST" | "Unfit" | "Others" | "Manual">;
+  origin_type: Extract<DemandOriginType, "Resign" | "Pension" | "PensionDini" | "GST" | "Unfit" | "Others" | "Manual">;
   origin_label?: string; // free-text reason when origin_type = "Others"
   outgoing_noreg: string;
   outgoing_nama: string;
@@ -179,18 +332,22 @@ export function generatePkwtReviews(): void {
   const snap = getActiveSnapshot();
   if (!snap) return;
   const existing = pkwtReviewStore.list();
-  const kontrakTypes = new Set(["Kontrak 1.1", "Kontrak 1.2", "Kontrak 2"]);
-  const seenIds = new Set<string>();
+  // Collected into one insertMany() call — firing one insert() per employee
+  // (previously up to hundreds of concurrent requests) risked silent partial
+  // failures where a review would show up locally (optimistic cache) but
+  // never actually land in Supabase, later failing set_review_result with
+  // "Review not found".
+  const toCreate: PkwtReview[] = [];
   for (const emp of snap.employees) {
-    if (!kontrakTypes.has(emp.status_kontrak)) continue;
+    if (!KONTRAK_REVIEW_STATUSES.includes(emp.status_kontrak)) continue;
+    // A blank/unreadable Tgl Masuk has no review date — skipping it keeps one
+    // bad row from throwing (date-fns) or failing the whole batch insert
+    // (Postgres rejects "" for a date column).
     const tgl_review = computeReviewDate(emp.tgl_masuk, emp.status_kontrak);
+    if (!tgl_review) continue;
     const prior = existing.find((r) => r.noreg === emp.noreg && r.tgl_review === tgl_review);
-    if (prior) {
-      seenIds.add(prior.id);
-      // keep as-is (preserves review_result / demand_id)
-      continue;
-    }
-    const rec = {
+    if (prior) continue; // keep as-is (preserves review_result / demand_id)
+    toCreate.push({
       id: genId("pkwtrev"),
       noreg: emp.noreg,
       nama: emp.nama,
@@ -200,23 +357,38 @@ export function generatePkwtReviews(): void {
       tgl_masuk: emp.tgl_masuk,
       tgl_review,
       review_result: "" as ReviewResult,
-    };
-    pkwtReviewStore.insert(rec);
-    seenIds.add(rec.id);
+      labor_type: emp.labor_type,
+    });
   }
+  if (toCreate.length) pkwtReviewStore.insertMany(toCreate);
 }
 
 /**
  * Routed through the `set_review_result` Postgres RPC (see supabase/schema.sql)
  * so the Admin/HR-only rule is enforced in the database, not just the UI.
- * The local cache updates shortly after via the realtime subscription.
+ * Applies an optimistic local update immediately (the RPC bypasses the
+ * generic Store.update() write path, so without this the UI only reflects
+ * the change once a realtime event arrives) and reverts + surfaces the
+ * error if the RPC itself is rejected (e.g. a role/permission mismatch).
  */
 export function setReviewResult(reviewId: string, result: ReviewResult): void {
+  const previous = pkwtReviewStore.get(reviewId)?.review_result;
+  pkwtReviewStore.update(reviewId, { review_result: result });
   const supabase = createClient();
   supabase
     .rpc("set_review_result", { p_review_id: reviewId, p_result: result })
     .then((res: { error: { message: string } | null }) => {
-      if (res.error) console.error("set_review_result failed:", res.error.message);
+      if (res.error) {
+        console.error("set_review_result failed:", res.error.message);
+        pkwtReviewStore.update(reviewId, { review_result: previous ?? "" });
+        pushToast(`Gagal menyimpan review result: ${res.error.message}`);
+        return;
+      }
+      // On Terminate, the RPC creates a new Demand server-side — the client
+      // never inserted it locally, so without this the new "PKWT Demand" row
+      // only shows up once/if a realtime event arrives. Re-fetch instead of
+      // waiting on that.
+      if (result === "Terminate") demandStore.refetch();
     });
 }
 
@@ -255,7 +427,7 @@ export function setDemandReplacementByNoreg(
     dept = vokasi?.dept ?? emp?.dept ?? "";
     batch = vokasi?.batch ?? "";
     tglMasuk = vokasi?.tgl_masuk ?? emp?.tgl_masuk ?? null;
-    fs_status = demand.category === "PKWT" ? computeFsStatus(demand.dept, dept, vokasi?.tgl_ended) : "";
+    fs_status = computeFsStatus(replacementStatus, demand.dept, dept, vokasi?.tgl_ended);
     employmentStatus = getEmploymentStatus(noreg);
   }
 
@@ -274,7 +446,12 @@ export function setDemandReplacementByNoreg(
       p_no_replace_reason: "",
     })
     .then((res: { error: { message: string } | null }) => {
-      if (res.error) console.error("set_demand_replacement failed:", res.error.message);
+      if (res.error) {
+        console.error("set_demand_replacement failed:", res.error.message);
+        pushToast(`Gagal menyimpan replacement: ${res.error.message}`);
+        return;
+      }
+      demandStore.refetch();
     });
 }
 
@@ -295,7 +472,12 @@ export function setDemandNoReplace(demandId: string, reason: string): void {
       p_no_replace_reason: reason,
     })
     .then((res: { error: { message: string } | null }) => {
-      if (res.error) console.error("set_demand_replacement (no replace) failed:", res.error.message);
+      if (res.error) {
+        console.error("set_demand_replacement (no replace) failed:", res.error.message);
+        pushToast(`Gagal menyimpan replacement: ${res.error.message}`);
+        return;
+      }
+      demandStore.refetch();
     });
 }
 
@@ -303,7 +485,81 @@ export function setDemandFulfillDate(demandId: string, date: string): void {
   demandStore.update(demandId, { fulfill_date: date });
 }
 
-/** §4.2 auto-matching: new Vokasi batch upload -> fill Open Vokasi Demand of same dept. */
+/**
+ * Supply-Demand: confirms a mapped candidate actually signed contract (new
+ * hire) or was officially assigned to the destination department (MP Back
+ * Up/Excess) — separate from `setDemandReplacementByNoreg`, which only maps
+ * who the candidate is. Passing an empty date un-confirms it. Routed through
+ * `confirm_demand_fulfillment` (see supabase/migration_4.sql) so the same
+ * admin/shop-PKWT rule as replacement-mapping is enforced server-side.
+ */
+export function confirmDemandFulfillment(demandId: string, confirmedDate: string): void {
+  const previous = demandStore.get(demandId);
+  if (!previous) return;
+  demandStore.patchLocal(demandId, {
+    fulfillment_confirmed_date: confirmedDate,
+    status: confirmedDate ? "Fulfilled" : "Open",
+  });
+  const supabase = createClient();
+  supabase
+    .rpc("confirm_demand_fulfillment", { p_demand_id: demandId, p_confirmed_date: confirmedDate || null })
+    .then((res: { error: { message: string } | null }) => {
+      if (res.error) {
+        console.error("confirm_demand_fulfillment failed:", res.error.message);
+        demandStore.patchLocal(demandId, {
+          fulfillment_confirmed_date: previous.fulfillment_confirmed_date,
+          status: previous.status,
+        });
+        pushToast(`Gagal verifikasi: ${res.error.message}`);
+        return;
+      }
+      // A verified fill may extend a project seat's chain.
+      if (confirmedDate) syncProjectSeatDemands();
+      demandStore.refetch();
+    });
+}
+
+/**
+ * Supply-Demand: shop floor confirms the replacement candidate has actually
+ * reported for duty — separate from `confirmDemandFulfillment` (Sign
+ * Kontrak/Assigned), which only reflects the HR/admin paperwork step.
+ * Passing an empty date un-confirms it. Routed through
+ * `confirm_shop_receipt` (see supabase/migration_5.sql) so the same
+ * admin/shop-PKWT rule as replacement-mapping is enforced server-side. Does
+ * not touch `status`/`fulfillment_confirmed_date` — the granular
+ * Open/DELAY/Need Replace ASAP/Fulfilled Ontime/Fulfilled but Delay label is
+ * derived client-side (see `supplyDemandStatus` in compute.ts).
+ */
+export function confirmShopReceipt(demandId: string, confirmedDate: string): void {
+  const previous = demandStore.get(demandId);
+  if (!previous) return;
+  demandStore.update(demandId, { shop_confirmed_date: confirmedDate });
+  const supabase = createClient();
+  supabase
+    .rpc("confirm_shop_receipt", { p_demand_id: demandId, p_confirmed_date: confirmedDate || null })
+    .then((res: { error: { message: string } | null }) => {
+      if (res.error) {
+        console.error("confirm_shop_receipt failed:", res.error.message);
+        demandStore.update(demandId, { shop_confirmed_date: previous.shop_confirmed_date });
+        pushToast(`Gagal konfirmasi shop: ${res.error.message}`);
+        return;
+      }
+      demandStore.refetch();
+    });
+}
+
+/** §4.2 auto-matching: new Vokasi batch upload -> fill Open Demand whose
+ * Source is "Vokasi New Hire" (regardless of which tab it lives on — a PKWT
+ * demand backfilled from the Vokasi pipeline is just as eligible as a
+ * Vokasi-origin one) with a same-dept candidate from the batch.
+ *
+ * A candidate only fits a seat that is vacated by the time they start (the
+ * outgoing person ends no later than a month after the candidate's Tgl
+ * Masuk), never their own seat or a seat of their own batch — otherwise a
+ * starting file carrying every batch would match batches against
+ * themselves. Oldest vacancies are filled first. Only call this once the
+ * demands are persisted (see ensureVokasiEndedDemands), since the RPC looks
+ * each one up server-side. */
 export function autoMatchVokasiBatch(newRecords: VokasiRecord[]): number {
   const usedNoreg = new Set(
     demandStore
@@ -311,16 +567,26 @@ export function autoMatchVokasiBatch(newRecords: VokasiRecord[]): number {
       .filter((d) => d.replacement_noreg)
       .map((d) => d.replacement_noreg)
   );
+  const vacatedBy = (d: Demand) => d.tgl_ended_outgoing || demandTargetDate(d);
   const openDemands = demandStore
     .list()
-    .filter((d) => d.category === "Vokasi" && d.status === "Open" && !d.replacement_noreg);
+    .filter((d) => d.replacement_status === "Vokasi New Hire" && d.status === "Open" && !d.replacement_noreg)
+    .sort((a, b) => vacatedBy(a).localeCompare(vacatedBy(b)));
+
+  const fits = (r: VokasiRecord, demand: Demand) => {
+    if (r.dept !== demand.dept || usedNoreg.has(r.noreg) || r.noreg === demand.outgoing_noreg) return false;
+    if (demand.origin_type === "VokasiEnded" && vokasiStore.get(demand.origin_ref)?.batch === r.batch) return false;
+    const vacated = vacatedBy(demand);
+    if (!vacated || !r.tgl_masuk) return true;
+    return vacated <= format(addDays(parseISO(r.tgl_masuk), 31), "yyyy-MM-dd");
+  };
 
   let matched = 0;
   for (const demand of openDemands) {
-    const candidate = newRecords.find((r) => r.dept === demand.dept && !usedNoreg.has(r.noreg));
+    const candidate = newRecords.find((r) => fits(r, demand));
     if (!candidate) continue;
     usedNoreg.add(candidate.noreg);
-    setDemandReplacementByNoreg(demand.id, candidate.noreg);
+    setDemandReplacementByNoreg(demand.id, candidate.noreg, "Vokasi New Hire");
     matched++;
   }
   return matched;
@@ -336,69 +602,241 @@ export function estimateContractEnd(noreg: string, type: MpStatusKategori): stri
   const vokasi = getVokasiByNoreg(noreg);
   if (vokasi?.tgl_ended) return vokasi.tgl_ended;
   const emp = getActiveEmployeeByNoreg(noreg);
-  if (emp && emp.status_kontrak !== "Permanen") {
-    return computeReviewDate(emp.tgl_masuk, emp.status_kontrak);
+  if (emp && !isPermanenForRatio(emp.status_kontrak)) {
+    return computeReviewDate(emp.tgl_masuk, emp.status_kontrak) || null;
   }
   return null;
 }
 
+/** Registers a project from its name, Tanggal SOP and MP need-rows. Each
+ * row carries its own release (date or No Release); end_date is derived. */
 export function createProject(input: {
   name: string;
-  start_date: string;
-  end_date: string;
+  sop_date: string;
   rows: Omit<ProjectMpNeedRow, "id">[];
 }): Project {
   const project: Project = {
     id: genId("project"),
     name: input.name,
-    start_date: input.start_date,
-    end_date: input.end_date,
+    start_date: input.sop_date,
+    end_date: projectEndDate(input.rows, input.sop_date),
     status: "Ongoing",
     rows: input.rows.map((r) => ({ ...r, id: genId("row") })),
     demand_ids: [],
   };
   projectStore.insert(project);
-  const demandIds: string[] = [];
-  for (const row of project.rows) {
-    const created = createDemandsFromProjectRow(project, row);
-    demandIds.push(...created.map((d) => d.id));
+  const rows = project.rows.map((row) => ({ ...row, demand_ids: createDemandsFromProjectRow(project, row).map((d) => d.id) }));
+  return projectStore.update(project.id, { rows, demand_ids: rows.flatMap((r) => r.demand_ids) })!;
+}
+
+/** The need-row a project demand was expanded from. Rows record their own
+ * demand ids; older projects predate that, so fall back to the first row
+ * with the same division, department and MP status. */
+export function projectRowOfDemand(project: Project, demand: Demand): ProjectMpNeedRow | undefined {
+  return (
+    project.rows.find((r) => r.demand_ids?.includes(demand.id)) ??
+    project.rows.find(
+      (r) => !r.demand_ids && r.division === demand.div && r.dept === demand.dept && mapMpStatusToDemandCategory(r.status_mp) === demand.category
+    )
+  );
+}
+
+/** Everyone who has held one project seat, in order: the person mapped to
+ * the project demand, then whoever filled the replacement demand raised
+ * when that person's contract ended (Vokasi Ended / PKWT Terminate), and so
+ * on. Only verified (Fulfilled) fills count. */
+export function projectSeatOccupants(seat: Demand, demands: Demand[] = demandStore.list()): Demand[] {
+  const chain: Demand[] = [];
+  const seen = new Set<string>();
+  let current: Demand | undefined = seat;
+  while (current && current.status === "Fulfilled" && current.replacement_noreg && !seen.has(current.id)) {
+    seen.add(current.id);
+    chain.push(current);
+    const outgoing: string = current.replacement_noreg;
+    current = demands.find(
+      (d) => d.outgoing_noreg === outgoing && (d.origin_type === "VokasiEnded" || d.origin_type === "PkwtTerminate")
+    );
   }
-  return projectStore.update(project.id, { demand_ids: demandIds })!;
+  return chain;
+}
+
+const pendingProjectNoReplace = new Set<string>();
+
+/** Keeps the replacement demands of project seats in line with each row's
+ * release. When a Vokasi holding a seat ends before the row's release date,
+ * their Vokasi Ended demand is the seat's next fill (labelled with the
+ * project). When they end on/after it, the seat is not refilled, so that
+ * demand becomes No Replace. No Release rows keep the regular cycle.
+ * Idempotent; call when demands or projects may have changed. */
+export function syncProjectSeatDemands(): void {
+  const demands = demandStore.list();
+  for (const project of projectStore.list()) {
+    const label = `Project ${project.name}`;
+    for (const seat of demands.filter((d) => d.origin_type === "Project" && d.origin_ref === project.id)) {
+      const row = projectRowOfDemand(project, seat);
+      const releaseDate = row ? rowReleaseDate(row, project) : null;
+      for (const holder of projectSeatOccupants(seat, demands)) {
+        const next = demands.find((d) => d.origin_type === "VokasiEnded" && d.outgoing_noreg === holder.replacement_noreg);
+        if (!next) continue;
+        if (!next.outgoing_label) demandStore.update(next.id, { outgoing_label: label });
+        if (
+          releaseDate &&
+          next.tgl_ended_outgoing >= releaseDate &&
+          next.replacement_status !== "No Replace" &&
+          !next.fulfillment_confirmed_date &&
+          !pendingProjectNoReplace.has(next.id)
+        ) {
+          pendingProjectNoReplace.add(next.id);
+          setDemandNoReplace(next.id, `Rilis projek ${project.name} ${releaseDate}`);
+        }
+      }
+    }
+  }
 }
 
 export function projectSuppliedCount(project: Project): number {
   return demandStore.list().filter((d) => project.demand_ids.includes(d.id) && d.status === "Fulfilled").length;
 }
 
-/** §7 / §12 Auto Project Finish: run when Project Monitoring module is opened. */
-export function autoProjectFinishCheck(): void {
-  const projects = projectStore.list();
-  for (const project of projects) {
-    if (project.status !== "Ongoing") continue;
-    if (sisaHari(project.end_date) >= 0) continue;
-    projectStore.update(project.id, { status: "Finish" });
+/** Edit-after-registration: name/Tanggal SOP only — rows/demands are handled
+ * by addProjectRow / increaseProjectRowQty / updateProjectRowRelease below,
+ * which never delete or shrink existing demand records (only additive
+ * changes are safe post-registration). */
+export function updateProjectDetails(projectId: string, input: { name?: string; sop_date?: string }): void {
+  const project = projectStore.get(projectId);
+  if (!project) return;
+  const sop = input.sop_date ?? project.start_date;
+  projectStore.update(projectId, {
+    ...(input.name !== undefined ? { name: input.name } : {}),
+    start_date: sop,
+    end_date: projectEndDate(project.rows, sop),
+  });
+}
 
-    const fulfilledDemands = demandStore
-      .list()
-      .filter((d) => project.demand_ids.includes(d.id) && d.status === "Fulfilled" && d.replacement_noreg);
+/** Changes a registered row's release (date or No Release) until it has
+ * actually been released, then re-syncs its seats' replacement demands. */
+export function updateProjectRowRelease(projectId: string, rowId: string, release: { release_date: string; no_release: boolean }): void {
+  const project = projectStore.get(projectId);
+  const row = project?.rows.find((r) => r.id === rowId);
+  if (!project || !row || row.released) return;
+  if (row.no_release === release.no_release && (row.release_date ?? "") === release.release_date) return;
+  const rows = project.rows.map((r) => (r.id === rowId ? { ...r, ...release } : r));
+  projectStore.update(projectId, { rows, end_date: projectEndDate(rows, project.start_date) });
+  syncProjectSeatDemands();
+}
 
-    for (const d of fulfilledDemands) {
-      const type: MpStatusKategori =
-        d.category === "Vokasi" ? "Vokasi" : d.replacement_batch ? "Vokasi" : "PKWT";
-      const contractEnd = estimateContractEnd(d.replacement_noreg, type);
-      const stillValid = contractEnd === null || sisaHari(contractEnd) >= 0;
-      if (!stillValid) continue;
-      pushToUtilPool({
-        noreg: d.replacement_noreg,
-        nama: d.replacement_nama,
-        type,
-        source: "ProjectFinish",
-        source_label: project.name,
-        prev_dept: d.dept,
-        contract_end: contractEnd,
-      });
-    }
+/** Adds a brand-new MP need row to an already-registered project, expanding
+ * it into demand records immediately (same as at creation time). Always
+ * re-reads the project from the store so sequential calls in a loop don't
+ * clobber each other's row/demand_ids updates. */
+export function addProjectRow(projectId: string, row: Omit<ProjectMpNeedRow, "id">): void {
+  const project = projectStore.get(projectId);
+  if (!project) return;
+  const newRow: ProjectMpNeedRow = { ...row, id: genId("row") };
+  const created = createDemandsFromProjectRow({ ...project, rows: [...project.rows, newRow] }, newRow);
+  const updatedRows = [...project.rows, { ...newRow, demand_ids: created.map((d) => d.id) }];
+  projectStore.update(projectId, { rows: updatedRows, demand_ids: [...project.demand_ids, ...created.map((d) => d.id)] });
+}
+
+/** Increases an existing row's qty, creating demand records only for the
+ * delta. Decreasing qty is intentionally not supported here — it would mean
+ * silently deleting demand records that may already be Fulfilled. */
+export function increaseProjectRowQty(projectId: string, rowId: string, newQty: number): void {
+  const project = projectStore.get(projectId);
+  if (!project) return;
+  const row = project.rows.find((r) => r.id === rowId);
+  if (!row || newQty <= row.qty) return;
+  const delta = newQty - row.qty;
+  const created = expandRowToDemands({ ...row, qty: delta }, "Project", project.id, project.name);
+  const updatedRows = project.rows.map((r) =>
+    r.id === rowId ? { ...r, qty: newQty, ...(r.demand_ids ? { demand_ids: [...r.demand_ids, ...created.map((d) => d.id)] } : {}) } : r
+  );
+  projectStore.update(projectId, { rows: updatedRows, demand_ids: [...project.demand_ids, ...created.map((d) => d.id)] });
+}
+
+/**
+ * Deletes a project. Same safety invariant as deleteTaktDown: a demand it
+ * generated that's still Open (no candidate mapped yet) is cleaned up with
+ * it, but one already Fulfilled is left standing on its own — deleting the
+ * project never erases a real, already-completed assignment.
+ */
+export function deleteProject(projectId: string): boolean {
+  const project = projectStore.get(projectId);
+  if (!project) return false;
+
+  for (const demandId of project.demand_ids) {
+    const demand = demandStore.get(demandId);
+    if (demand && demand.status !== "Fulfilled") demandStore.remove(demandId);
   }
+  projectStore.remove(projectId);
+  return true;
+}
+
+/** §7 / §12 project releases, run when Demand/Supply/Project pages open
+ * (admin). Each row is released on its own date: whoever holds each of its
+ * seats at that point (the last verified fill in the seat's chain) goes to
+ * Supply Pool as MP Excess if their contract is still running. No Release
+ * rows are never released — they carry on as regular enrollment.
+ *
+ * A project counts as Finish (History) once nothing about it is pending in
+ * either menu: every release date has passed, every demand it raised is
+ * fulfilled (or No Replace), and everyone it released has been utilized. */
+export function autoProjectFinishCheck(): void {
+  // Releasing marks rows as done for good — never do it against a cache
+  // that hasn't loaded yet (it would release nobody and still mark them).
+  const needed = [projectStore, demandStore, utilPoolStore, vokasiStore, zparStore];
+  needed.forEach((store) => store.init());
+  if (!needed.every((store) => store.ready())) return;
+  const demands = demandStore.list();
+  for (const project of projectStore.list()) {
+    if (project.status !== "Ongoing") continue;
+    const seats = demands.filter((d) => project.demand_ids.includes(d.id));
+
+    let releasedAny = false;
+    const rows = project.rows.map((row) => {
+      const releaseDate = rowReleaseDate(row, project);
+      if (row.released || !releaseDate || sisaHari(releaseDate) > 0) return row;
+      releasedAny = true;
+      for (const seat of seats.filter((d) => projectRowOfDemand(project, d)?.id === row.id)) {
+        releaseSeatHolder(project, seat, demands);
+      }
+      return { ...row, released: true };
+    });
+    if (releasedAny) projectStore.update(project.id, { rows });
+
+    const allReleased = rows.every((r) => r.released || !rowReleaseDate(r, project));
+    const allFulfilled = seats.every((d) => d.status === "Fulfilled" || d.replacement_status === "No Replace");
+    const allUtilized = !utilPoolStore
+      .list()
+      .some((e) => e.source === "ProjectFinish" && e.source_label === project.name && e.status === "Open");
+    if (allReleased && allFulfilled && allUtilized) projectStore.update(project.id, { status: "Finish" });
+  }
+  syncProjectSeatDemands();
+}
+
+function releaseSeatHolder(project: Project, seat: Demand, demands: Demand[]): void {
+  const holder = projectSeatOccupants(seat, demands).at(-1);
+  if (!holder) return;
+  const employment = getEmploymentStatus(holder.replacement_noreg);
+  const type: MpStatusKategori =
+    employment === "Vokasi" || (!employment && (holder.replacement_status === "Vokasi New Hire" || holder.replacement_batch))
+      ? "Vokasi"
+      : employment === "Permanen"
+        ? "Permanen"
+        : "PKWT";
+  const contractEnd = estimateContractEnd(holder.replacement_noreg, type);
+  const stillValid = contractEnd === null || sisaHari(contractEnd) >= 0;
+  if (!stillValid) return;
+  pushToUtilPool({
+    noreg: holder.replacement_noreg,
+    nama: holder.replacement_nama,
+    type,
+    source: "ProjectFinish",
+    source_label: project.name,
+    prev_div: seat.div,
+    prev_dept: seat.dept,
+    contract_end: contractEnd,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -432,13 +870,28 @@ export function createTaktUp(input: {
   return taktStore.update(takt.id, { demand_ids: demandIds })!;
 }
 
+/** The plan row a released person's composition matches (division + dept +
+ * status), used to carry that row's planned release_date onto the Supply
+ * Pool entry created for them — the same relationship
+ * ProjectMpNeedRow.fulfill_date has to the Demands it expands into. Falls
+ * back to the case's own date when a person doesn't line up with any row
+ * (e.g. added via bulk/search without a matching plan entry). */
+function releaseDateFor(person: TaktDownPerson, planRows: TaktDownPlanRow[], fallbackDate: string): string {
+  const row = planRows.find(
+    (r) => r.division === person.div && r.dept === person.dept && r.status_mp === person.type
+  );
+  return row?.release_date || fallbackDate;
+}
+
 export function createTaktDown(input: {
   plant: TaktCase["plant"];
   date: string;
   takt_before: number;
   takt_after: number;
-  released_persons: { noreg: string; nama: string; type: MpStatusKategori; dept: string }[];
+  plan_rows: Omit<TaktDownPlanRow, "id">[];
+  released_persons: TaktDownPerson[];
 }): TaktCase {
+  const planRowsWithIds = input.plan_rows.map((r) => ({ ...r, id: genId("plan") }));
   const takt: TaktCase = {
     id: genId("takt"),
     plant: input.plant,
@@ -446,6 +899,7 @@ export function createTaktDown(input: {
     category: "down",
     takt_before: input.takt_before,
     takt_after: input.takt_after,
+    plan_rows: planRowsWithIds,
     released_persons: input.released_persons,
     demand_ids: [],
     released_pool_ids: [],
@@ -460,12 +914,135 @@ export function createTaktDown(input: {
       type: p.type,
       source: "TaktDown",
       source_label: `Takt Down ${input.plant}`,
+      prev_div: p.div,
       prev_dept: p.dept,
       contract_end: contractEnd,
+      entered_pool_date: releaseDateFor(p, planRowsWithIds, input.date),
     });
     poolIds.push(entry.id);
   }
   return taktStore.update(takt.id, { released_pool_ids: poolIds })!;
+}
+
+/**
+ * Edits an existing Takt Down case — plan_rows, released_persons, and the
+ * case's own fields all stay changeable after creation, unlike the original
+ * one-shot flow, since one takt-time change block commonly affects several
+ * shops discovered/refined over more than one sitting.
+ *
+ * Only persons still "Open" in the Supply Pool are safe to drop — once a
+ * released person has been Assigned (mapped to a Demand) or Released, their
+ * Util Pool entry is left alone rather than silently deleted, so an
+ * in-progress Demand mapping never gets orphaned by a Takt Down edit. The
+ * caller (TaktDownModal) disables removal of non-Open persons in the UI;
+ * this is the same invariant enforced again server-side of the store.
+ */
+export function updateTaktDown(
+  taktId: string,
+  input: {
+    plant: TaktCase["plant"];
+    date: string;
+    takt_before: number;
+    takt_after: number;
+    plan_rows: TaktDownPlanRow[];
+    released_persons: TaktDownPerson[];
+  }
+): TaktCase | undefined {
+  const takt = taktStore.get(taktId);
+  if (!takt) return undefined;
+
+  const poolByNoreg = new Map(
+    (takt.released_pool_ids ?? [])
+      .map((id) => utilPoolStore.get(id))
+      .filter((e): e is UtilPoolEntry => Boolean(e))
+      .map((e) => [e.noreg, e])
+  );
+
+  const nextNoregs = new Set(input.released_persons.map((p) => p.noreg));
+  const removedButLocked: TaktDownPerson[] = [];
+  const keptPoolIds: string[] = [];
+
+  for (const [noreg, entry] of poolByNoreg) {
+    const stillPresent = nextNoregs.has(noreg);
+    if (stillPresent) {
+      keptPoolIds.push(entry.id);
+      // Keep the Supply Pool entry in sync with an in-place edit (e.g.
+      // correcting a person's shop or status) — only while it's still
+      // Open; an already-Assigned/Released entry keeps its snapshot.
+      if (entry.status === "Open") {
+        const edited = input.released_persons.find((p) => p.noreg === noreg);
+        if (
+          edited &&
+          (edited.nama !== entry.nama ||
+            edited.type !== entry.type ||
+            edited.div !== entry.prev_div ||
+            edited.dept !== entry.prev_dept)
+        ) {
+          utilPoolStore.update(entry.id, { nama: edited.nama, type: edited.type, prev_div: edited.div, prev_dept: edited.dept });
+        }
+      }
+      continue;
+    }
+    if (entry.status === "Open") {
+      removePoolEntry(entry);
+    } else {
+      // Already utilized elsewhere — keep the pool entry and the person on
+      // the case instead of orphaning what it's now backing.
+      const prevPerson = (takt.released_persons ?? []).find((p) => p.noreg === noreg);
+      if (prevPerson) removedButLocked.push(prevPerson);
+      keptPoolIds.push(entry.id);
+    }
+  }
+
+  const newPersons = input.released_persons.filter((p) => !poolByNoreg.has(p.noreg));
+  const newPoolIds: string[] = [];
+  for (const p of newPersons) {
+    const contractEnd = estimateContractEnd(p.noreg, p.type);
+    const entry = pushToUtilPool({
+      noreg: p.noreg,
+      nama: p.nama,
+      type: p.type,
+      source: "TaktDown",
+      source_label: `Takt Down ${input.plant}`,
+      prev_div: p.div,
+      prev_dept: p.dept,
+      contract_end: contractEnd,
+      entered_pool_date: releaseDateFor(p, input.plan_rows, input.date),
+    });
+    newPoolIds.push(entry.id);
+  }
+
+  const finalPersons = [...input.released_persons.filter((p) => nextNoregs.has(p.noreg)), ...removedButLocked];
+
+  return taktStore.update(taktId, {
+    plant: input.plant,
+    date: input.date,
+    takt_before: input.takt_before,
+    takt_after: input.takt_after,
+    plan_rows: input.plan_rows,
+    released_persons: finalPersons,
+    released_pool_ids: [...keptPoolIds, ...newPoolIds],
+  });
+}
+
+/**
+ * Deletes a Takt Down case. Same safety invariant as updateTaktDown's
+ * removal path: a released person still "Open" in the Supply Pool is
+ * cleaned up with the case (nothing depends on it), but one already
+ * Assigned or Released is left in place — the case record disappears, but
+ * the Supply Pool entry it produced (and whatever Demand it's backing)
+ * keeps standing on its own. Returns false if the case doesn't exist.
+ */
+export function deleteTaktDown(taktId: string): boolean {
+  const takt = taktStore.get(taktId);
+  if (!takt || takt.category !== "down") return false;
+
+  for (const poolId of takt.released_pool_ids ?? []) {
+    const entry = utilPoolStore.get(poolId);
+    if (entry && entry.status === "Open") removePoolEntry(entry);
+  }
+  taktStore.remove(taktId);
+  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -478,8 +1055,10 @@ export function pushToUtilPool(input: {
   type: MpStatusKategori;
   source: UtilPoolEntry["source"];
   source_label: string;
+  prev_div: string;
   prev_dept: string;
   contract_end: string | null;
+  entered_pool_date?: string;
 }): UtilPoolEntry {
   const entry: UtilPoolEntry = {
     id: genId("pool"),
@@ -488,35 +1067,119 @@ export function pushToUtilPool(input: {
     type: input.type,
     source: input.source,
     source_label: input.source_label,
+    prev_div: input.prev_div,
     prev_dept: input.prev_dept,
-    entered_pool_date: today().toISOString().slice(0, 10),
+    entered_pool_date: input.entered_pool_date ?? today().toISOString().slice(0, 10),
     contract_end: input.contract_end,
     status: "Open",
     action_note: "",
   };
   utilPoolStore.insert(entry);
+  applyVokasiNaturalRelease(entry);
   return entry;
 }
 
-export function assignPoolEntryToDemand(poolEntryId: string, demandId: string): void {
-  const entry = utilPoolStore.get(poolEntryId);
-  if (!entry) return;
-  demandStore.update(demandId, {
-    replacement_noreg: entry.noreg,
-    replacement_nama: entry.nama,
-    replacement_dept: entry.prev_dept,
-    replacement_batch: "",
-    status: "Fulfilled",
+/** Kaizen-driven headcount release: a shop/department is challenged to
+ * improve its process and free up MP — this records who came out of that
+ * effort and pushes them straight into Supply Pool (like Takt Down). Each
+ * person carries the activity and release date of the plan row they were
+ * picked for, and the whole release is declared under one labor group
+ * (A/F or B/C). source_label groups them per year, labor group, division
+ * and activity so each result gets its own Source Summary batch. Contract
+ * due date is auto-estimated like every other Supply Pool source. */
+export function createKaizenSupply(input: {
+  laborGroup: KaizenLaborGroup;
+  persons: {
+    noreg: string;
+    nama: string;
+    type: MpStatusKategori;
+    div: string;
+    dept: string;
+    activity: string;
+    releaseDate: string;
+  }[];
+}): UtilPoolEntry[] {
+  return input.persons.map((p) => {
+    const contractEnd = estimateContractEnd(p.noreg, p.type);
+    const year = p.releaseDate.slice(0, 4);
+    return pushToUtilPool({
+      noreg: p.noreg,
+      nama: p.nama,
+      type: p.type,
+      source: "Kaizen",
+      source_label: `Kaizen ${year} Labor ${input.laborGroup} - ${p.div} (${p.activity})`,
+      prev_div: p.div,
+      prev_dept: p.dept,
+      contract_end: contractEnd,
+      entered_pool_date: p.releaseDate,
+    });
   });
+}
+
+/** Step 1 of pool mapping: propose a Util Pool person (MP Excess/Back Up)
+ * for a demand. The demand stays Open ("Diusulkan") and the pool entry is
+ * reserved so no other demand can take it; step 2 is HR/admin verifying via
+ * confirmDemandFulfillment. Pass `null` to withdraw the proposal and release
+ * the reserved entry. Routed through the `propose_pool_candidate` RPC
+ * (migration_12) so the admin / shop-PKWT rule holds server-side — direct
+ * table writes here are admin-only under RLS and fail silently for shop. */
+export function proposePoolCandidate(poolEntryId: string | null, demandId: string): void {
   const demand = demandStore.get(demandId);
-  if (demand?.category === "PKWT") {
-    const fs_status = computeFsStatus(demand.dept, entry.prev_dept, undefined);
-    demandStore.update(demandId, { fs_status });
+  if (!demand) return;
+  const entry = poolEntryId ? utilPoolStore.get(poolEntryId) : undefined;
+  if (poolEntryId && !entry) return;
+
+  const previousDemand = demand;
+  const previousEntry = demand.replacement_noreg
+    ? utilPoolStore.list().find((e) => e.noreg === demand.replacement_noreg && e.status === "Assigned")
+    : undefined;
+  const releasing = previousEntry && previousEntry.id !== poolEntryId ? previousEntry : undefined;
+  const entryBefore = entry ? { status: entry.status, action_note: entry.action_note } : undefined;
+
+  const replacement_status: ReplacementStatus =
+    demand.replacement_status === "" || demand.replacement_status === "No Replace"
+      ? "MP Excess"
+      : demand.replacement_status;
+  const fs_status = entry ? computeFsStatus(replacement_status, demand.dept, entry.prev_dept, undefined) : "";
+
+  if (releasing) utilPoolStore.patchLocal(releasing.id, { status: "Open", action_note: "" });
+  if (entry) {
+    demandStore.patchLocal(demandId, {
+      replacement_status,
+      no_replace_reason: "",
+      replacement_noreg: entry.noreg,
+      replacement_nama: entry.nama,
+      replacement_dept: entry.prev_dept,
+      replacement_batch: "",
+      fs_status,
+      status: "Open",
+    });
+    utilPoolStore.patchLocal(entry.id, { status: "Assigned", action_note: `Diusulkan untuk demand ${demandId}` });
+  } else {
+    demandStore.patchLocal(demandId, {
+      replacement_noreg: "",
+      replacement_nama: "",
+      replacement_dept: "",
+      replacement_batch: "",
+      fs_status: "",
+      status: "Open",
+    });
   }
-  utilPoolStore.update(poolEntryId, {
-    status: "Assigned",
-    action_note: `Assigned to demand ${demandId}`,
-  });
+
+  createClient()
+    .rpc("propose_pool_candidate", { p_demand_id: demandId, p_pool_entry_id: poolEntryId, p_fs_status: fs_status })
+    .then((res: { error: { message: string } | null }) => {
+      if (res.error) {
+        console.error("propose_pool_candidate failed:", res.error.message);
+        demandStore.patchLocal(demandId, previousDemand);
+        if (releasing) utilPoolStore.patchLocal(releasing.id, { status: releasing.status, action_note: releasing.action_note });
+        if (entry && entryBefore) utilPoolStore.patchLocal(entry.id, entryBefore);
+        pushToast(`Gagal menyimpan usulan: ${res.error.message}`);
+        return;
+      }
+      demandStore.refetch();
+      utilPoolStore.refetch();
+    });
 }
 
 export function naturalRelease(poolEntryId: string): void {

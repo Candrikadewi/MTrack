@@ -3,82 +3,104 @@ import { useState } from "react";
 import { Modal } from "@/components/ui/Modal";
 import { Field, Input, Select } from "@/components/ui/Form";
 import { Button } from "@/components/ui/Button";
-import { getActiveSnapshot, vokasiStore } from "@/lib/repo";
-import { createTaktDown } from "@/lib/engine/actions";
-import type { MpStatusKategori, Plant } from "@/lib/types";
+import { CompositionRowsEditor, emptyCompositionRow, type CompositionRow } from "@/components/takt/CompositionRowsEditor";
+import { ReleaseMappingStep, StepNav } from "@/components/takt/ReleaseMappingStep";
+import { TaktSecondsField } from "@/components/takt/TaktSecondsField";
+import { createTaktDown, updateTaktDown } from "@/lib/engine/actions";
+import type { Plant, TaktCase, TaktDownPerson, TaktDownPlanRow, UtilPoolEntry } from "@/lib/types";
 
-interface Candidate {
-  noreg: string;
-  nama: string;
-  dept: string;
-  type: MpStatusKategori;
+function toPlanRow(row: CompositionRow): Omit<TaktDownPlanRow, "id"> {
+  return { division: row.division, dept: row.dept, status_mp: row.status_mp, qty: row.qty, release_date: row.date };
 }
 
-export function TaktDownModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const [plant, setPlant] = useState<Plant>("Plant 1");
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
-  const [taktBefore, setTaktBefore] = useState(0);
-  const [taktAfter, setTaktAfter] = useState(0);
-  const [query, setQuery] = useState("");
-  const [selected, setSelected] = useState<Candidate[]>([]);
+function fromPlanRow(row: TaktDownPlanRow): CompositionRow {
+  return { id: row.id, division: row.division, dept: row.dept, status_mp: row.status_mp, qty: row.qty, date: row.release_date };
+}
 
-  function loadCandidates(): Candidate[] {
-    const snap = getActiveSnapshot();
-    const fromEmployees: Candidate[] = (snap?.employees ?? []).map((e) => ({
-      noreg: e.noreg,
-      nama: e.nama,
-      dept: e.dept,
-      type: e.status_kontrak === "Permanen" ? "Permanen" : e.status_kontrak === "AKTI" ? "AKTI" : "PKWT",
-    }));
-    const fromVokasi: Candidate[] = vokasiStore.list().map((v) => ({
-      noreg: v.noreg,
-      nama: v.nama,
-      dept: v.dept,
-      type: "Vokasi",
-    }));
-    return [...fromEmployees, ...fromVokasi];
+/** Legacy cases created before plan_rows existed have no plan — synthesize
+ * a starting plan from the actual released persons instead of handing the
+ * editor an empty table. */
+function planRowsFromPersons(persons: TaktDownPerson[]): CompositionRow[] {
+  const groups = new Map<string, CompositionRow>();
+  for (const p of persons) {
+    const key = `${p.div}|${p.dept}|${p.type}`;
+    const existing = groups.get(key);
+    if (existing) existing.qty += 1;
+    else groups.set(key, emptyCompositionRow({ division: p.div, dept: p.dept, status_mp: p.type, qty: 1 }));
   }
+  return Array.from(groups.values());
+}
 
-  const candidates = open ? loadCandidates() : [];
+/**
+ * Always rendered conditionally by the caller — `{open && <TaktDownModal
+ * .../>}`, keyed by the case id when editing — so mounting IS "just
+ * opened": every piece of draft state can seed itself once from `editing`
+ * via a lazy initializer instead of an effect that would re-seed on every
+ * render. Re-opening for a different case gets a fresh instance because the
+ * key changes; there is no scenario where this same instance needs to
+ * re-seed itself after mount.
+ */
+export function TaktDownModal({
+  onClose,
+  editing,
+  poolEntries,
+}: {
+  onClose: () => void;
+  /** Present when editing an existing Takt Down case instead of creating one. */
+  editing?: TaktCase;
+  poolEntries: UtilPoolEntry[];
+}) {
+  const isEditing = Boolean(editing);
+  const [step, setStep] = useState<"plan" | "names">("plan");
+  const [plant, setPlant] = useState<Plant>(editing?.plant ?? "Plant 1");
+  const [date, setDate] = useState(editing?.date ?? new Date().toISOString().slice(0, 10));
+  const [taktBefore, setTaktBefore] = useState(editing?.takt_before ?? 0);
+  const [taktAfter, setTaktAfter] = useState(editing?.takt_after ?? 0);
+  const [planRows, setPlanRows] = useState<CompositionRow[]>(() => {
+    if (!editing) return [emptyCompositionRow()];
+    const rows = editing.plan_rows?.length ? editing.plan_rows.map(fromPlanRow) : planRowsFromPersons(editing.released_persons ?? []);
+    return rows.length ? rows : [emptyCompositionRow()];
+  });
+  const [selected, setSelected] = useState<TaktDownPerson[]>(() => (editing?.released_persons ?? []).map((p) => ({ ...p })));
 
-  const filtered = query
-    ? candidates.filter(
-        (c) => c.noreg.toLowerCase().includes(query.toLowerCase()) || c.nama.toLowerCase().includes(query.toLowerCase())
-      )
-    : [];
-
-  function addCandidate(c: Candidate) {
-    if (selected.some((s) => s.noreg === c.noreg)) return;
-    setSelected((prev) => [...prev, c]);
-    setQuery("");
-  }
-
-  function removeCandidate(noreg: string) {
-    setSelected((prev) => prev.filter((s) => s.noreg !== noreg));
-  }
-
-  function reset() {
-    setSelected([]);
-    setQuery("");
-    setTaktBefore(0);
-    setTaktAfter(0);
-  }
+  // Editing an already-Assigned/Released person would orphan whatever
+  // that Supply Pool entry is now backing — updateTaktDown enforces this
+  // too, but disabling it here avoids a dead-end "Hapus" click.
+  const poolStatusByNoreg = new Map(
+    (editing?.released_pool_ids ?? [])
+      .map((id) => poolEntries.find((e) => e.id === id))
+      .filter((e): e is UtilPoolEntry => Boolean(e))
+      .map((e) => [e.noreg, e.status])
+  );
+  const isRemovable = (noreg: string) => (poolStatusByNoreg.get(noreg) ?? "Open") === "Open";
 
   function submit() {
     if (selected.length === 0) return;
-    createTaktDown({
-      plant,
-      date,
-      takt_before: taktBefore,
-      takt_after: taktAfter,
-      released_persons: selected.map((s) => ({ noreg: s.noreg, nama: s.nama, type: s.type, dept: s.dept })),
-    });
-    reset();
+    const validRows = planRows.filter((r) => r.division && r.dept && r.qty > 0);
+    if (isEditing && editing) {
+      updateTaktDown(editing.id, {
+        plant,
+        date,
+        takt_before: taktBefore,
+        takt_after: taktAfter,
+        plan_rows: validRows.map((r) => ({ ...toPlanRow(r), id: r.id })),
+        released_persons: selected,
+      });
+    } else {
+      createTaktDown({
+        plant,
+        date,
+        takt_before: taktBefore,
+        takt_after: taktAfter,
+        plan_rows: validRows.map(toPlanRow),
+        released_persons: selected,
+      });
+    }
     onClose();
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="Takt Down — Lepas Personil" width="max-w-xl">
+    <Modal open onClose={onClose} title={isEditing ? "Edit Takt Down" : "Takt Down: Lepas Personil"} width="max-w-5xl">
       <div className="space-y-4">
         <div className="grid grid-cols-4 gap-4">
           <Field label="Plant">
@@ -90,62 +112,48 @@ export function TaktDownModal({ open, onClose }: { open: boolean; onClose: () =>
           <Field label="Tanggal">
             <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
           </Field>
-          <Field label="Takt Before (s)">
-            <Input type="number" value={taktBefore} onChange={(e) => setTaktBefore(Number(e.target.value))} />
-          </Field>
-          <Field label="Takt After (s)">
-            <Input type="number" value={taktAfter} onChange={(e) => setTaktAfter(Number(e.target.value))} />
-          </Field>
+          <TaktSecondsField label="Takt Before (detik)" valueMinutes={taktBefore} onChange={setTaktBefore} />
+          <TaktSecondsField label="Takt After (detik)" valueMinutes={taktAfter} onChange={setTaktAfter} />
         </div>
 
-        <Field label="Cari Personil (noreg / nama)">
-          <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Ketik untuk mencari..." />
-        </Field>
-        {filtered.length > 0 && (
-          <div className="max-h-40 overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-800">
-            {filtered.slice(0, 20).map((c) => (
-              <button
-                key={c.noreg}
-                onClick={() => addCandidate(c)}
-                className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-800"
-              >
-                <span>
-                  {c.noreg} — {c.nama} <span className="text-slate-400">({c.dept})</span>
-                </span>
-                <span className="text-xs text-slate-400">{c.type}</span>
-              </button>
-            ))}
+        <StepNav step={step} onStep={setStep} />
+
+        {step === "plan" && (
+          <div className="space-y-3">
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Satu perubahan takt time biasanya berdampak ke beberapa shop sekaligus, dengan komposisi status MP
+              (Permanen/Vokasi/Kontrak) yang berbeda-beda per shop. Tentukan rencana per shop dulu di sini, baru pilih
+              orangnya di langkah berikutnya.
+            </p>
+            <h4 className="text-xs font-semibold text-slate-500">Rencana Rilis per Shop</h4>
+            <CompositionRowsEditor rows={planRows} onChange={setPlanRows} dateLabel="Tanggal Release" laborTypeFilter="A" />
+            <div className="flex justify-end pt-2">
+              <Button variant="primary" onClick={() => setStep("names")}>
+                Lanjut ke Mapping Name-by-Name →
+              </Button>
+            </div>
           </div>
         )}
 
-        <div>
-          <h4 className="mb-2 text-xs font-semibold text-slate-500">Personil Terpilih ({selected.length})</h4>
-          {selected.length === 0 ? (
-            <p className="text-sm text-slate-400">Belum ada personil dipilih.</p>
-          ) : (
-            <ul className="space-y-1">
-              {selected.map((s) => (
-                <li key={s.noreg} className="flex items-center justify-between rounded-lg border border-slate-100 px-3 py-1.5 text-sm dark:border-slate-800">
-                  <span>
-                    {s.noreg} — {s.nama} ({s.type}, {s.dept})
-                  </span>
-                  <button onClick={() => removeCandidate(s.noreg)} className="text-red-500 hover:text-red-700">
-                    Hapus
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+        {step === "names" && (
+          <div className="space-y-4">
+            <ReleaseMappingStep planRows={planRows} selected={selected} onChange={setSelected} isRemovable={isRemovable} />
 
-        <div className="flex justify-end gap-2 pt-2">
-          <Button variant="secondary" onClick={onClose}>
-            Batal
-          </Button>
-          <Button variant="primary" onClick={submit} disabled={selected.length === 0}>
-            Simpan Takt Down
-          </Button>
-        </div>
+            <div className="flex justify-between gap-2 pt-2">
+              <Button variant="secondary" onClick={() => setStep("plan")}>
+                ← Kembali ke Rencana
+              </Button>
+              <div className="flex gap-2">
+                <Button variant="secondary" onClick={onClose}>
+                  Batal
+                </Button>
+                <Button variant="primary" onClick={submit} disabled={selected.length === 0}>
+                  {isEditing ? "Simpan Perubahan" : "Simpan Takt Down"} ({selected.length} orang)
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </Modal>
   );
