@@ -9,7 +9,8 @@ import {
   parseISO,
   subBusinessDays,
 } from "date-fns";
-import type { FsStatus, ReplacementStatus, StatusKontrak, VokasiStatusSaatIni } from "../types";
+import { CONTRACT_MONTHS } from "../types";
+import type { FsStatus, MpStatusKategori, ReplacementStatus, StatusKontrak, VokasiStatusSaatIni } from "../types";
 
 export function today(): Date {
   return new Date(new Date().toDateString());
@@ -188,4 +189,20 @@ export function formatMinutesSecondsClock(seconds: number): string {
   const mins = Math.floor(total / 60);
   const secs = total % 60;
   return `${mins}.${String(secs).padStart(2, "0")}`;
+}
+
+/** How many people fill one project seat in sequence between its fulfil
+ * date and the project's end: one per contract started before the project
+ * ends — e.g. a 1-year project with Vokasi (6-month contracts) is 2. Null
+ * when the status has no fixed contract length (Permanen/AKTI) or a date is
+ * missing. */
+export function projectFillCount(status: MpStatusKategori, fromDate: string, projectEnd: string): number | null {
+  const months = CONTRACT_MONTHS[status];
+  if (!months || !fromDate || !projectEnd) return null;
+  const start = parseISO(fromDate);
+  const end = parseISO(projectEnd);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
+  let count = 1;
+  while (addMonths(start, count * months) < end && count < 100) count++;
+  return count;
 }

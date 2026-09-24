@@ -275,7 +275,32 @@ export interface Demand {
 
 export type ProjectStatus = "Ongoing" | "Finish";
 
-export type MpRole = "Proses" | "Backup";
+/** Jenis MP on a project need-row. MP Project and MP Backup leave with the
+ * project: when it ends, whoever holds the seat and still has contract left
+ * goes to Supply Pool as MP Excess. MP Setting stays in the shop for good
+ * (its seat keeps the normal replacement cycle after the project). "Proses"
+ * is the old stored name for MP Project. */
+export type MpRole = "Project" | "Backup" | "Setting" | "Proses";
+
+export const MP_ROLE_OPTIONS: { value: Exclude<MpRole, "Proses">; label: string }[] = [
+  { value: "Project", label: "MP Project" },
+  { value: "Backup", label: "MP Backup" },
+  { value: "Setting", label: "MP Setting" },
+];
+
+export function mpRoleLabel(role: MpRole | undefined): string {
+  if (role === "Backup") return "MP Backup";
+  if (role === "Setting") return "MP Setting";
+  return "MP Project";
+}
+
+export function releasedAtProjectEnd(role: MpRole | undefined): boolean {
+  return role !== "Setting";
+}
+
+/** Contract length per MP status, for counting how many times a project
+ * seat has to be filled. Permanen/AKTI have no fixed cycle here. */
+export const CONTRACT_MONTHS: Partial<Record<MpStatusKategori, number>> = { Vokasi: 6, PKWT: 24 };
 
 export interface ProjectMpNeedRow {
   id: string;
@@ -285,6 +310,9 @@ export interface ProjectMpNeedRow {
   mp_role: MpRole;
   qty: number;
   fulfill_date: string;
+  /** Demands expanded from this row (stored inside projects.rows). Older
+   * projects don't have it; see projectRowOfDemand for the fallback. */
+  demand_ids?: string[];
 }
 
 export interface Project {

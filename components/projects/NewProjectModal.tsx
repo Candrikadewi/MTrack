@@ -7,15 +7,15 @@ import { Badge } from "@/components/ui/Badge";
 import { TableWrap, Th, Td } from "@/components/ui/Table";
 import { CompositionRowsEditor, emptyCompositionRow, type CompositionRow } from "@/components/takt/CompositionRowsEditor";
 import { addProjectRow, createProject, increaseProjectRowQty, updateProjectDetails } from "@/lib/engine/actions";
-import { fmtDate } from "@/lib/engine/compute";
-import type { Project, ProjectMpNeedRow } from "@/lib/types";
+import { fmtDate, projectFillCount } from "@/lib/engine/compute";
+import { CONTRACT_MONTHS, mpRoleLabel, releasedAtProjectEnd, type Project, type ProjectMpNeedRow } from "@/lib/types";
 
 function toNeedRow(row: CompositionRow): Omit<ProjectMpNeedRow, "id"> {
   return {
     division: row.division,
     dept: row.dept,
     status_mp: row.status_mp,
-    mp_role: row.mp_role ?? "Proses",
+    mp_role: row.mp_role ?? "Project",
     qty: row.qty,
     fulfill_date: row.date,
   };
@@ -31,6 +31,19 @@ function fromNeedRow(row: ProjectMpNeedRow): CompositionRow {
     qty: row.qty,
     date: row.fulfill_date,
   };
+}
+
+/** "2x · 6 orang" — how many times one seat of this row is filled before the
+ * project ends (see projectFillCount), and the total people across its qty. */
+function fillLabel(row: CompositionRow, startDate: string, endDate: string): string {
+  const count = projectFillCount(row.status_mp, row.date || startDate, endDate);
+  if (count === null) return row.status_mp === "Permanen" ? "1x (tanpa kontrak)" : "—";
+  const cycle = CONTRACT_MONTHS[row.status_mp];
+  return `${count}x · tiap ${cycle} bln${row.qty > 1 ? ` · ${count * row.qty} orang` : ""}`;
+}
+
+function afterProjectLabel(row: CompositionRow): string {
+  return releasedAtProjectEnd(row.mp_role) ? "Dirilis → MP Excess bila kontrak masih ada" : "Tetap di shop";
 }
 
 /**
@@ -62,7 +75,7 @@ export function NewProjectModal({ open, onClose, project }: { open: boolean; onC
   }
 
   function goToPreview() {
-    if (!name || !startDate || !endDate) return;
+    if (!name || !startDate || !endDate || endDate < startDate) return;
     if (validRows().length === 0) return;
     setStep("preview");
   }
@@ -103,6 +116,15 @@ export function NewProjectModal({ open, onClose, project }: { open: boolean; onC
               <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
             </Field>
           </div>
+          <p className="-mt-1 text-xs text-slate-500 dark:text-slate-400">
+            Tanggal selesai menentukan berapa kali tiap kursi MP harus diisi (mis. projek 1 tahun dengan Vokasi = 2 kali). Saat
+            projek selesai, <b className="font-semibold text-slate-600 dark:text-slate-300">MP Project</b> dan{" "}
+            <b className="font-semibold text-slate-600 dark:text-slate-300">MP Backup</b> yang kontraknya masih ada masuk Supply Pool
+            sebagai MP Excess; <b className="font-semibold text-slate-600 dark:text-slate-300">MP Setting</b> tetap di shop.
+            {endDate && startDate && endDate < startDate && (
+              <span className="mt-1 block font-medium text-red-600 dark:text-red-400">Tanggal selesai harus setelah tanggal mulai.</span>
+            )}
+          </p>
 
           <div>
             <h4 className="mb-2 text-xs font-semibold text-slate-500">Kebutuhan MP</h4>
@@ -148,9 +170,11 @@ export function NewProjectModal({ open, onClose, project }: { open: boolean; onC
                 <Th>Divisi</Th>
                 <Th>Department</Th>
                 <Th>Status MP</Th>
-                <Th>MP Role</Th>
+                <Th>Jenis MP</Th>
                 <Th>Qty</Th>
                 <Th>Tanggal Pemenuhan</Th>
+                <Th>Pengisian selama projek</Th>
+                <Th>Setelah projek selesai</Th>
               </tr>
             </thead>
             <tbody>
@@ -159,15 +183,21 @@ export function NewProjectModal({ open, onClose, project }: { open: boolean; onC
                   <Td>{r.division}</Td>
                   <Td>{r.dept}</Td>
                   <Td>{r.status_mp}</Td>
-                  <Td>{r.mp_role}</Td>
+                  <Td>{mpRoleLabel(r.mp_role)}</Td>
                   <Td>{r.qty}</Td>
                   <Td>{fmtDate(r.date)}</Td>
+                  <Td className="whitespace-nowrap">{fillLabel(r, startDate, endDate)}</Td>
+                  <Td>
+                    <Badge tone={releasedAtProjectEnd(r.mp_role) ? "amber" : "green"}>{afterProjectLabel(r)}</Badge>
+                  </Td>
                 </tr>
               ))}
             </tbody>
           </TableWrap>
           <p className="text-xs text-slate-400">
-            Total kebutuhan: {validRows().reduce((sum, r) => sum + r.qty, 0)} orang. Periksa dulu sebelum register, demand akan langsung dibuat begitu di-register.
+            Total kebutuhan awal: {validRows().reduce((sum, r) => sum + r.qty, 0)} orang. Demand awal langsung dibuat begitu di-register;
+            demand penggantian muncul sendiri saat kontrak pengisinya habis sebelum projek selesai (berlabel nama projek). Kontrak yang
+            habis setelah projek selesai tidak diganti untuk MP Project/Backup.
           </p>
 
           <div className="flex justify-end gap-2 pt-2">

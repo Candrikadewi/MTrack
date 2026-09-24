@@ -1,5 +1,5 @@
 "use client";
-import { useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { addMonths, format } from "date-fns";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -41,6 +41,7 @@ import {
   setDemandFulfillDate,
   setDemandNoReplace,
   setDemandReplacementByNoreg,
+  syncProjectSeatDemands,
 } from "@/lib/engine/actions";
 import { pushToast } from "@/lib/toast";
 import { useRole } from "@/lib/RoleContext";
@@ -277,6 +278,13 @@ export function DemandPageClient() {
   const employees = useMemo(() => snapshots.find((s) => s.is_active)?.employees ?? [], [snapshots]);
   const empByNoreg = useMemo(() => new Map(employees.map((e) => [e.noreg, e])), [employees]);
   const vokasiNoregs = useMemo(() => new Set(vokasi.map((v) => v.noreg)), [vokasi]);
+
+  // Admin only (the fixes go through admin-scoped writes): bring project
+  // seats' replacement demands in line with each project's end date.
+  const projectsReady = useStoreReady(projectStore);
+  useEffect(() => {
+    if (isAdmin && demandsReady && projectsReady) syncProjectSeatDemands();
+  }, [isAdmin, demandsReady, projectsReady]);
 
   const batchCategories = useMemo(() => buildDemandBatchCategories(demands, projects, taktCases), [demands, projects, taktCases]);
 

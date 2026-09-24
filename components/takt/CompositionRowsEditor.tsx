@@ -2,7 +2,7 @@
 import { X } from "lucide-react";
 import { Select, Input } from "@/components/ui/Form";
 import { getActiveSnapshot } from "@/lib/repo";
-import type { MpRole, MpStatusKategori } from "@/lib/types";
+import { MP_ROLE_OPTIONS, type MpRole, type MpStatusKategori } from "@/lib/types";
 
 /** Shared shape for a Takt Up need-row, a Takt Down plan-row, or a Project
  * need-row while they're being composed — each modal converts to/from its
@@ -26,7 +26,7 @@ export function emptyCompositionRow(patch: Partial<CompositionRow> = {}): Compos
     division: "",
     dept: "",
     status_mp: "PKWT",
-    mp_role: "Proses",
+    mp_role: "Project",
     qty: 1,
     date: "",
     ...patch,
@@ -193,15 +193,18 @@ export function CompositionRowsEditor({
                           </Select>
                         </div>
                         {withRole && (
-                          <div className="w-28">
-                            <span className="mb-0.5 block text-[10px] font-medium text-slate-500 dark:text-slate-400">MP Role</span>
+                          <div className="w-32">
+                            <span className="mb-0.5 block text-[10px] font-medium text-slate-500 dark:text-slate-400">Jenis MP</span>
                             <Select
-                              value={row.mp_role}
+                              value={row.mp_role === "Proses" ? "Project" : row.mp_role}
                               disabled={locked}
                               onChange={(e) => update(row.id, { mp_role: e.target.value as MpRole })}
                             >
-                              <option value="Proses">Proses</option>
-                              <option value="Backup">Backup</option>
+                              {MP_ROLE_OPTIONS.map((o) => (
+                                <option key={o.value} value={o.value}>
+                                  {o.label}
+                                </option>
+                              ))}
                             </Select>
                           </div>
                         )}
