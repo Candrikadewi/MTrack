@@ -43,6 +43,8 @@ import {
   setDemandReplacementByNoreg,
   syncProjectSeatDemands,
   autoProjectFinishCheck,
+  ensureVokasiEndedDemands,
+  repairMissingPlanDemands,
 } from "@/lib/engine/actions";
 import { pushToast } from "@/lib/toast";
 import { useRole } from "@/lib/RoleContext";
@@ -159,81 +161,92 @@ function demandRatioDelta(d: Demand, empByNoreg: Map<string, EmployeeRecord>, vo
 // Section 1 — Ringkasan per Batch
 // ---------------------------------------------------------------------------
 
+/** Every tile and batch counts MP still to fulfil (not yet verified), out
+ * of the demand it has. Vokasi counts from the month its batch ends, and
+ * No Replace has nothing to fill, so neither is in the total. Batches with
+ * nothing left are not listed. */
 function buildDemandBatchCategories(
   demands: Demand[],
   projects: Project[],
   taktCases: TaktCase[]
 ): BatchTileCategory[] {
-  // Still-open demand that needs a replacement now: Vokasi only counts from
-  // the month its batch ends, and No Replace has nothing left to fill.
-  const open = demands.filter((d) => d.status !== "Fulfilled" && d.replacement_status !== "No Replace" && isDemandDue(d));
+  const active = demands.filter((d) => d.replacement_status !== "No Replace" && isDemandDue(d));
+  const isOpen = (d: Demand) => d.status !== "Fulfilled";
 
-  function groupBy(items: Demand[], keyOf: (d: Demand) => string) {
+  function batchesOf(
+    items: Demand[],
+    keyOf: (d: Demand) => string,
+    describe: (key: string) => { label: string; meta?: string; href?: string },
+    order: (a: string, b: string) => number = () => 0
+  ) {
     const map = new Map<string, Demand[]>();
     for (const d of items) {
       const key = keyOf(d);
-      const arr = map.get(key) ?? [];
-      arr.push(d);
-      map.set(key, arr);
+      map.set(key, [...(map.get(key) ?? []), d]);
     }
-    return map;
+    return Array.from(map.entries())
+      .map(([key, list]) => ({ id: key, ...describe(key), count: list.filter(isOpen).length, total: list.length }))
+      .filter((b) => b.count > 0)
+      .sort((a, b) => order(a.id, b.id));
   }
 
-  const projectDemands = open.filter((d) => d.origin_type === "Project");
-  const projectGroups = groupBy(projectDemands, (d) => d.origin_ref);
-  const projectBatches = Array.from(projectGroups.entries()).map(([ref, items]) => {
-    const p = projects.find((x) => x.id === ref);
-    return {
-      id: ref,
-      label: p?.name ?? "Project",
-      meta: p ? `SOP ${fmtDate(p.start_date)}` : undefined,
-      count: items.length,
-      href: "/projects",
-    };
-  });
+  function category(key: string, label: string, tone: BatchTileCategory["tone"], items: Demand[], batches: BatchTileCategory["batches"]) {
+    return { key, label, tone, count: items.filter(isOpen).length, total: items.length, batches };
+  }
 
-  const taktUpDemands = open.filter((d) => d.origin_type === "TaktUp");
-  const taktUpGroups = groupBy(taktUpDemands, (d) => d.origin_ref);
-  const taktUpBatches = Array.from(taktUpGroups.entries()).map(([ref, items]) => {
-    const t = taktCases.find((x) => x.id === ref);
-    return { id: ref, label: t ? `Takt Up — ${t.plant}` : "Takt Up", meta: t ? fmtDate(t.date) : undefined, count: items.length };
-  });
+  const byMonthDesc = (a: string, b: string) => b.localeCompare(a);
+  const monthLabel = (prefix: string, month: string) =>
+    month === "-" ? prefix : `${prefix} — ${format(new Date(`${month}-01T00:00:00`), "MMM yyyy")}`;
 
-  const pkwtDemands = open.filter((d) => d.origin_type === "PkwtTerminate");
-  const pkwtGroups = groupBy(pkwtDemands, (d) => demandTargetDate(d).slice(0, 7) || "-");
-  const pkwtBatches = Array.from(pkwtGroups.entries())
-    .sort((a, b) => b[0].localeCompare(a[0]))
-    .map(([month, items]) => ({
-      id: month,
-      label: month === "-" ? "Review PKWT" : `Review PKWT — ${format(new Date(`${month}-01T00:00:00`), "MMM yyyy")}`,
-      count: items.length,
-    }));
-
-  const vokasiDemands = open.filter((d) => d.origin_type === "VokasiEnded");
-  const vokasiGroups = groupBy(vokasiDemands, (d) => demandTargetDate(d).slice(0, 7) || "-");
-  const vokasiBatches = Array.from(vokasiGroups.entries())
-    .sort((a, b) => b[0].localeCompare(a[0]))
-    .map(([month, items]) => ({
-      id: month,
-      label: month === "-" ? "Vokasi Ended" : `Vokasi Ended — ${format(new Date(`${month}-01T00:00:00`), "MMM yyyy")}`,
-      count: items.length,
-    }));
-
+  const projectDemands = active.filter((d) => d.origin_type === "Project");
+  const taktUpDemands = active.filter((d) => d.origin_type === "TaktUp");
+  const pkwtDemands = active.filter((d) => d.origin_type === "PkwtTerminate");
+  const vokasiDemands = active.filter((d) => d.origin_type === "VokasiEnded");
   const lainnyaTypes: DemandOriginType[] = ["Resign", "Pension", "PensionDini", "GST", "Unfit", "Others", "Manual"];
-  const lainnyaDemands = open.filter((d) => lainnyaTypes.includes(d.origin_type));
-  const lainnyaGroups = groupBy(lainnyaDemands, (d) => d.origin_type);
-  const lainnyaBatches = Array.from(lainnyaGroups.entries()).map(([type, items]) => ({
-    id: type,
-    label: JENIS_LABEL[type as DemandOriginType],
-    count: items.length,
-  }));
+  const lainnyaDemands = active.filter((d) => lainnyaTypes.includes(d.origin_type));
 
   return [
-    { key: "project", label: "Project", count: projectDemands.length, tone: "blue", batches: projectBatches },
-    { key: "taktup", label: "Takt Up", count: taktUpDemands.length, tone: "blue", batches: taktUpBatches },
-    { key: "pkwt", label: "PKWT", count: pkwtDemands.length, tone: "amber", batches: pkwtBatches },
-    { key: "vokasi", label: "Vokasi", count: vokasiDemands.length, tone: "violet", batches: vokasiBatches },
-    { key: "lainnya", label: "Lainnya", count: lainnyaDemands.length, tone: "slate", batches: lainnyaBatches },
+    category(
+      "project",
+      "Project",
+      "blue",
+      projectDemands,
+      batchesOf(projectDemands, (d) => d.origin_ref, (ref) => {
+        const p = projects.find((x) => x.id === ref);
+        return { label: p?.name ?? "Project", meta: p ? `SOP ${fmtDate(p.start_date)}` : undefined, href: "/projects" };
+      })
+    ),
+    category(
+      "taktup",
+      "Takt Up",
+      "blue",
+      taktUpDemands,
+      batchesOf(taktUpDemands, (d) => d.origin_ref, (ref) => {
+        const t = taktCases.find((x) => x.id === ref);
+        return { label: t ? `Takt Up — ${t.plant}` : "Takt Up", meta: t ? fmtDate(t.date) : undefined };
+      })
+    ),
+    category(
+      "pkwt",
+      "PKWT",
+      "amber",
+      pkwtDemands,
+      batchesOf(pkwtDemands, (d) => demandTargetDate(d).slice(0, 7) || "-", (m) => ({ label: monthLabel("Review PKWT", m) }), byMonthDesc)
+    ),
+    category(
+      "vokasi",
+      "Vokasi",
+      "violet",
+      vokasiDemands,
+      batchesOf(vokasiDemands, (d) => demandTargetDate(d).slice(0, 7) || "-", (m) => ({ label: monthLabel("Vokasi Ended", m) }), byMonthDesc)
+    ),
+    category(
+      "lainnya",
+      "Lainnya",
+      "slate",
+      lainnyaDemands,
+      batchesOf(lainnyaDemands, (d) => d.origin_type, (type) => ({ label: JENIS_LABEL[type as DemandOriginType] }))
+    ),
   ];
 }
 
@@ -287,11 +300,16 @@ export function DemandPageClient() {
   const poolReady = useStoreReady(utilPoolStore);
   const vokasiReady = useStoreReady(vokasiStore);
   const zparReady = useStoreReady(zparStore);
-  const releaseInputsReady = demandsReady && projectsReady && poolReady && vokasiReady && zparReady;
+  const taktReady = useStoreReady(taktStore);
+  const releaseInputsReady = demandsReady && projectsReady && poolReady && vokasiReady && zparReady && taktReady;
   useEffect(() => {
     if (!isAdmin || !releaseInputsReady) return;
-    autoProjectFinishCheck();
-    syncProjectSeatDemands();
+    // Recreate demands whose insert was rejected before blank dates were
+    // sent as null, then run the usual release/sync passes over them.
+    Promise.all([repairMissingPlanDemands(), ensureVokasiEndedDemands()]).then(() => {
+      autoProjectFinishCheck();
+      syncProjectSeatDemands();
+    });
   }, [isAdmin, releaseInputsReady]);
 
   const batchCategories = useMemo(() => buildDemandBatchCategories(demands, projects, taktCases), [demands, projects, taktCases]);
@@ -484,8 +502,8 @@ export function DemandPageClient() {
         </p>
       </div>
 
-      <SectionHeading n={1} title="Ringkasan per Batch" subtitle="Demand yang belum terpenuhi sampai bulan ini (Vokasi dihitung mulai bulan berakhirnya). Klik tile untuk rincian." divider={false} />
-      <BatchTileRow categories={batchCategories} onShowInTable={showCategoryInTable} />
+      <SectionHeading n={1} title="Ringkasan per Batch" subtitle="Jumlah MP yang belum terpenuhi (belum diverifikasi) dari total demand sampai bulan ini. Vokasi dihitung mulai bulan berakhirnya. Klik tile untuk rincian." divider={false} />
+      <BatchTileRow categories={batchCategories} pendingLabel="belum terpenuhi" onShowInTable={showCategoryInTable} />
 
       {canReview && (
         <CollapsibleSection
