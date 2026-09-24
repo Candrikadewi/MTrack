@@ -459,9 +459,10 @@ function ActionNeededBlock({
   );
 }
 
-/** Remaining MP out of the total, the same numbers and batch names as
- * Ringkasan per Batch on the Demand / Supply page, highlighted while any
- * is left. Lists the batches with the most left first. */
+/** Done out of total ("27/30"), the same numbers and batch names as
+ * Ringkasan per Batch on the Demand / Supply page, highlighted with how
+ * many are left until it's full. Lists the batches with the most left
+ * first. */
 function PendingWorkCard({
   title,
   href,
@@ -494,7 +495,7 @@ function PendingWorkCard({
           <div className="text-xs font-semibold text-slate-600 dark:text-slate-300">{title}</div>
           <div className="mt-0.5 flex items-baseline gap-0.5 tabular-nums">
             <span className={`text-2xl font-bold ${pending ? "text-amber-700 dark:text-amber-300" : "text-slate-800 dark:text-slate-100"}`}>
-              {left}
+              {total - left}
             </span>
             <span className="text-sm font-semibold text-slate-400 dark:text-slate-500">/{total}</span>
           </div>
@@ -513,8 +514,15 @@ function PendingWorkCard({
             <li key={b.key} className="flex items-center justify-between gap-2 text-xs">
               <span className="truncate text-slate-700 dark:text-slate-200">{b.label}</span>
               <span className="shrink-0 font-semibold tabular-nums text-amber-800 dark:text-amber-200">
-                {b.count}
-                {b.total !== undefined && <span className="font-normal text-slate-500 dark:text-slate-400">/{b.total}</span>}
+                {b.total !== undefined ? (
+                  <>
+                    {b.total - b.count}
+                    <span className="font-normal text-slate-500 dark:text-slate-400">/{b.total}</span>
+                    <span className="ml-1.5 font-normal text-amber-700 dark:text-amber-300">({b.count} lagi)</span>
+                  </>
+                ) : (
+                  b.count
+                )}
               </span>
             </li>
           ))}

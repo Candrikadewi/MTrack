@@ -53,7 +53,7 @@ export function BatchTileRow({
               aria-controls={isActive ? panelId : undefined}
               aria-label={
                 pendingLabel && cat.total !== undefined
-                  ? `${cat.label}: ${cat.count} dari ${cat.total} ${pendingLabel}`
+                  ? `${cat.label}: ${cat.total - cat.count} dari ${cat.total} selesai, ${cat.count} ${pendingLabel}`
                   : undefined
               }
               className={`flex min-h-11 items-center justify-between gap-2 rounded-2xl border px-3.5 py-3 text-left shadow-sm transition-all duration-150 hover:-translate-y-0.5 hover:shadow-md dark:shadow-none ${
@@ -75,7 +75,7 @@ export function BatchTileRow({
                           cat.count > 0 ? "text-amber-700 dark:text-amber-300" : "text-slate-800 dark:text-slate-100"
                         }`}
                       >
-                        {cat.count}
+                        {cat.total - cat.count}
                       </span>
                       <span className="text-sm font-semibold text-slate-400 dark:text-slate-500">/{cat.total}</span>
                     </div>
@@ -119,8 +119,8 @@ export function BatchTileRow({
   );
 }
 
-/** Under each tile's number: a loud "still N to go" while anything is
- * left, a quiet all-clear once it's done, nothing when there's no demand. */
+/** Under each tile's "done/total": a loud "N still to go" while it isn't
+ * full, a quiet all-clear once it is, "Belum ada" when there's nothing. */
 function PendingNote({ count, total, pendingLabel }: { count: number; total: number; pendingLabel: string }) {
   if (total === 0) return <div className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">Belum ada</div>;
   if (count === 0) {
@@ -166,10 +166,19 @@ function BatchBreakdown({ category }: { category: BatchTileCategory }) {
                 Kelola →
               </Link>
             )}
+            {b.total !== undefined && b.count > 0 && (
+              <span className="text-xs font-semibold text-amber-700 dark:text-amber-300">{b.count} lagi</span>
+            )}
             <Badge tone={b.total !== undefined ? (b.count > 0 ? "amber" : "green") : (b.tone ?? category.tone)}>
               <span className="tabular-nums">
-                {b.count}
-                {b.total !== undefined && <span className="font-normal opacity-70">/{b.total}</span>}
+                {b.total !== undefined ? (
+                  <>
+                    {b.total - b.count}
+                    <span className="font-normal opacity-70">/{b.total}</span>
+                  </>
+                ) : (
+                  b.count
+                )}
               </span>
             </Badge>
           </div>
