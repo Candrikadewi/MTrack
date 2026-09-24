@@ -30,6 +30,7 @@ import {
   type ColumnCheck,
   type ExtraColumn,
   type SkipBreakdown,
+  type VokasiParseResult,
   type VokasiShopValue,
 } from "@/lib/parseFile";
 import {
@@ -40,7 +41,7 @@ import {
   generatePkwtReviews,
   pruneStaleVokasiDemands,
 } from "@/lib/engine/actions";
-import { fmtDate } from "@/lib/engine/compute";
+import { computeVokasiEndedDate, fmtDate } from "@/lib/engine/compute";
 import { createClient } from "@/lib/supabase/client";
 import { pushToast } from "@/lib/toast";
 import { useSessionState } from "@/lib/useSessionState";
@@ -328,6 +329,71 @@ function ShopMappingPanel({ values, mappings }: { values: VokasiShopValue[]; map
   );
 }
 
+/** Rows whose Tgl Masuk cell is blank get one date per batch, filled here:
+ * pre-set to the date the rest of that batch carries, editable, and
+ * required before upload when the batch has no date at all. */
+function BlankTglPanel({
+  batches,
+  values,
+  onChange,
+}: {
+  batches: VokasiParseResult["blankTglBatches"];
+  values: Record<string, string>;
+  onChange: (batch: string, date: string) => void;
+}) {
+  if (batches.length === 0) return null;
+  const pending = batches.filter((b) => !values[b.batch]).length;
+  return (
+    <div className="mt-3 space-y-3 rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h4 className="text-sm font-semibold text-slate-800 dark:text-slate-100">Tgl Masuk kosong ({batches.length} batch)</h4>
+        {pending > 0 ? (
+          <span className="text-xs font-semibold text-amber-700 dark:text-amber-300">{pending} batch perlu diisi sebelum upload</span>
+        ) : (
+          <span className="text-xs text-emerald-700 dark:text-emerald-400">Semua sudah terisi</span>
+        )}
+      </div>
+      <p className="text-xs text-slate-600 dark:text-slate-400">
+        Tgl Masuk berlaku satu tanggal per batch dan menentukan tanggal berakhir (6 bulan − 1 hari). Cek tanggal yang disarankan, ubah
+        bila perlu.
+      </p>
+      <ul className="divide-y divide-slate-100 dark:divide-slate-800">
+        {batches.map((b) => {
+          const value = values[b.batch] ?? "";
+          return (
+            <li key={b.batch} className="flex flex-wrap items-center justify-between gap-3 py-2">
+              <div className="min-w-0">
+                <div className="text-sm font-medium text-slate-800 dark:text-slate-100">
+                  Batch {b.batch}{" "}
+                  <span className="text-xs font-normal text-slate-500 dark:text-slate-400">
+                    · {b.blank} dari {b.total} baris kosong
+                  </span>
+                </div>
+                <div className="text-xs text-slate-500 dark:text-slate-400">
+                  {b.suggested
+                    ? value === b.suggested
+                      ? `Disarankan dari baris lain di batch ini: ${fmtDate(b.suggested)}`
+                      : `Diubah (saran: ${fmtDate(b.suggested)})`
+                    : "Tidak ada tanggal di batch ini — isi manual"}
+                  {value && <> · berakhir {fmtDate(computeVokasiEndedDate(value))}</>}
+                </div>
+              </div>
+              <Input
+                type="date"
+                value={value}
+                aria-label={`Tgl Masuk batch ${b.batch}`}
+                aria-invalid={!value || undefined}
+                onChange={(e) => onChange(b.batch, e.target.value)}
+                className={`w-44 ${value ? "" : "border-amber-400 dark:border-amber-500"}`}
+              />
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
 function currentMonthKey(): string {
   return new Date().toISOString().slice(0, 7);
 }
@@ -384,6 +450,7 @@ export function UploadCenterClient() {
   const [vokasiBusy, setVokasiBusy] = useState(false);
   const [vokasiMsg, setVokasiMsg] = useState("");
   const [vokasiPreview, setVokasiPreview] = useState<Awaited<ReturnType<typeof parseVokasiFile>> | null>(null);
+  const [vokasiTglFill, setVokasiTglFill] = useState<Record<string, string>>({});
 
   const [resetModalOpen, setResetModalOpen] = useState(false);
 
@@ -512,6 +579,7 @@ export function UploadCenterClient() {
     try {
       const result = await parseVokasiFile(vokasiFile, vokasiTglMasuk);
       setVokasiPreview(result);
+      setVokasiTglFill(Object.fromEntries(result.blankTglBatches.map((b) => [b.batch, b.suggested])));
     } catch (e) {
       setVokasiMsg(`Gagal parsing file: ${(e as Error).message}`);
     } finally {
@@ -530,6 +598,11 @@ export function UploadCenterClient() {
     : 0;
   const vokasiResolved = vokasiPreview
     ? vokasiPreview.records
+        .map((r, i) => {
+          if (!vokasiPreview.tglBlank[i]) return r;
+          const tgl = vokasiTglFill[r.batch] ?? "";
+          return { ...r, tgl_masuk: tgl, tgl_ended: computeVokasiEndedDate(tgl) };
+        })
         .filter((r) => vokasiShopByKey.get(r.shop))
         .map((r) => finalizeVokasiRecord({ ...r, batch: r.batch || vokasiBatch.trim() }, vokasiShopByKey.get(r.shop) as string))
     : [];
@@ -552,7 +625,10 @@ export function UploadCenterClient() {
   const vokasiPendingColumns = vokasiPreview ? vokasiPreview.columns.extra.filter((c) => !decisionFor("vokasi", c, decisions)).length : 0;
   const vokasiNewBatches = new Set(vokasiNew.map((r) => r.batch));
 
-  const vokasiBlocked = vokasiNew.length === 0 || vokasiMissingBatch > 0 || vokasiPendingColumns > 0 || vokasiPendingShops > 0;
+  const vokasiPendingTgl = vokasiPreview ? vokasiPreview.blankTglBatches.filter((b) => !vokasiTglFill[b.batch]).length : 0;
+
+  const vokasiBlocked =
+    vokasiNew.length === 0 || vokasiMissingBatch > 0 || vokasiPendingColumns > 0 || vokasiPendingShops > 0 || vokasiPendingTgl > 0;
 
   async function handleVokasiUpload() {
     if (!vokasiFile || !vokasiPreview || vokasiBlocked || vokasiBusy) return;
@@ -573,7 +649,12 @@ export function UploadCenterClient() {
       const error = await vokasiStore.insertManyPersisted(full);
       if (error) {
         vokasiStore.refetch();
-        setVokasiMsg(`Gagal upload Vokasi: ${error}`);
+        const missingColumn = /could not find the '([^']+)' column/i.exec(error)?.[1];
+        setVokasiMsg(
+          missingColumn
+            ? `Gagal upload Vokasi: kolom "${missingColumn}" belum ada di database. Ada migration Supabase yang belum dijalankan — jalankan supabase/check_migrations.sql untuk melihat yang kurang, lalu jalankan file migration-nya.`
+            : `Gagal upload Vokasi: ${error}`
+        );
         return;
       }
       const created = await ensureVokasiEndedDemands();
@@ -857,6 +938,11 @@ export function UploadCenterClient() {
               included={vokasiPreview.records.length}
               skipBreakdown={vokasiPreview.skipBreakdown}
               columns={vokasiPreview.columns}
+            />
+            <BlankTglPanel
+              batches={vokasiPreview.blankTglBatches}
+              values={vokasiTglFill}
+              onChange={(batch, date) => setVokasiTglFill((v) => ({ ...v, [batch]: date }))}
             />
             <ShopMappingPanel values={vokasiPreview.shopValues} mappings={valueMappings} />
             <ColumnDecisionPanel dataset="vokasi" columns={vokasiPreview.columns.extra} decisions={decisions} />

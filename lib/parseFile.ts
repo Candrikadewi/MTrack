@@ -524,6 +524,13 @@ export interface VokasiParseResult {
   batches: { batch: string; count: number }[];
   title?: { batch: string; start: string; end: string };
   shopValues: VokasiShopValue[];
+  /** Per record (same order as `records`): its Tgl Masuk cell was blank or
+   * unreadable, so the date shown is only a suggestion. */
+  tglBlank: boolean[];
+  /** Batches with blank Tgl Masuk cells, for the uploader to confirm or fill
+   * one date per batch. `suggested` is the date most other rows of that
+   * batch carry ("" when none do). */
+  blankTglBatches: { batch: string; blank: number; total: number; suggested: string }[];
 }
 
 export async function parseVokasiFile(file: File, defaultTglMasuk: string): Promise<VokasiParseResult> {
@@ -625,20 +632,31 @@ export async function parseVokasiFile(file: File, defaultTglMasuk: string): Prom
     return m ? Array.from(m).sort((a, b) => b[1] - a[1])[0][0] : "";
   };
   const batchCounts = new Map<string, number>();
-  for (const { record, tglFromFile } of kept) {
+  const blankByBatch = new Map<string, number>();
+  // The raw monthly file has no date column by design — its title is the
+  // source. Only a file that has the column can have blank cells to fill.
+  const fileHasTgl = has(VOKASI_ALIASES.tglMasuk);
+  const tglBlank = kept.map(({ record, tglFromFile }) => {
     let tgl = tglFromFile;
-    if (!tgl) {
-      tgl = batchDate(record.batch) || title?.start || "";
-      // The raw monthly file has no date column by design — its title is
-      // the source, so only flag blanks in a file that has the column.
-      if (tgl && has(VOKASI_ALIASES.tglMasuk)) addWarning(skipBreakdown, "Tgl Masuk kosong, diisi dari tanggal batch-nya");
-      else tgl = defaultTglMasuk;
+    const blank = !tgl && fileHasTgl;
+    if (blank) {
+      tgl = batchDate(record.batch);
+      blankByBatch.set(record.batch, (blankByBatch.get(record.batch) ?? 0) + 1);
+    } else if (!tgl) {
+      tgl = title?.start || defaultTglMasuk;
     }
     record.tgl_masuk = tgl;
     // Business rule: Vokasi selalu 6 bulan − 1 hari dari tgl_masuk.
     record.tgl_ended = computeVokasiEndedDate(tgl);
     if (record.batch) batchCounts.set(record.batch, (batchCounts.get(record.batch) ?? 0) + 1);
-  }
+    return blank;
+  });
+  const blankTglBatches = Array.from(blankByBatch, ([batch, blank]) => ({
+    batch,
+    blank,
+    total: batchCounts.get(batch) ?? blank,
+    suggested: batchDate(batch),
+  })).sort((a, b) => a.batch.localeCompare(b.batch, undefined, { numeric: true }));
   if (title?.end && kept[0] && kept[0].record.tgl_ended !== title.end) {
     addWarning(skipBreakdown, `Tgl selesai di judul (${title.end}) beda dengan hitungan 6 bulan (${kept[0].record.tgl_ended})`);
   }
@@ -659,6 +677,8 @@ export async function parseVokasiFile(file: File, defaultTglMasuk: string): Prom
     batches,
     title,
     shopValues,
+    tglBlank,
+    blankTglBatches,
   };
 }
 
