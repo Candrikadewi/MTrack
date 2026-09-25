@@ -16,7 +16,7 @@ import { KaizenModal } from "@/components/util-pool/KaizenModal";
 import { TaktDownModal } from "@/components/takt/TaktDownModal";
 import { useStoreList, useStoreReady } from "@/lib/useStore";
 import { pushToast } from "@/lib/toast";
-import { demandStore, projectStore, taktStore, utilPoolStore, vokasiStore, zparStore } from "@/lib/repo";
+import { demandStore, projectStore, taktStore, utilPoolStore, valueMappingStore, vokasiStore, zparStore } from "@/lib/repo";
 import { contractRemainingLabel, contractUrgency, fmtDate, poolLeadTimeDays } from "@/lib/engine/compute";
 import { autoProjectFinishCheck, naturalRelease } from "@/lib/engine/actions";
 import { useRole } from "@/lib/RoleContext";
@@ -43,7 +43,8 @@ export function SupplyPageClient() {
   const demandsReady = useStoreReady(demandStore);
   const vokasiReady = useStoreReady(vokasiStore);
   const zparReady = useStoreReady(zparStore);
-  const releaseInputsReady = poolReady && projectsReady && demandsReady && vokasiReady && zparReady;
+  const mappingsReady = useStoreReady(valueMappingStore);
+  const releaseInputsReady = poolReady && projectsReady && demandsReady && vokasiReady && zparReady && mappingsReady;
   useEffect(() => {
     if (role === "admin" && releaseInputsReady) autoProjectFinishCheck();
   }, [role, releaseInputsReady]);

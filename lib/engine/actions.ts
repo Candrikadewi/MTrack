@@ -10,6 +10,7 @@ import {
   projectStore,
   taktStore,
   utilPoolStore,
+  valueMappingStore,
   vokasiStore,
   zparStore,
   getActiveSnapshot,
@@ -742,27 +743,101 @@ function normalizedName(name: string): string {
   return name.toUpperCase().replace(/[^A-Z]+/g, " ").trim();
 }
 
-/** A Vokasi alumnus hired as PKWT (Source "PKWT New Hire") signs under a
- * new noreg that only shows up in a later ZPAR. Finds that ZPAR record:
- * the same noreg if HR kept it, otherwise the one employee with the same
- * name whose Tgl Masuk isn't before their Vokasi start (same department
- * breaks a tie). Undefined while the new ZPAR isn't in or the match isn't
- * unique — never a guess. */
-export function findRehiredEmployee(vokasiNoreg: string, nama: string, dept: string): EmployeeRecord | undefined {
+// A Vokasi alumnus hired as PKWT (Source "PKWT New Hire") signs under a
+// new noreg that only shows up in a later ZPAR. The link Vokasi noreg →
+// ZPAR noreg is stored once confirmed (value_mappings, field noreg_zpar)
+// and every release / review / pool lookup follows it from then on.
+const REHIRE_FIELD = "noreg_zpar";
+
+export function linkedZparNoreg(vokasiNoreg: string): string | undefined {
+  const key = vokasiNoreg.trim().toUpperCase();
+  return valueMappingStore.list().find((m) => m.dataset === "vokasi" && m.field === REHIRE_FIELD && m.normalized_raw === key)
+    ?.mapped_value;
+}
+
+/** Records (or changes) which ZPAR noreg a rehired alumnus signed under. */
+export function linkRehiredNoreg(vokasiNoreg: string, zparNoreg: string): void {
+  const key = vokasiNoreg.trim().toUpperCase();
+  const existing = valueMappingStore
+    .list()
+    .find((m) => m.dataset === "vokasi" && m.field === REHIRE_FIELD && m.normalized_raw === key);
+  const decided_at = new Date().toISOString();
+  if (existing) valueMappingStore.update(existing.id, { mapped_value: zparNoreg, decided_at });
+  else
+    valueMappingStore.insert({
+      id: genId("valmap"),
+      dataset: "vokasi",
+      field: REHIRE_FIELD,
+      raw_value: vokasiNoreg,
+      normalized_raw: key,
+      mapped_value: zparNoreg,
+      decided_at,
+    });
+}
+
+/** The ZPAR employee a rehired alumnus is confirmed as, when the active
+ * snapshot has them. Only a confirmed link counts — never a name guess. */
+export function findRehiredEmployee(vokasiNoreg: string): EmployeeRecord | undefined {
+  const noreg = linkedZparNoreg(vokasiNoreg);
+  return noreg ? getActiveEmployeeByNoreg(noreg) : undefined;
+}
+
+export interface RehireCheck {
+  label: string;
+  ok: boolean;
+}
+
+export interface RehireCandidate {
+  employee: EmployeeRecord;
+  checks: RehireCheck[];
+  /** Passes every check — safe to link without asking. */
+  strict: boolean;
+}
+
+/** ZPAR employees who could be the alumnus behind a PKWT New Hire demand
+ * after signing: same name, not already linked to someone else, each with
+ * the checks that support it. Tgl Masuk is allowed up to 45 days before
+ * the sign-contract date (HR back-dates the start sometimes). */
+export function rehireCandidates(d: Demand): RehireCandidate[] {
   const snap = getActiveSnapshot();
-  if (!snap) return undefined;
-  const same = snap.employees.find((e) => e.noreg === vokasiNoreg);
-  if (same) return same;
-  const vokasi = getVokasiByNoreg(vokasiNoreg);
-  const name = normalizedName(nama || vokasi?.nama || "");
-  if (!name) return undefined;
-  let candidates = snap.employees.filter((e) => normalizedName(e.nama) === name);
-  if (vokasi?.tgl_masuk) candidates = candidates.filter((e) => !e.tgl_masuk || e.tgl_masuk >= vokasi.tgl_masuk);
-  if (candidates.length > 1 && dept) {
-    const sameDept = candidates.filter((e) => e.dept === dept);
-    if (sameDept.length > 0) candidates = sameDept;
+  if (!snap || !d.replacement_noreg) return [];
+  const vokasi = getVokasiByNoreg(d.replacement_noreg);
+  const name = normalizedName(d.replacement_nama || vokasi?.nama || "");
+  if (!name) return [];
+  const taken = new Set(
+    valueMappingStore
+      .list()
+      .filter((m) => m.dataset === "vokasi" && m.field === REHIRE_FIELD && m.normalized_raw !== d.replacement_noreg.toUpperCase())
+      .map((m) => m.mapped_value)
+  );
+  const signed = d.fulfillment_confirmed_date;
+  const earliest = signed ? format(addDays(parseISO(signed), -45), "yyyy-MM-dd") : vokasi?.tgl_masuk ?? "";
+  return snap.employees
+    .filter((e) => normalizedName(e.nama) === name && e.noreg !== d.replacement_noreg && !taken.has(e.noreg))
+    .map((employee) => {
+      const checks: RehireCheck[] = [
+        { label: "Status Kontrak", ok: KONTRAK_REVIEW_STATUSES.includes(employee.status_kontrak) },
+        { label: "Tgl Masuk setelah sign kontrak", ok: Boolean(employee.tgl_masuk && earliest && employee.tgl_masuk >= earliest) },
+        { label: "Dept sama", ok: !d.dept || employee.dept === d.dept },
+        { label: "Gender sama", ok: !vokasi?.gender || employee.gender === vokasi.gender },
+      ];
+      return { employee, checks, strict: checks.every((c) => c.ok) };
+    });
+}
+
+/** Links every signed (verified) PKWT New Hire alumnus whose new ZPAR
+ * record is unambiguous: exactly one candidate passing every check.
+ * Anything less is left for an admin to confirm on the Demand page. */
+export function linkRehiredAlumni(): number {
+  let linked = 0;
+  for (const d of demandStore.list()) {
+    if (!isRehiredAlumnus(d) || !d.fulfillment_confirmed_date || linkedZparNoreg(d.replacement_noreg)) continue;
+    const strict = rehireCandidates(d).filter((c) => c.strict);
+    if (strict.length !== 1) continue;
+    linkRehiredNoreg(d.replacement_noreg, strict[0].employee.noreg);
+    linked++;
   }
-  return candidates.length === 1 ? candidates[0] : undefined;
+  return linked;
 }
 
 /** Filled as "PKWT New Hire" with a Vokasi noreg: the person is an alumnus
@@ -776,8 +851,8 @@ export function isRehiredAlumnus(d: Demand): boolean {
  * their new ZPAR noreg once a rehired alumnus shows up there. */
 function holderNoregs(d: Demand): string[] {
   if (!isRehiredAlumnus(d)) return [d.replacement_noreg];
-  const emp = findRehiredEmployee(d.replacement_noreg, d.replacement_nama, d.dept);
-  return emp && emp.noreg !== d.replacement_noreg ? [d.replacement_noreg, emp.noreg] : [d.replacement_noreg];
+  const linked = linkedZparNoreg(d.replacement_noreg);
+  return linked && linked !== d.replacement_noreg ? [d.replacement_noreg, linked] : [d.replacement_noreg];
 }
 
 export function projectSeatOccupants(seat: Demand, demands: Demand[] = demandStore.list()): Demand[] {
@@ -925,10 +1000,11 @@ export function deleteProject(projectId: string): boolean {
 export function autoProjectFinishCheck(): void {
   // Releasing marks rows as done for good — never do it against a cache
   // that hasn't loaded yet (it would release nobody and still mark them).
-  const needed = [projectStore, demandStore, utilPoolStore, vokasiStore, zparStore];
+  const needed = [projectStore, demandStore, utilPoolStore, vokasiStore, zparStore, valueMappingStore];
   needed.forEach((store) => store.init());
   if (!needed.every((store) => store.ready())) return;
   const demands = demandStore.list();
+  linkRehiredAlumni();
   syncRehiredPoolEntries();
   for (const project of projectStore.list()) {
     const seats = demands.filter((d) => project.demand_ids.includes(d.id));
@@ -961,7 +1037,7 @@ export function autoProjectFinishCheck(): void {
   syncProjectSeatDemands();
 }
 
-const PENDING_NOREG_NOTE = "Noreg Vokasi — noreg ZPAR baru belum ditemukan";
+const PENDING_NOREG_NOTE = "Noreg Vokasi — noreg ZPAR baru belum dikonfirmasi";
 
 /** Puts a released seat's current holder into Supply Pool as MP Excess
  * while their contract still runs. A rehired alumnus is released as PKWT
@@ -974,10 +1050,9 @@ function releaseSeatHolder(project: Project, seat: Demand, demands: Demand[], re
   const holder = projectSeatOccupants(seat, demands).at(-1);
   if (!holder) return false;
   const rehired = isRehiredAlumnus(holder);
-  const emp = rehired
-    ? findRehiredEmployee(holder.replacement_noreg, holder.replacement_nama, seat.dept)
-    : getActiveEmployeeByNoreg(holder.replacement_noreg);
-  const noregs = [holder.replacement_noreg, ...(emp ? [emp.noreg] : [])];
+  const emp = rehired ? findRehiredEmployee(holder.replacement_noreg) : getActiveEmployeeByNoreg(holder.replacement_noreg);
+  const linked = rehired ? linkedZparNoreg(holder.replacement_noreg) : undefined;
+  const noregs = [holder.replacement_noreg, ...(linked ? [linked] : []), ...(emp ? [emp.noreg] : [])];
   const alreadyIn = utilPoolStore
     .list()
     .some((e) => e.source === "ProjectFinish" && e.source_label === project.name && noregs.includes(e.noreg));
@@ -1019,7 +1094,7 @@ function releaseSeatHolder(project: Project, seat: Demand, demands: Demand[], re
 function syncRehiredPoolEntries(): void {
   for (const entry of utilPoolStore.list()) {
     if (entry.source !== "ProjectFinish" || entry.action_note !== PENDING_NOREG_NOTE) continue;
-    const emp = findRehiredEmployee(entry.noreg, entry.nama, entry.prev_dept);
+    const emp = findRehiredEmployee(entry.noreg);
     if (!emp) continue;
     utilPoolStore.update(entry.id, {
       noreg: emp.noreg,
