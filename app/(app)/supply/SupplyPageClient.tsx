@@ -14,7 +14,6 @@ import { SectionHeading } from "@/components/ui/SectionHeading";
 import { SegmentedSwitch } from "@/components/ui/SegmentedSwitch";
 import { KaizenModal } from "@/components/util-pool/KaizenModal";
 import { KaizenBatchModal } from "@/components/util-pool/KaizenBatchModal";
-import { RegisteredList, type RegisteredItem } from "@/components/ui/RegisteredList";
 import { TaktDownModal } from "@/components/takt/TaktDownModal";
 import { useStoreList, useStoreReady } from "@/lib/useStore";
 import { pushToast } from "@/lib/toast";
@@ -79,29 +78,6 @@ export function SupplyPageClient() {
     for (const e of entries) if (e.source === "Kaizen") map.set(e.source_label, [...(map.get(e.source_label) ?? []), e]);
     return map;
   }, [entries]);
-  const registered: RegisteredItem[] = useMemo(
-    () =>
-      inputTab === "taktdown"
-        ? taktCases
-            .filter((t) => t.category === "down")
-            .sort((a, b) => b.date.localeCompare(a.date))
-            .map((t) => {
-              const linked = entries.filter((e) => t.released_pool_ids.includes(e.id));
-              return {
-                id: t.id,
-                title: `Takt Down ${t.plant}`,
-                meta: `${fmtDate(t.date)} · ${linked.length} MP · ${linked.filter((e) => e.status !== "Open").length}/${linked.length} diutilize`,
-              };
-            })
-        : Array.from(kaizenBatches.entries())
-            .sort((a, b) => b[1][0].entered_pool_date.localeCompare(a[1][0].entered_pool_date))
-            .map(([label, list]) => ({
-              id: label,
-              title: label,
-              meta: `Rilis ${fmtDate(list[0].entered_pool_date)} · ${list.length} MP · ${list.filter((e) => e.status !== "Open").length}/${list.length} diutilize`,
-            })),
-    [inputTab, taktCases, entries, kaizenBatches]
-  );
 
   const [kontrapVokasi, setKontrapVokasi] = useSessionState<"kontrak" | "vokasi">("supply.detail.switch", "kontrak");
   const switchScoped = useMemo(
@@ -169,7 +145,38 @@ export function SupplyPageClient() {
       </div>
 
       <SectionHeading n={1} title="Ringkasan per Batch" subtitle="Jumlah MP di Supply Pool yang belum diutilize, dari total yang masuk. Klik tile untuk rincian." divider={false} />
-      <BatchTileRow categories={batchCategories} pendingLabel="belum diutilize" />
+      <BatchTileRow
+        categories={batchCategories}
+        pendingLabel="belum diutilize"
+        batchActions={
+          role === "admin"
+            ? (key, batch) => {
+                const keep = "MP yang belum diutilize ikut dikeluarkan dari Supply Pool. MP yang sudah diutilize tetap tersimpan.";
+                if (key === "TaktDown" && taktCases.some((t) => t.id === batch.id)) {
+                  return {
+                    onEdit: () => setEditingTaktDownId(batch.id),
+                    onDelete: () => {
+                      deleteTaktDown(batch.id);
+                      pushToast("Takt Down dihapus.", "success");
+                    },
+                    deleteNote: keep,
+                  };
+                }
+                if (kaizenBatches.has(batch.id)) {
+                  return {
+                    onEdit: () => setEditingKaizenLabel(batch.id),
+                    onDelete: () => {
+                      const kept = deleteKaizenBatch(batch.id);
+                      pushToast(kept ? `Kaizen dihapus. ${kept} MP yang sudah diutilize tetap tersimpan.` : "Kaizen dihapus.", "success");
+                    },
+                    deleteNote: keep,
+                  };
+                }
+                return null;
+              }
+            : undefined
+        }
+      />
 
       {role === "admin" && (
         <div className="space-y-4 border-t border-slate-200 pt-6 dark:border-slate-800">
@@ -203,21 +210,6 @@ export function SupplyPageClient() {
                 </Button>
               </div>
             )}
-            <RegisteredList
-              items={registered}
-              emptyText={inputTab === "taktdown" ? "Belum ada Takt Down." : "Belum ada Kaizen."}
-              onEdit={(id) => (inputTab === "taktdown" ? setEditingTaktDownId(id) : setEditingKaizenLabel(id))}
-              onDelete={(id) => {
-                if (inputTab === "taktdown") {
-                  deleteTaktDown(id);
-                  pushToast("Takt Down dihapus.", "success");
-                } else {
-                  const kept = deleteKaizenBatch(id);
-                  pushToast(kept ? `Kaizen dihapus. ${kept} MP yang sudah diutilize tetap tersimpan.` : "Kaizen dihapus.", "success");
-                }
-              }}
-              deleteNote="MP yang belum diutilize ikut dikeluarkan dari Supply Pool. MP yang sudah diutilize tetap tersimpan."
-            />
             </div>
           </Card>
           {kaizenOpen && <KaizenModal open onClose={() => setKaizenOpen(false)} />}

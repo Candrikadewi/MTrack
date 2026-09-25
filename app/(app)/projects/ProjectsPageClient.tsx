@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Pencil, Trash2 } from "lucide-react";
-import { Breadcrumbs, DASHBOARD_MONITORING_CRUMB } from "@/components/ui/Breadcrumbs";
+import { BackButton } from "@/components/ui/BackButton";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Badge, statusTone } from "@/components/ui/Badge";
@@ -32,7 +32,7 @@ export function ProjectsPageClient() {
 
   return (
     <div className="space-y-6">
-      <Breadcrumbs items={[DASHBOARD_MONITORING_CRUMB, { label: "Project Monitoring" }]} />
+      <BackButton fallback="/demand" />
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100">Project Monitoring</h1>

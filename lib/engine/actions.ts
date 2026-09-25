@@ -485,6 +485,37 @@ export function setReviewResult(reviewId: string, result: ReviewResult): void {
     });
 }
 
+/** The same as setReviewResult for many reviews at once (a whole dept
+ * marked Continue, say). Reviews that already have this result are
+ * skipped; the calls go out a few at a time and end in one toast. */
+export async function setReviewResults(reviewIds: string[], result: ReviewResult): Promise<{ saved: number; failed: number }> {
+  const targets = reviewIds
+    .map((id) => pkwtReviewStore.get(id))
+    .filter((r): r is PkwtReview => r !== undefined && r.review_result !== result);
+  const previous = new Map(targets.map((r) => [r.id, r.review_result]));
+  for (const r of targets) pkwtReviewStore.update(r.id, { review_result: result });
+  const supabase = createClient();
+  let saved = 0;
+  let failed = 0;
+  let lastError = "";
+  const queue = [...targets];
+  async function worker() {
+    for (let r = queue.shift(); r; r = queue.shift()) {
+      const res: { error: { message: string } | null } = await supabase.rpc("set_review_result", { p_review_id: r.id, p_result: result });
+      if (res.error) {
+        failed++;
+        lastError = res.error.message;
+        pkwtReviewStore.update(r.id, { review_result: previous.get(r.id) ?? "" });
+      } else saved++;
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(6, queue.length) }, worker));
+  if (result === "Terminate" && saved > 0) demandStore.refetch();
+  if (failed > 0) pushToast(`${failed} review gagal disimpan: ${lastError}`);
+  else if (saved > 0) pushToast(`${saved} review disimpan sebagai ${result || "kosong"}.`, "success");
+  return { saved, failed };
+}
+
 // ---------------------------------------------------------------------------
 // Replacement linking (Enrollment)
 // ---------------------------------------------------------------------------

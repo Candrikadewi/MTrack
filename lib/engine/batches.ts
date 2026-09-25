@@ -19,8 +19,8 @@ export interface BatchSummary {
   /** What `count` is out of, when known. */
   total?: number;
   tone?: BatchTone;
-  /** Where to edit/delete this batch — the list page that still owns that
-   * capability (e.g. /projects, /takt). Omit when there's no such page. */
+  /** Where this batch is shown in full (a project or takt detail page).
+   * Omit when there's no such page. Edit / Hapus sit on the row itself. */
   href?: string;
 }
 
@@ -193,7 +193,7 @@ function tileForTaktDown(entries: UtilPoolEntry[], taktCases: TaktCase[]): Batch
         meta: fmtDate(c.date),
         count: linked.filter((e) => e.status === "Open").length,
         total: linked.length,
-        href: "/takt",
+        href: `/takt/${c.id}`,
       };
     })
     .filter((b) => b.count > 0)

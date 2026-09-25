@@ -10,7 +10,6 @@ import { EmptyState, FilteredEmptyState, TableWrap, Td, Th } from "@/components/
 import { Skeleton } from "@/components/ui/Skeleton";
 import { MultiSelect } from "@/components/ui/MultiSelect";
 import { BatchTileRow } from "@/components/ui/BatchTileRow";
-import { RegisteredList, type RegisteredItem } from "@/components/ui/RegisteredList";
 import { DEMAND_JENIS_LABEL as JENIS_LABEL, buildDemandBatchCategories } from "@/lib/engine/batches";
 import { RatioWidget, RatioScenarioCompare } from "@/components/ui/RatioWidget";
 import { CollapsibleSection } from "@/components/ui/Collapsible";
@@ -21,7 +20,8 @@ import { ReviewSection, VokasiEndedSection } from "@/components/enrollment/Revie
 import { ManualDemandModal } from "@/components/enrollment/ManualDemandModal";
 import { NewProjectModal } from "@/components/projects/NewProjectModal";
 import { TaktUpModal } from "@/components/takt/TaktUpModal";
-import { Check, Circle } from "lucide-react";
+import { Check, Circle, Pencil, Trash2 } from "lucide-react";
+import { ConfirmDialog } from "@/components/ui/Modal";
 import { useStoreList, useStoreReady } from "@/lib/useStore";
 import { demandStore, pkwtReviewStore, projectStore, taktStore, utilPoolStore, valueMappingStore, vokasiStore, zparStore } from "@/lib/repo";
 import { fmtDate, sisaHari, fulfillmentDeadline, supplyDemandStatus, computeVokasiStatus } from "@/lib/engine/compute";
@@ -47,6 +47,7 @@ import {
   deleteProject,
   deleteTaktUp,
   findRehiredEmployee,
+  isEditableDemand,
   isRehiredAlumnus,
   linkedZparNoreg,
   linkRehiredNoreg,
@@ -65,8 +66,6 @@ import type {
   DemandOriginType,
   EmployeeRecord,
   EmploymentStatus,
-  Project,
-  TaktCase,
   ReplacementStatus,
   UtilPoolEntry,
   VokasiRecord,
@@ -174,45 +173,6 @@ function todayKey(): string {
 
 const MANUAL_ORIGINS: DemandOriginType[] = ["Resign", "Pension", "PensionDini", "GST", "Unfit", "Others", "Manual"];
 
-/** What's already been entered under the selected input tab, newest first,
- * for the "Sudah terdaftar" list (edit / delete). */
-function registeredInputs(tab: "project" | "taktup" | "manual", projects: Project[], taktCases: TaktCase[], demands: Demand[]): RegisteredItem[] {
-  const byId = new Map(demands.map((d) => [d.id, d]));
-  const progress = (ids: string[]) => {
-    const list = ids.map((id) => byId.get(id)).filter((d): d is Demand => Boolean(d));
-    return `${list.filter((d) => d.status === "Fulfilled").length}/${list.length} terpenuhi`;
-  };
-  if (tab === "project") {
-    return [...projects]
-      .sort((a, b) => b.start_date.localeCompare(a.start_date))
-      .map((p) => ({
-        id: p.id,
-        title: p.name,
-        meta: `SOP ${fmtDate(p.start_date)} · ${p.rows.reduce((n, r) => n + r.qty, 0)} MP · ${progress(p.demand_ids)}`,
-        status: p.status === "Finish" ? { label: "Selesai", tone: "slate" as const } : { label: "Ongoing", tone: "blue" as const },
-      }));
-  }
-  if (tab === "taktup") {
-    return taktCases
-      .filter((t) => t.category === "up")
-      .sort((a, b) => b.date.localeCompare(a.date))
-      .map((t) => ({
-        id: t.id,
-        title: `Takt Up ${t.plant}`,
-        meta: `${fmtDate(t.date)} · ${(t.need_rows ?? []).reduce((n, r) => n + r.qty, 0)} MP · ${progress(t.demand_ids)}`,
-      }));
-  }
-  return demands
-    .filter((d) => MANUAL_ORIGINS.includes(d.origin_type))
-    .sort((a, b) => b.created_at.localeCompare(a.created_at))
-    .map((d) => ({
-      id: d.id,
-      title: `${JENIS_LABEL[d.origin_type]} — ${d.outgoing_nama || d.outgoing_noreg}`,
-      meta: `${d.dept} · ${d.category === "PKWT" ? "Kontrak" : "Vokasi"} · pemenuhan ${fmtDate(d.fulfill_date)}`,
-      status: d.status === "Fulfilled" ? { label: "Terpenuhi", tone: "green" as const } : undefined,
-    }));
-}
-
 /** Nothing left to do: received by the shop, or not being replaced. */
 function isDemandDone(d: Demand): boolean {
   return Boolean(d.shop_confirmed_date) || d.replacement_status === "No Replace";
@@ -313,7 +273,7 @@ export function DemandPageClient() {
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [editingTaktUpId, setEditingTaktUpId] = useState<string | null>(null);
   const [editingManualId, setEditingManualId] = useState<string | null>(null);
-  const registered = useMemo(() => registeredInputs(inputTab, projects, taktCases, demands), [inputTab, projects, taktCases, demands]);
+  const [deletingManual, setDeletingManual] = useState<Demand | null>(null);
 
   // ---- Detail dan Mapping Demand ----
   const [tab, setTab] = useSessionState<DemandCategory>("demand.detail.tab", "PKWT");
@@ -465,7 +425,38 @@ export function DemandPageClient() {
       </div>
 
       <SectionHeading n={1} title="Ringkasan per Batch" subtitle="Jumlah MP yang belum terpenuhi (belum diverifikasi) dari total demand sampai bulan ini. Vokasi dihitung mulai bulan berakhirnya. Klik tile untuk rincian." divider={false} />
-      <BatchTileRow categories={batchCategories} pendingLabel="belum terpenuhi" onShowInTable={showCategoryInTable} />
+      <BatchTileRow
+        categories={batchCategories}
+        pendingLabel="belum terpenuhi"
+        onShowInTable={showCategoryInTable}
+        batchActions={
+          isAdmin
+            ? (key, batch) => {
+                if (key === "project" && projects.some((p) => p.id === batch.id)) {
+                  return {
+                    onEdit: () => setEditingProjectId(batch.id),
+                    onDelete: () => {
+                      deleteProject(batch.id);
+                      pushToast(`Project ${batch.label} dihapus.`, "success");
+                    },
+                    deleteNote: "Demand yang belum berjalan ikut terhapus. Demand yang sudah punya kandidat atau pemenuhan tetap tersimpan.",
+                  };
+                }
+                if (key === "taktup" && taktCases.some((t) => t.id === batch.id)) {
+                  return {
+                    onEdit: () => setEditingTaktUpId(batch.id),
+                    onDelete: () => {
+                      deleteTaktUp(batch.id);
+                      pushToast("Takt Up dihapus.", "success");
+                    },
+                    deleteNote: "Demand yang belum berjalan ikut terhapus. Demand yang sudah punya kandidat atau pemenuhan tetap tersimpan.",
+                  };
+                }
+                return null;
+              }
+            : undefined
+        }
+      />
 
       {canReview && (
         <CollapsibleSection
@@ -554,36 +545,6 @@ export function DemandPageClient() {
                   {inputTab === "project" ? "+ Project Baru" : inputTab === "taktup" ? "+ Takt Up" : "+ Manual Demand"}
                 </Button>
               </div>
-              <RegisteredList
-                items={registered}
-                emptyText={
-                  inputTab === "project"
-                    ? "Belum ada project."
-                    : inputTab === "taktup"
-                      ? "Belum ada Takt Up."
-                      : "Belum ada manual demand."
-                }
-                onEdit={(id) =>
-                  inputTab === "project" ? setEditingProjectId(id) : inputTab === "taktup" ? setEditingTaktUpId(id) : setEditingManualId(id)
-                }
-                onDelete={(id) => {
-                  if (inputTab === "project") {
-                    deleteProject(id);
-                    pushToast("Project dihapus.", "success");
-                  } else if (inputTab === "taktup") {
-                    deleteTaktUp(id);
-                    pushToast("Takt Up dihapus.", "success");
-                  } else {
-                    const error = deleteManualDemand(id);
-                    pushToast(error ?? "Manual demand dihapus.", error ? "error" : "success");
-                  }
-                }}
-                deleteNote={
-                  inputTab === "manual"
-                    ? "Demand ini akan dihapus. Demand yang sudah punya kandidat atau pemenuhan tidak bisa dihapus."
-                    : "Demand yang belum berjalan ikut terhapus. Demand yang sudah punya kandidat atau pemenuhan tetap tersimpan."
-                }
-              />
             </div>
           </Card>
           {projectModalOpen && <NewProjectModal open onClose={() => setProjectModalOpen(false)} />}
@@ -595,6 +556,22 @@ export function DemandPageClient() {
           {editingTaktUpId && taktCases.find((t) => t.id === editingTaktUpId) && (
             <TaktUpModal open editing={taktCases.find((t) => t.id === editingTaktUpId)} onClose={() => setEditingTaktUpId(null)} />
           )}
+          <ConfirmDialog
+            open={deletingManual !== null}
+            title={`Hapus demand ${deletingManual ? whoOf(deletingManual) : ""}?`}
+            confirmLabel="Hapus"
+            tone="danger"
+            onCancel={() => setDeletingManual(null)}
+            onConfirm={() => {
+              if (deletingManual) {
+                const error = deleteManualDemand(deletingManual.id);
+                pushToast(error ?? "Demand dihapus.", error ? "error" : "success");
+              }
+              setDeletingManual(null);
+            }}
+          >
+            Demand ini belum punya kandidat, jadi bisa dihapus tanpa mengubah riwayat.
+          </ConfirmDialog>
           {editingManualId && demands.find((d) => d.id === editingManualId) && (
             <ManualDemandModal open editing={demands.find((d) => d.id === editingManualId)} onClose={() => setEditingManualId(null)} />
           )}
@@ -736,6 +713,8 @@ export function DemandPageClient() {
                     canEditFulfillDate={canEditFulfillDate}
                     canVerify={canVerify}
                     poolEntries={poolEntries}
+                    onEdit={isAdmin && MANUAL_ORIGINS.includes(d.origin_type) && isEditableDemand(d) ? () => setEditingManualId(d.id) : undefined}
+                    onDelete={isAdmin && MANUAL_ORIGINS.includes(d.origin_type) && isEditableDemand(d) ? () => setDeletingManual(d) : undefined}
                   />
                 ))}
               </tbody>
@@ -809,6 +788,8 @@ function DemandRow({
   canEditFulfillDate,
   canVerify,
   poolEntries,
+  onEdit,
+  onDelete,
 }: {
   demand: Demand;
   tab: DemandCategory;
@@ -816,6 +797,9 @@ function DemandRow({
   canEditFulfillDate: boolean;
   canVerify: boolean;
   poolEntries: UtilPoolEntry[];
+  /** Manual demands that haven't started yet can be edited or deleted. */
+  onEdit?: () => void;
+  onDelete?: () => void;
 }) {
   const isLabelRow = d.origin_type === "Project" || d.origin_type === "TaktUp";
   const who = whoOf(d);
@@ -859,6 +843,20 @@ function DemandRow({
           {isLabelRow ? demandStatusLabel(d) : `${d.outgoing_noreg} · ${demandStatusLabel(d)}`}
           {crossSourced && " (dari Kontrak)"}
         </div>
+        {(onEdit || onDelete) && (
+          <div className="mt-1.5 flex gap-3 text-xs font-medium">
+            {onEdit && (
+              <button type="button" onClick={onEdit} className="inline-flex items-center gap-1 text-blue-700 hover:underline dark:text-blue-400">
+                <Pencil size={11} aria-hidden /> Edit
+              </button>
+            )}
+            {onDelete && (
+              <button type="button" onClick={onDelete} className="inline-flex items-center gap-1 text-red-700 hover:underline dark:text-red-400">
+                <Trash2 size={11} aria-hidden /> Hapus
+              </button>
+            )}
+          </div>
+        )}
       </Td>
       <Td>
         <Badge tone={statusTone(status)}>{status}</Badge>
