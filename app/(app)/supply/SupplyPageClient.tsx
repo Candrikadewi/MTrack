@@ -13,12 +13,14 @@ import { buildSupplyBatchCategories, jenisOf } from "@/lib/engine/batches";
 import { SectionHeading } from "@/components/ui/SectionHeading";
 import { SegmentedSwitch } from "@/components/ui/SegmentedSwitch";
 import { KaizenModal } from "@/components/util-pool/KaizenModal";
+import { KaizenBatchModal } from "@/components/util-pool/KaizenBatchModal";
+import { RegisteredList, type RegisteredItem } from "@/components/ui/RegisteredList";
 import { TaktDownModal } from "@/components/takt/TaktDownModal";
 import { useStoreList, useStoreReady } from "@/lib/useStore";
 import { pushToast } from "@/lib/toast";
-import { demandStore, projectStore, taktStore, utilPoolStore, vokasiStore, zparStore } from "@/lib/repo";
+import { demandStore, projectStore, taktStore, utilPoolStore, valueMappingStore, vokasiStore, zparStore } from "@/lib/repo";
 import { contractRemainingLabel, contractUrgency, fmtDate, poolLeadTimeDays } from "@/lib/engine/compute";
-import { autoProjectFinishCheck, naturalRelease } from "@/lib/engine/actions";
+import { autoProjectFinishCheck, deleteKaizenBatch, deleteTaktDown, naturalRelease } from "@/lib/engine/actions";
 import { useRole } from "@/lib/RoleContext";
 import { useSessionState } from "@/lib/useSessionState";
 import type { UtilPoolEntry } from "@/lib/types";
@@ -43,7 +45,8 @@ export function SupplyPageClient() {
   const demandsReady = useStoreReady(demandStore);
   const vokasiReady = useStoreReady(vokasiStore);
   const zparReady = useStoreReady(zparStore);
-  const releaseInputsReady = poolReady && projectsReady && demandsReady && vokasiReady && zparReady;
+  const mappingsReady = useStoreReady(valueMappingStore);
+  const releaseInputsReady = poolReady && projectsReady && demandsReady && vokasiReady && zparReady && mappingsReady;
   useEffect(() => {
     if (role === "admin" && releaseInputsReady) autoProjectFinishCheck();
   }, [role, releaseInputsReady]);
@@ -69,6 +72,36 @@ export function SupplyPageClient() {
   const batchCategories = useMemo(() => buildSupplyBatchCategories(entries, taktCases), [entries, taktCases]);
 
   const [inputTab, setInputTab] = useSessionState<"taktdown" | "kaizen">("supply.input.tab", "taktdown");
+  const [editingTaktDownId, setEditingTaktDownId] = useState<string | null>(null);
+  const [editingKaizenLabel, setEditingKaizenLabel] = useState<string | null>(null);
+  const kaizenBatches = useMemo(() => {
+    const map = new Map<string, UtilPoolEntry[]>();
+    for (const e of entries) if (e.source === "Kaizen") map.set(e.source_label, [...(map.get(e.source_label) ?? []), e]);
+    return map;
+  }, [entries]);
+  const registered: RegisteredItem[] = useMemo(
+    () =>
+      inputTab === "taktdown"
+        ? taktCases
+            .filter((t) => t.category === "down")
+            .sort((a, b) => b.date.localeCompare(a.date))
+            .map((t) => {
+              const linked = entries.filter((e) => t.released_pool_ids.includes(e.id));
+              return {
+                id: t.id,
+                title: `Takt Down ${t.plant}`,
+                meta: `${fmtDate(t.date)} · ${linked.length} MP · ${linked.filter((e) => e.status !== "Open").length}/${linked.length} diutilize`,
+              };
+            })
+        : Array.from(kaizenBatches.entries())
+            .sort((a, b) => b[1][0].entered_pool_date.localeCompare(a[1][0].entered_pool_date))
+            .map(([label, list]) => ({
+              id: label,
+              title: label,
+              meta: `Rilis ${fmtDate(list[0].entered_pool_date)} · ${list.length} MP · ${list.filter((e) => e.status !== "Open").length}/${list.length} diutilize`,
+            })),
+    [inputTab, taktCases, entries, kaizenBatches]
+  );
 
   const [kontrapVokasi, setKontrapVokasi] = useSessionState<"kontrak" | "vokasi">("supply.detail.switch", "kontrak");
   const switchScoped = useMemo(
@@ -170,10 +203,39 @@ export function SupplyPageClient() {
                 </Button>
               </div>
             )}
+            <RegisteredList
+              items={registered}
+              emptyText={inputTab === "taktdown" ? "Belum ada Takt Down." : "Belum ada Kaizen."}
+              onEdit={(id) => (inputTab === "taktdown" ? setEditingTaktDownId(id) : setEditingKaizenLabel(id))}
+              onDelete={(id) => {
+                if (inputTab === "taktdown") {
+                  deleteTaktDown(id);
+                  pushToast("Takt Down dihapus.", "success");
+                } else {
+                  const kept = deleteKaizenBatch(id);
+                  pushToast(kept ? `Kaizen dihapus. ${kept} MP yang sudah diutilize tetap tersimpan.` : "Kaizen dihapus.", "success");
+                }
+              }}
+              deleteNote="MP yang belum diutilize ikut dikeluarkan dari Supply Pool. MP yang sudah diutilize tetap tersimpan."
+            />
             </div>
           </Card>
           {kaizenOpen && <KaizenModal open onClose={() => setKaizenOpen(false)} />}
           {taktDownOpen && <TaktDownModal onClose={() => setTaktDownOpen(false)} poolEntries={entries} />}
+          {editingTaktDownId && taktCases.find((t) => t.id === editingTaktDownId) && (
+            <TaktDownModal
+              editing={taktCases.find((t) => t.id === editingTaktDownId)}
+              onClose={() => setEditingTaktDownId(null)}
+              poolEntries={entries}
+            />
+          )}
+          {editingKaizenLabel && kaizenBatches.has(editingKaizenLabel) && (
+            <KaizenBatchModal
+              label={editingKaizenLabel}
+              entries={kaizenBatches.get(editingKaizenLabel) ?? []}
+              onClose={() => setEditingKaizenLabel(null)}
+            />
+          )}
         </div>
       )}
 

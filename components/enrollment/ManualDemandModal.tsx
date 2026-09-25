@@ -3,8 +3,9 @@ import { useState } from "react";
 import { Modal } from "@/components/ui/Modal";
 import { Field, Input, Select } from "@/components/ui/Form";
 import { Button } from "@/components/ui/Button";
-import { createManualDemand, getActiveEmployeeByNoreg } from "@/lib/engine/actions";
-import type { DemandCategory, DemandOriginType } from "@/lib/types";
+import { createManualDemand, getActiveEmployeeByNoreg, updateManualDemand } from "@/lib/engine/actions";
+import { pushToast } from "@/lib/toast";
+import type { Demand, DemandCategory, DemandOriginType } from "@/lib/types";
 
 const ORIGINS: Extract<DemandOriginType, "Resign" | "Pension" | "PensionDini" | "Unfit" | "GST" | "Others">[] = [
   "GST",
@@ -30,23 +31,28 @@ export function ManualDemandModal({
   open,
   onClose,
   defaultCategory,
+  editing,
 }: {
   open: boolean;
   onClose: () => void;
+  /** Present when editing an existing manual demand. */
+  editing?: Demand;
   /** Fixed category when opened from a PKWT/Vokasi-scoped context (old
    * Enrollment page). Omit to let the user pick it in-modal — the
    * consolidated Demand page's Manual tab isn't scoped to either tab. */
   defaultCategory?: DemandCategory;
 }) {
-  const [pickedCategory, setPickedCategory] = useState<DemandCategory>(defaultCategory ?? "PKWT");
+  const [pickedCategory, setPickedCategory] = useState<DemandCategory>(editing?.category ?? defaultCategory ?? "PKWT");
   const category = defaultCategory ?? pickedCategory;
-  const [originType, setOriginType] = useState<(typeof ORIGINS)[number]>("Resign");
-  const [othersReason, setOthersReason] = useState("");
-  const [outgoingNoreg, setOutgoingNoreg] = useState("");
-  const [outgoingNama, setOutgoingNama] = useState("");
-  const [div, setDiv] = useState("");
-  const [dept, setDept] = useState("");
-  const [fulfillDate, setFulfillDate] = useState("");
+  const [originType, setOriginType] = useState<(typeof ORIGINS)[number]>(
+    editing && (ORIGINS as string[]).includes(editing.origin_type) ? (editing.origin_type as (typeof ORIGINS)[number]) : "Resign"
+  );
+  const [othersReason, setOthersReason] = useState(editing?.origin_label ?? "");
+  const [outgoingNoreg, setOutgoingNoreg] = useState(editing?.outgoing_noreg ?? "");
+  const [outgoingNama, setOutgoingNama] = useState(editing?.outgoing_nama ?? "");
+  const [div, setDiv] = useState(editing?.div ?? "");
+  const [dept, setDept] = useState(editing?.dept ?? "");
+  const [fulfillDate, setFulfillDate] = useState(editing?.fulfill_date ?? "");
   const [notFound, setNotFound] = useState(false);
 
   function reset() {
@@ -78,7 +84,7 @@ export function ManualDemandModal({
 
   function submit() {
     if (!outgoingNoreg || !dept) return;
-    createManualDemand({
+    const input = {
       category,
       origin_type: originType,
       origin_label: originType === "Others" ? othersReason : undefined,
@@ -87,13 +93,24 @@ export function ManualDemandModal({
       div,
       dept,
       fulfill_date: fulfillDate,
-    });
+    };
+    if (editing) {
+      const error = updateManualDemand(editing.id, input);
+      if (error) {
+        pushToast(error);
+        return;
+      }
+      pushToast("Demand diperbarui.", "success");
+      onClose();
+      return;
+    }
+    createManualDemand(input);
     reset();
     onClose();
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="+ Manual Demand">
+    <Modal open={open} onClose={onClose} title={editing ? "Edit Manual Demand" : "+ Manual Demand"}>
       <div className="space-y-4">
         <div className="grid grid-cols-2 gap-4">
           <Field label="Rencana Pemenuhan (Status MP)">
@@ -150,7 +167,7 @@ export function ManualDemandModal({
             Batal
           </Button>
           <Button variant="primary" disabled={!outgoingNoreg || !dept} onClick={submit}>
-            Simpan Demand
+            {editing ? "Simpan Perubahan" : "Simpan Demand"}
           </Button>
         </div>
       </div>

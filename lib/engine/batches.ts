@@ -99,7 +99,7 @@ export function buildDemandBatchCategories(
       projectDemands,
       batchesOf(projectDemands, (d) => d.origin_ref, (ref) => {
         const p = projects.find((x) => x.id === ref);
-        return { label: p?.name ?? "Project", meta: p ? `SOP ${fmtDate(p.start_date)}` : undefined, href: "/projects" };
+        return { label: p?.name ?? "Project", meta: p ? `SOP ${fmtDate(p.start_date)}` : undefined, href: p ? `/projects/${p.id}` : "/projects" };
       })
     ),
     category(

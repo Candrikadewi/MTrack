@@ -6,13 +6,8 @@ import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { TableWrap, Th, Td } from "@/components/ui/Table";
 import { CompositionRowsEditor, emptyCompositionRow, type CompositionRow } from "@/components/takt/CompositionRowsEditor";
-import {
-  addProjectRow,
-  createProject,
-  increaseProjectRowQty,
-  updateProjectDetails,
-  updateProjectRowRelease,
-} from "@/lib/engine/actions";
+import { createProject, demandIdsByRow, lockedDemandCount, updateProject } from "@/lib/engine/actions";
+import { pushToast } from "@/lib/toast";
 import { fmtDate, projectFillCount } from "@/lib/engine/compute";
 import { CONTRACT_MONTHS, mpRoleLabel, rowReleaseDate, type Project, type ProjectMpNeedRow } from "@/lib/types";
 
@@ -85,15 +80,17 @@ export function NewProjectModal({ open, onClose, project }: { open: boolean; onC
   const [step, setStep] = useState<"form" | "preview">("form");
   const [showErrors, setShowErrors] = useState(false);
 
-  // Rows that already existed when the project loaded can only have their
-  // qty increased and their release changed — every other field is locked
-  // (see CompositionRowsEditor) so demand records that may already be
-  // Fulfilled never get reshuffled. A release that already happened is
-  // locked too.
+  // Every row stays editable and removable until one of its demands is in
+  // progress (a candidate mapped, verified or received). From then on its
+  // qty can't go below the demands in progress, and its division / dept /
+  // status are fixed so that history never gets reshuffled. A release that
+  // already happened is fixed too.
   const originalById = new Map((project?.rows ?? []).map((r) => [r.id, r]));
-  const isRowLocked = (row: CompositionRow) => originalById.has(row.id);
+  const idsByRow = project ? demandIdsByRow(project.rows, project.demand_ids) : new Map<string, string[]>();
+  const lockedFor = (row: CompositionRow) => lockedDemandCount(idsByRow.get(row.id) ?? []);
+  const isRowLocked = (row: CompositionRow) => lockedFor(row) > 0;
   const isReleaseLocked = (row: CompositionRow) => Boolean(originalById.get(row.id)?.released);
-  const minQtyFor = (row: CompositionRow) => originalById.get(row.id)?.qty ?? 1;
+  const minQtyFor = (row: CompositionRow) => Math.max(1, lockedFor(row));
 
   const validRows = rows.filter((r) => r.division && r.dept && r.qty > 0);
   const problems = validRows
@@ -116,17 +113,16 @@ export function NewProjectModal({ open, onClose, project }: { open: boolean; onC
     if (!project) return;
     setShowErrors(true);
     if (blocked) return;
-    updateProjectDetails(project.id, { name: name.trim(), sop_date: sopDate });
-    for (const row of rows) {
-      const original = originalById.get(row.id);
-      if (!original) {
-        if (row.division && row.dept && row.qty > 0) addProjectRow(project.id, toNeedRow(row));
-        continue;
-      }
-      if (row.qty > original.qty) increaseProjectRowQty(project.id, row.id, row.qty);
-      const { release_date = "", no_release = false } = toNeedRow(row);
-      updateProjectRowRelease(project.id, row.id, { release_date, no_release });
+    const error = updateProject(project.id, {
+      name: name.trim(),
+      sop_date: sopDate,
+      rows: validRows.map((r) => ({ ...toNeedRow(r), ...(originalById.has(r.id) ? { id: r.id } : {}) })),
+    });
+    if (error) {
+      pushToast(error);
+      return;
     }
+    pushToast(`Project ${name.trim()} diperbarui.`, "success");
     onClose();
   }
 
@@ -164,8 +160,8 @@ export function NewProjectModal({ open, onClose, project }: { open: boolean; onC
             />
             {isEdit && (
               <p className="mt-2 text-xs text-slate-500">
-                Baris yang sudah terdaftar hanya bisa ditambah qty-nya dan diubah tanggal release-nya (sebelum rilis terjadi), agar
-                data demand yang sudah fulfilled tidak hilang.
+                Semua baris bisa diubah atau dihapus. Baris yang sudah punya kandidat atau pemenuhan hanya bisa diubah qty (tidak
+                kurang dari yang sudah berjalan) dan tanggal release-nya (sebelum rilis terjadi), supaya riwayatnya tidak hilang.
               </p>
             )}
           </div>

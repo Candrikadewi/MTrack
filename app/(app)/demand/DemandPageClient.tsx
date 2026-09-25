@@ -10,6 +10,7 @@ import { EmptyState, FilteredEmptyState, TableWrap, Td, Th } from "@/components/
 import { Skeleton } from "@/components/ui/Skeleton";
 import { MultiSelect } from "@/components/ui/MultiSelect";
 import { BatchTileRow } from "@/components/ui/BatchTileRow";
+import { RegisteredList, type RegisteredItem } from "@/components/ui/RegisteredList";
 import { DEMAND_JENIS_LABEL as JENIS_LABEL, buildDemandBatchCategories } from "@/lib/engine/batches";
 import { RatioWidget, RatioScenarioCompare } from "@/components/ui/RatioWidget";
 import { CollapsibleSection } from "@/components/ui/Collapsible";
@@ -22,7 +23,7 @@ import { NewProjectModal } from "@/components/projects/NewProjectModal";
 import { TaktUpModal } from "@/components/takt/TaktUpModal";
 import { Check, Circle } from "lucide-react";
 import { useStoreList, useStoreReady } from "@/lib/useStore";
-import { demandStore, pkwtReviewStore, projectStore, taktStore, utilPoolStore, vokasiStore, zparStore } from "@/lib/repo";
+import { demandStore, pkwtReviewStore, projectStore, taktStore, utilPoolStore, valueMappingStore, vokasiStore, zparStore } from "@/lib/repo";
 import { fmtDate, sisaHari, fulfillmentDeadline, supplyDemandStatus, computeVokasiStatus } from "@/lib/engine/compute";
 import {
   demandGranularStatus,
@@ -42,6 +43,14 @@ import {
   setDemandFulfillDate,
   setDemandNoReplace,
   setDemandReplacementByNoreg,
+  deleteManualDemand,
+  deleteProject,
+  deleteTaktUp,
+  findRehiredEmployee,
+  isRehiredAlumnus,
+  linkedZparNoreg,
+  linkRehiredNoreg,
+  rehireCandidates,
   syncProjectSeatDemands,
   autoProjectFinishCheck,
   ensureVokasiEndedDemands,
@@ -56,6 +65,8 @@ import type {
   DemandOriginType,
   EmployeeRecord,
   EmploymentStatus,
+  Project,
+  TaktCase,
   ReplacementStatus,
   UtilPoolEntry,
   VokasiRecord,
@@ -161,6 +172,47 @@ function todayKey(): string {
   return format(new Date(), "yyyy-MM-dd");
 }
 
+const MANUAL_ORIGINS: DemandOriginType[] = ["Resign", "Pension", "PensionDini", "GST", "Unfit", "Others", "Manual"];
+
+/** What's already been entered under the selected input tab, newest first,
+ * for the "Sudah terdaftar" list (edit / delete). */
+function registeredInputs(tab: "project" | "taktup" | "manual", projects: Project[], taktCases: TaktCase[], demands: Demand[]): RegisteredItem[] {
+  const byId = new Map(demands.map((d) => [d.id, d]));
+  const progress = (ids: string[]) => {
+    const list = ids.map((id) => byId.get(id)).filter((d): d is Demand => Boolean(d));
+    return `${list.filter((d) => d.status === "Fulfilled").length}/${list.length} terpenuhi`;
+  };
+  if (tab === "project") {
+    return [...projects]
+      .sort((a, b) => b.start_date.localeCompare(a.start_date))
+      .map((p) => ({
+        id: p.id,
+        title: p.name,
+        meta: `SOP ${fmtDate(p.start_date)} · ${p.rows.reduce((n, r) => n + r.qty, 0)} MP · ${progress(p.demand_ids)}`,
+        status: p.status === "Finish" ? { label: "Selesai", tone: "slate" as const } : { label: "Ongoing", tone: "blue" as const },
+      }));
+  }
+  if (tab === "taktup") {
+    return taktCases
+      .filter((t) => t.category === "up")
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .map((t) => ({
+        id: t.id,
+        title: `Takt Up ${t.plant}`,
+        meta: `${fmtDate(t.date)} · ${(t.need_rows ?? []).reduce((n, r) => n + r.qty, 0)} MP · ${progress(t.demand_ids)}`,
+      }));
+  }
+  return demands
+    .filter((d) => MANUAL_ORIGINS.includes(d.origin_type))
+    .sort((a, b) => b.created_at.localeCompare(a.created_at))
+    .map((d) => ({
+      id: d.id,
+      title: `${JENIS_LABEL[d.origin_type]} — ${d.outgoing_nama || d.outgoing_noreg}`,
+      meta: `${d.dept} · ${d.category === "PKWT" ? "Kontrak" : "Vokasi"} · pemenuhan ${fmtDate(d.fulfill_date)}`,
+      status: d.status === "Fulfilled" ? { label: "Terpenuhi", tone: "green" as const } : undefined,
+    }));
+}
+
 /** Nothing left to do: received by the shop, or not being replaced. */
 function isDemandDone(d: Demand): boolean {
   return Boolean(d.shop_confirmed_date) || d.replacement_status === "No Replace";
@@ -191,6 +243,8 @@ export function DemandPageClient() {
   const reviews = useStoreList(pkwtReviewStore);
   const vokasi = useStoreList(vokasiStore);
   const snapshots = useStoreList(zparStore);
+  // Confirmed Vokasi → ZPAR noreg links for rehired alumni (RehiredNoreg).
+  useStoreList(valueMappingStore);
   const employees = useMemo(() => snapshots.find((s) => s.is_active)?.employees ?? [], [snapshots]);
   const empByNoreg = useMemo(() => new Map(employees.map((e) => [e.noreg, e])), [employees]);
   const vokasiNoregs = useMemo(() => new Set(vokasi.map((v) => v.noreg)), [vokasi]);
@@ -203,7 +257,8 @@ export function DemandPageClient() {
   const vokasiReady = useStoreReady(vokasiStore);
   const zparReady = useStoreReady(zparStore);
   const taktReady = useStoreReady(taktStore);
-  const releaseInputsReady = demandsReady && projectsReady && poolReady && vokasiReady && zparReady && taktReady;
+  const mappingsReady = useStoreReady(valueMappingStore);
+  const releaseInputsReady = demandsReady && projectsReady && poolReady && vokasiReady && zparReady && taktReady && mappingsReady;
   useEffect(() => {
     if (!isAdmin || !releaseInputsReady) return;
     // Recreate demands whose insert was rejected before blank dates were
@@ -255,6 +310,10 @@ export function DemandPageClient() {
   const [projectModalOpen, setProjectModalOpen] = useState(false);
   const [taktUpOpen, setTaktUpOpen] = useState(false);
   const [manualOpen, setManualOpen] = useState(false);
+  const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
+  const [editingTaktUpId, setEditingTaktUpId] = useState<string | null>(null);
+  const [editingManualId, setEditingManualId] = useState<string | null>(null);
+  const registered = useMemo(() => registeredInputs(inputTab, projects, taktCases, demands), [inputTab, projects, taktCases, demands]);
 
   // ---- Detail dan Mapping Demand ----
   const [tab, setTab] = useSessionState<DemandCategory>("demand.detail.tab", "PKWT");
@@ -495,11 +554,50 @@ export function DemandPageClient() {
                   {inputTab === "project" ? "+ Project Baru" : inputTab === "taktup" ? "+ Takt Up" : "+ Manual Demand"}
                 </Button>
               </div>
+              <RegisteredList
+                items={registered}
+                emptyText={
+                  inputTab === "project"
+                    ? "Belum ada project."
+                    : inputTab === "taktup"
+                      ? "Belum ada Takt Up."
+                      : "Belum ada manual demand."
+                }
+                onEdit={(id) =>
+                  inputTab === "project" ? setEditingProjectId(id) : inputTab === "taktup" ? setEditingTaktUpId(id) : setEditingManualId(id)
+                }
+                onDelete={(id) => {
+                  if (inputTab === "project") {
+                    deleteProject(id);
+                    pushToast("Project dihapus.", "success");
+                  } else if (inputTab === "taktup") {
+                    deleteTaktUp(id);
+                    pushToast("Takt Up dihapus.", "success");
+                  } else {
+                    const error = deleteManualDemand(id);
+                    pushToast(error ?? "Manual demand dihapus.", error ? "error" : "success");
+                  }
+                }}
+                deleteNote={
+                  inputTab === "manual"
+                    ? "Demand ini akan dihapus. Demand yang sudah punya kandidat atau pemenuhan tidak bisa dihapus."
+                    : "Demand yang belum berjalan ikut terhapus. Demand yang sudah punya kandidat atau pemenuhan tetap tersimpan."
+                }
+              />
             </div>
           </Card>
           {projectModalOpen && <NewProjectModal open onClose={() => setProjectModalOpen(false)} />}
           {taktUpOpen && <TaktUpModal open onClose={() => setTaktUpOpen(false)} />}
           {manualOpen && <ManualDemandModal open onClose={() => setManualOpen(false)} />}
+          {editingProjectId && projects.find((p) => p.id === editingProjectId) && (
+            <NewProjectModal open project={projects.find((p) => p.id === editingProjectId)} onClose={() => setEditingProjectId(null)} />
+          )}
+          {editingTaktUpId && taktCases.find((t) => t.id === editingTaktUpId) && (
+            <TaktUpModal open editing={taktCases.find((t) => t.id === editingTaktUpId)} onClose={() => setEditingTaktUpId(null)} />
+          )}
+          {editingManualId && demands.find((d) => d.id === editingManualId) && (
+            <ManualDemandModal open editing={demands.find((d) => d.id === editingManualId)} onClose={() => setEditingManualId(null)} />
+          )}
         </div>
       )}
 
@@ -921,6 +1019,111 @@ function CandidateSummary({ demand: d }: { demand: Demand }) {
         {d.replacement_nama || d.replacement_noreg} <span className="text-xs text-slate-500 dark:text-slate-400">{d.replacement_noreg}</span>
       </div>
       <CandidateMeta demand={{ ...d, replacement_nama: "" }} />
+      <RehiredNoreg demand={d} />
+    </div>
+  );
+}
+
+/** A Vokasi alumnus mapped as PKWT New Hire signs under a new noreg. After
+ * sign kontrak it shows the confirmed ZPAR noreg, or — until one is
+ * confirmed — the same-name ZPAR candidates with the checks behind each,
+ * for an admin to pick (or type the noreg when the name differs). */
+function RehiredNoreg({ demand: d }: { demand: Demand }) {
+  const isAdmin = useRole() === "admin";
+  const [editing, setEditing] = useState(false);
+  const [manual, setManual] = useState("");
+  if (!isRehiredAlumnus(d)) return null;
+  const linked = linkedZparNoreg(d.replacement_noreg);
+  if (!d.fulfillment_confirmed_date) {
+    return <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">Noreg ZPAR ditautkan setelah sign kontrak</div>;
+  }
+  if (linked && !editing) {
+    const emp = findRehiredEmployee(d.replacement_noreg);
+    return (
+      <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
+        Noreg ZPAR: <span className="font-semibold text-emerald-700 dark:text-emerald-400">{linked}</span>
+        {!emp && <span>(belum di ZPAR aktif)</span>}
+        {isAdmin && (
+          <button type="button" onClick={() => setEditing(true)} className="font-medium text-blue-700 hover:underline dark:text-blue-400">
+            Ubah
+          </button>
+        )}
+      </div>
+    );
+  }
+  const candidates = rehireCandidates(d);
+  const confirm = (noreg: string) => {
+    linkRehiredNoreg(d.replacement_noreg, noreg);
+    setEditing(false);
+    setManual("");
+    pushToast(`${d.replacement_nama || d.replacement_noreg} ditautkan ke noreg ZPAR ${noreg}.`, "success");
+  };
+  return (
+    <div className="mt-1.5 space-y-1.5 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs dark:border-amber-500/30 dark:bg-amber-500/10">
+      <div className="font-semibold text-amber-800 dark:text-amber-200">Noreg ZPAR belum dikonfirmasi</div>
+      {candidates.length === 0 ? (
+        <p className="text-amber-800/80 dark:text-amber-200/80">Belum ada nama yang sama di ZPAR aktif. Tunggu ZPAR berikutnya, atau isi noreg-nya.</p>
+      ) : (
+        <ul className="space-y-1.5">
+          {candidates.map((c) => (
+            <li key={c.employee.noreg} className="rounded-md bg-white/80 p-1.5 dark:bg-slate-900/60">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-medium text-slate-800 dark:text-slate-100">
+                  {c.employee.noreg} · {c.employee.dept || "-"} · masuk {fmtDate(c.employee.tgl_masuk)}
+                </span>
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={() => confirm(c.employee.noreg)}
+                    className="shrink-0 rounded-md bg-blue-600 px-2 py-0.5 font-semibold text-white hover:bg-blue-700"
+                  >
+                    Pakai
+                  </button>
+                )}
+              </div>
+              <div className="mt-1 flex flex-wrap gap-1">
+                {c.checks.map((ch) => (
+                  <span
+                    key={ch.label}
+                    className={`rounded-full px-1.5 py-0.5 ${
+                      ch.ok
+                        ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-300"
+                        : "bg-red-100 text-red-800 dark:bg-red-500/15 dark:text-red-300"
+                    }`}
+                  >
+                    {ch.ok ? "✓" : "✕"} {ch.label}
+                  </span>
+                ))}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+      {isAdmin && (
+        <form
+          className="flex items-center gap-1.5"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (manual.trim()) confirm(manual.trim());
+          }}
+        >
+          <input
+            value={manual}
+            onChange={(e) => setManual(e.target.value)}
+            placeholder="Noreg ZPAR lain"
+            aria-label={`Noreg ZPAR untuk ${d.replacement_nama || d.replacement_noreg}`}
+            className="min-w-0 flex-1 rounded-md border border-slate-300 bg-white px-2 py-1 dark:border-slate-700 dark:bg-slate-900"
+          />
+          <button type="submit" disabled={!manual.trim()} className="rounded-md border border-slate-300 bg-white px-2 py-1 font-medium disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900">
+            Simpan
+          </button>
+          {editing && (
+            <button type="button" onClick={() => setEditing(false)} className="px-1 text-slate-500 hover:underline">
+              Batal
+            </button>
+          )}
+        </form>
+      )}
     </div>
   );
 }

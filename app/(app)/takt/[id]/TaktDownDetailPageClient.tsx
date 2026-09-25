@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
-import Link from "next/link";
-import { ArrowLeft, ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight } from "lucide-react";
+import { Breadcrumbs, DASHBOARD_MONITORING_CRUMB } from "@/components/ui/Breadcrumbs";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/Table";
@@ -18,14 +18,15 @@ function summarizeComposition(persons: TaktDownPerson[]): string {
     .join(", ");
 }
 
-function BackLink() {
+function BackLink({ name }: { name?: string }) {
   return (
-    <Link
-      href="/takt"
-      className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
-    >
-      <ArrowLeft size={15} /> Kembali ke Takt Time Monitoring
-    </Link>
+    <Breadcrumbs
+      items={[
+        DASHBOARD_MONITORING_CRUMB,
+        { label: "Takt Time Monitoring", href: "/takt" },
+        { label: name ?? "Detail" },
+      ]}
+    />
   );
 }
 
@@ -74,7 +75,7 @@ export function TaktDownDetailPageClient({ id }: { id: string }) {
 
   return (
     <div className="space-y-6">
-      <BackLink />
+      <BackLink name={`Takt Down — ${takt.plant}`} />
       <div>
         <div className="flex items-center gap-2">
           <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100">Takt Down — {takt.plant}</h1>
