@@ -42,6 +42,8 @@ import {
   setDemandFulfillDate,
   setDemandNoReplace,
   setDemandReplacementByNoreg,
+  findRehiredEmployee,
+  isRehiredAlumnus,
   syncProjectSeatDemands,
   autoProjectFinishCheck,
   ensureVokasiEndedDemands,
@@ -921,6 +923,25 @@ function CandidateSummary({ demand: d }: { demand: Demand }) {
         {d.replacement_nama || d.replacement_noreg} <span className="text-xs text-slate-500 dark:text-slate-400">{d.replacement_noreg}</span>
       </div>
       <CandidateMeta demand={{ ...d, replacement_nama: "" }} />
+      <RehiredNoreg demand={d} />
+    </div>
+  );
+}
+
+/** A Vokasi alumnus mapped as PKWT New Hire signs under a new noreg; shows
+ * it once ZPAR has them (or that it's still pending). */
+function RehiredNoreg({ demand: d }: { demand: Demand }) {
+  if (!isRehiredAlumnus(d)) return null;
+  const emp = findRehiredEmployee(d.replacement_noreg, d.replacement_nama, d.dept);
+  return (
+    <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+      {emp && emp.noreg !== d.replacement_noreg ? (
+        <>
+          Noreg ZPAR: <span className="font-medium text-slate-700 dark:text-slate-200">{emp.noreg}</span>
+        </>
+      ) : !emp ? (
+        "Noreg ZPAR baru belum muncul"
+      ) : null}
     </div>
   );
 }

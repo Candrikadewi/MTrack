@@ -520,7 +520,8 @@ export function setDemandReplacementByNoreg(
     batch = vokasi?.batch ?? "";
     tglMasuk = vokasi?.tgl_masuk ?? emp?.tgl_masuk ?? null;
     fs_status = computeFsStatus(replacementStatus, demand.dept, dept, vokasi?.tgl_ended);
-    employmentStatus = getEmploymentStatus(noreg);
+    // A PKWT New Hire is Kontrak even when mapped with their Vokasi noreg.
+    employmentStatus = replacementStatus === "PKWT New Hire" ? "Kontrak" : getEmploymentStatus(noreg);
   }
 
   const supabase = createClient();
@@ -737,6 +738,48 @@ export function projectRowOfDemand(project: Project, demand: Demand): ProjectMpN
  * the project demand, then whoever filled the replacement demand raised
  * when that person's contract ended (Vokasi Ended / PKWT Terminate), and so
  * on. Only verified (Fulfilled) fills count. */
+function normalizedName(name: string): string {
+  return name.toUpperCase().replace(/[^A-Z]+/g, " ").trim();
+}
+
+/** A Vokasi alumnus hired as PKWT (Source "PKWT New Hire") signs under a
+ * new noreg that only shows up in a later ZPAR. Finds that ZPAR record:
+ * the same noreg if HR kept it, otherwise the one employee with the same
+ * name whose Tgl Masuk isn't before their Vokasi start (same department
+ * breaks a tie). Undefined while the new ZPAR isn't in or the match isn't
+ * unique — never a guess. */
+export function findRehiredEmployee(vokasiNoreg: string, nama: string, dept: string): EmployeeRecord | undefined {
+  const snap = getActiveSnapshot();
+  if (!snap) return undefined;
+  const same = snap.employees.find((e) => e.noreg === vokasiNoreg);
+  if (same) return same;
+  const vokasi = getVokasiByNoreg(vokasiNoreg);
+  const name = normalizedName(nama || vokasi?.nama || "");
+  if (!name) return undefined;
+  let candidates = snap.employees.filter((e) => normalizedName(e.nama) === name);
+  if (vokasi?.tgl_masuk) candidates = candidates.filter((e) => !e.tgl_masuk || e.tgl_masuk >= vokasi.tgl_masuk);
+  if (candidates.length > 1 && dept) {
+    const sameDept = candidates.filter((e) => e.dept === dept);
+    if (sameDept.length > 0) candidates = sameDept;
+  }
+  return candidates.length === 1 ? candidates[0] : undefined;
+}
+
+/** Filled as "PKWT New Hire" with a Vokasi noreg: the person is an alumnus
+ * now under a PKWT contract, whose own Vokasi Ended record says nothing
+ * about this seat. */
+export function isRehiredAlumnus(d: Demand): boolean {
+  return d.replacement_status === "PKWT New Hire" && Boolean(d.replacement_noreg && getVokasiByNoreg(d.replacement_noreg));
+}
+
+/** The noregs a seat holder goes by: the one they were mapped with, plus
+ * their new ZPAR noreg once a rehired alumnus shows up there. */
+function holderNoregs(d: Demand): string[] {
+  if (!isRehiredAlumnus(d)) return [d.replacement_noreg];
+  const emp = findRehiredEmployee(d.replacement_noreg, d.replacement_nama, d.dept);
+  return emp && emp.noreg !== d.replacement_noreg ? [d.replacement_noreg, emp.noreg] : [d.replacement_noreg];
+}
+
 export function projectSeatOccupants(seat: Demand, demands: Demand[] = demandStore.list()): Demand[] {
   const chain: Demand[] = [];
   const seen = new Set<string>();
@@ -744,9 +787,14 @@ export function projectSeatOccupants(seat: Demand, demands: Demand[] = demandSto
   while (current && current.status === "Fulfilled" && current.replacement_noreg && !seen.has(current.id)) {
     seen.add(current.id);
     chain.push(current);
-    const outgoing: string = current.replacement_noreg;
+    const rehired = isRehiredAlumnus(current);
+    const noregs = holderNoregs(current);
+    // A rehired alumnus is replaced when their PKWT review ends in
+    // Terminate — under the new noreg — never via their old Vokasi record.
     current = demands.find(
-      (d) => d.outgoing_noreg === outgoing && (d.origin_type === "VokasiEnded" || d.origin_type === "PkwtTerminate")
+      (d) =>
+        noregs.includes(d.outgoing_noreg) &&
+        (d.origin_type === "PkwtTerminate" || (d.origin_type === "VokasiEnded" && !rehired))
     );
   }
   return chain;
@@ -768,6 +816,7 @@ export function syncProjectSeatDemands(): void {
       const row = projectRowOfDemand(project, seat);
       const releaseDate = row ? rowReleaseDate(row, project) : null;
       for (const holder of projectSeatOccupants(seat, demands)) {
+        if (isRehiredAlumnus(holder)) continue;
         const next = demands.find((d) => d.origin_type === "VokasiEnded" && d.outgoing_noreg === holder.replacement_noreg);
         if (!next) continue;
         if (!next.outgoing_label) demandStore.update(next.id, { outgoing_label: label });
@@ -880,18 +929,23 @@ export function autoProjectFinishCheck(): void {
   needed.forEach((store) => store.init());
   if (!needed.every((store) => store.ready())) return;
   const demands = demandStore.list();
+  syncRehiredPoolEntries();
   for (const project of projectStore.list()) {
-    if (project.status !== "Ongoing") continue;
     const seats = demands.filter((d) => project.demand_ids.includes(d.id));
 
     let releasedAny = false;
+    let pushedAny = false;
     const rows = project.rows.map((row) => {
       const releaseDate = rowReleaseDate(row, project);
-      if (row.released || !releaseDate || sisaHari(releaseDate) > 0) return row;
-      releasedAny = true;
+      if (!releaseDate || sisaHari(releaseDate) > 0) return row;
+      // Released rows are re-checked too (releasing is idempotent): a holder
+      // missed earlier — e.g. a rehired alumnus looked up under their old
+      // Vokasi noreg — still lands in the pool.
       for (const seat of seats.filter((d) => projectRowOfDemand(project, d)?.id === row.id)) {
-        releaseSeatHolder(project, seat, demands);
+        if (releaseSeatHolder(project, seat, demands, releaseDate)) pushedAny = true;
       }
+      if (row.released) return row;
+      releasedAny = true;
       return { ...row, released: true };
     });
     if (releasedAny) projectStore.update(project.id, { rows });
@@ -901,34 +955,80 @@ export function autoProjectFinishCheck(): void {
     const allUtilized = !utilPoolStore
       .list()
       .some((e) => e.source === "ProjectFinish" && e.source_label === project.name && e.status === "Open");
-    if (allReleased && allFulfilled && allUtilized) projectStore.update(project.id, { status: "Finish" });
+    const status = allReleased && allFulfilled && allUtilized ? "Finish" : "Ongoing";
+    if (project.status !== status && (status === "Finish" || pushedAny)) projectStore.update(project.id, { status });
   }
   syncProjectSeatDemands();
 }
 
-function releaseSeatHolder(project: Project, seat: Demand, demands: Demand[]): void {
+const PENDING_NOREG_NOTE = "Noreg Vokasi — noreg ZPAR baru belum ditemukan";
+
+/** Puts a released seat's current holder into Supply Pool as MP Excess
+ * while their contract still runs. A rehired alumnus is released as PKWT
+ * under their new ZPAR noreg (their old Vokasi end date says nothing about
+ * the PKWT contract); if the new ZPAR isn't in yet they go in under the old
+ * noreg with a note, and syncRehiredPoolEntries swaps it later. Does
+ * nothing if this project already released them. Returns whether an entry
+ * was added. */
+function releaseSeatHolder(project: Project, seat: Demand, demands: Demand[], releaseDate: string): boolean {
   const holder = projectSeatOccupants(seat, demands).at(-1);
-  if (!holder) return;
-  const employment = getEmploymentStatus(holder.replacement_noreg);
-  const type: MpStatusKategori =
-    employment === "Vokasi" || (!employment && (holder.replacement_status === "Vokasi New Hire" || holder.replacement_batch))
-      ? "Vokasi"
-      : employment === "Permanen"
-        ? "Permanen"
-        : "PKWT";
-  const contractEnd = estimateContractEnd(holder.replacement_noreg, type);
-  const stillValid = contractEnd === null || sisaHari(contractEnd) >= 0;
-  if (!stillValid) return;
+  if (!holder) return false;
+  const rehired = isRehiredAlumnus(holder);
+  const emp = rehired
+    ? findRehiredEmployee(holder.replacement_noreg, holder.replacement_nama, seat.dept)
+    : getActiveEmployeeByNoreg(holder.replacement_noreg);
+  const noregs = [holder.replacement_noreg, ...(emp ? [emp.noreg] : [])];
+  const alreadyIn = utilPoolStore
+    .list()
+    .some((e) => e.source === "ProjectFinish" && e.source_label === project.name && noregs.includes(e.noreg));
+  if (alreadyIn) return false;
+
+  let type: MpStatusKategori;
+  let contractEnd: string | null;
+  if (rehired) {
+    type = emp && isPermanenForRatio(emp.status_kontrak) ? "Permanen" : "PKWT";
+    contractEnd = emp && !isPermanenForRatio(emp.status_kontrak) ? computeReviewDate(emp.tgl_masuk, emp.status_kontrak) || null : null;
+  } else {
+    const employment = getEmploymentStatus(holder.replacement_noreg);
+    type =
+      employment === "Vokasi" || (!employment && (holder.replacement_status === "Vokasi New Hire" || holder.replacement_batch))
+        ? "Vokasi"
+        : employment === "Permanen"
+          ? "Permanen"
+          : "PKWT";
+    contractEnd = estimateContractEnd(holder.replacement_noreg, type);
+  }
+  if (contractEnd !== null && sisaHari(contractEnd) < 0) return false;
   pushToUtilPool({
-    noreg: holder.replacement_noreg,
-    nama: holder.replacement_nama,
+    noreg: emp?.noreg ?? holder.replacement_noreg,
+    nama: emp?.nama ?? holder.replacement_nama,
     type,
     source: "ProjectFinish",
     source_label: project.name,
     prev_div: seat.div,
     prev_dept: seat.dept,
     contract_end: contractEnd,
+    entered_pool_date: releaseDate,
+    action_note: rehired && !emp ? PENDING_NOREG_NOTE : "",
   });
+  return true;
+}
+
+/** Pool entries released under an alumnus' old Vokasi noreg switch to
+ * their new ZPAR noreg, name and PKWT contract end once that ZPAR is in. */
+function syncRehiredPoolEntries(): void {
+  for (const entry of utilPoolStore.list()) {
+    if (entry.source !== "ProjectFinish" || entry.action_note !== PENDING_NOREG_NOTE) continue;
+    const emp = findRehiredEmployee(entry.noreg, entry.nama, entry.prev_dept);
+    if (!emp) continue;
+    utilPoolStore.update(entry.id, {
+      noreg: emp.noreg,
+      nama: emp.nama,
+      type: isPermanenForRatio(emp.status_kontrak) ? "Permanen" : "PKWT",
+      contract_end: isPermanenForRatio(emp.status_kontrak) ? null : computeReviewDate(emp.tgl_masuk, emp.status_kontrak) || null,
+      action_note: "",
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1151,6 +1251,7 @@ export function pushToUtilPool(input: {
   prev_dept: string;
   contract_end: string | null;
   entered_pool_date?: string;
+  action_note?: string;
 }): UtilPoolEntry {
   const entry: UtilPoolEntry = {
     id: genId("pool"),
@@ -1164,7 +1265,7 @@ export function pushToUtilPool(input: {
     entered_pool_date: input.entered_pool_date ?? today().toISOString().slice(0, 10),
     contract_end: input.contract_end,
     status: "Open",
-    action_note: "",
+    action_note: input.action_note ?? "",
   };
   utilPoolStore.insert(entry);
   applyVokasiNaturalRelease(entry);
