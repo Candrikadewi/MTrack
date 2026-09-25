@@ -982,10 +982,250 @@ export function deleteProject(projectId: string): boolean {
 
   for (const demandId of project.demand_ids) {
     const demand = demandStore.get(demandId);
-    if (demand && demand.status !== "Fulfilled") demandStore.remove(demandId);
+    if (demand && isEditableDemand(demand)) demandStore.remove(demandId);
   }
   projectStore.remove(projectId);
   return true;
+}
+
+// ---------------------------------------------------------------------------
+// Editing / deleting registered inputs (Project, Takt Up, Manual, Kaizen)
+// ---------------------------------------------------------------------------
+
+/** A demand nobody has acted on yet — no candidate, nothing verified or
+ * received. Only these are reshaped or removed when an input is edited or
+ * deleted; anything in progress stays as it is. */
+export function isEditableDemand(d: Demand): boolean {
+  return d.status !== "Fulfilled" && !d.replacement_noreg && !d.fulfillment_confirmed_date && !d.shop_confirmed_date;
+}
+
+export type NeedRowDraft = Omit<ProjectMpNeedRow, "id" | "demand_ids"> & { id?: string };
+
+/** Each row's demand ids: exact when rows record their own, otherwise by
+ * creation order (rows expanded one after another into `flat`). */
+export function demandIdsByRow(rows: ProjectMpNeedRow[], flat: string[]): Map<string, string[]> {
+  const map = new Map<string, string[]>();
+  if (rows.every((r) => r.demand_ids)) {
+    for (const r of rows) map.set(r.id, r.demand_ids ?? []);
+    return map;
+  }
+  let i = 0;
+  for (const r of rows) {
+    const n = Math.max(1, r.qty);
+    map.set(r.id, flat.slice(i, i + n));
+    i += n;
+  }
+  return map;
+}
+
+/** How many of these demands are already in progress (see isEditableDemand). */
+export function lockedDemandCount(ids: string[]): number {
+  return ids.filter((id) => {
+    const d = demandStore.get(id);
+    return d !== undefined && !isEditableDemand(d);
+  }).length;
+}
+
+type ReconcileResult = { ok: true; rows: ProjectMpNeedRow[]; demandIds: string[] } | { ok: false; error: string };
+
+/** Applies an edited list of need rows to a Project / Takt Up: removed
+ * rows drop their demands, a lower qty drops untouched demands, a higher
+ * qty adds new ones, and changed div/dept/status/date carry over to the
+ * untouched demands. Refuses (changing nothing) when that would remove or
+ * reshape a demand already in progress. */
+function reconcileNeedRows(
+  prevRows: ProjectMpNeedRow[],
+  flatIds: string[],
+  nextRows: NeedRowDraft[],
+  originType: "Project" | "TaktUp",
+  originRef: string,
+  labelOf: (row: Omit<ProjectMpNeedRow, "id">) => string
+): ReconcileResult {
+  const idsByRow = demandIdsByRow(prevRows, flatIds);
+  const nextIds = new Set(nextRows.map((r) => r.id).filter(Boolean));
+  const describe = (r: { dept: string; status_mp: string }) => `${r.dept || "-"} · ${r.status_mp}`;
+
+  // Validate everything first so a refused edit leaves no half-applied state.
+  for (const prev of prevRows) {
+    const ids = idsByRow.get(prev.id) ?? [];
+    const locked = lockedDemandCount(ids);
+    const next = nextRows.find((r) => r.id === prev.id);
+    if (!next) {
+      if (locked > 0) return { ok: false, error: `Baris ${describe(prev)} sudah punya ${locked} kandidat/pemenuhan, tidak bisa dihapus.` };
+      continue;
+    }
+    if (next.qty < locked) return { ok: false, error: `Qty ${describe(prev)} minimal ${locked} (sudah punya kandidat/pemenuhan).` };
+    const reshaped = next.division !== prev.division || next.dept !== prev.dept || next.status_mp !== prev.status_mp;
+    if (reshaped && locked > 0) {
+      return { ok: false, error: `Divisi/Dept/Status ${describe(prev)} tidak bisa diubah karena sudah ada kandidat/pemenuhan.` };
+    }
+  }
+
+  for (const prev of prevRows) {
+    if (nextIds.has(prev.id)) continue;
+    for (const id of idsByRow.get(prev.id) ?? []) if (demandStore.get(id)) demandStore.remove(id);
+  }
+
+  const rows: ProjectMpNeedRow[] = [];
+  for (const draft of nextRows) {
+    const prev = draft.id ? prevRows.find((r) => r.id === draft.id) : undefined;
+    const row: ProjectMpNeedRow = { ...draft, id: prev?.id ?? genId("row") };
+    let ids = prev ? (idsByRow.get(prev.id) ?? []).filter((id) => demandStore.get(id)) : [];
+    const editable = ids.filter((id) => isEditableDemand(demandStore.get(id)!));
+    if (prev) {
+      for (const id of editable) {
+        demandStore.update(id, {
+          category: mapMpStatusToDemandCategory(row.status_mp),
+          div: row.division,
+          dept: row.dept,
+          fulfill_date: row.fulfill_date,
+          outgoing_label: labelOf(row),
+        });
+      }
+    }
+    const qty = Math.max(1, row.qty);
+    if (ids.length > qty) {
+      const drop = editable.slice(0, ids.length - qty);
+      for (const id of drop) demandStore.remove(id);
+      ids = ids.filter((id) => !drop.includes(id));
+    } else if (ids.length < qty) {
+      const created = expandRowToDemands({ ...row, qty: qty - ids.length }, originType, originRef, labelOf(row));
+      ids = [...ids, ...created.map((d) => d.id)];
+    }
+    rows.push({ ...row, demand_ids: ids });
+  }
+  return { ok: true, rows, demandIds: rows.flatMap((r) => r.demand_ids ?? []) };
+}
+
+/** Full edit of a registered project: name, Tanggal SOP and every need
+ * row (see reconcileNeedRows). Returns an error message when refused. */
+export function updateProject(projectId: string, input: { name: string; sop_date: string; rows: NeedRowDraft[] }): string | null {
+  const project = projectStore.get(projectId);
+  if (!project) return "Project tidak ditemukan.";
+  const rowsIn = input.rows.map((r) => {
+    const prev = r.id ? project.rows.find((p) => p.id === r.id) : undefined;
+    return prev?.released ? { ...r, release_date: prev.release_date, no_release: prev.no_release, released: true } : r;
+  });
+  const result = reconcileNeedRows(project.rows, project.demand_ids, rowsIn, "Project", project.id, () => input.name);
+  if (!result.ok) return result.error;
+  projectStore.update(projectId, {
+    name: input.name,
+    start_date: input.sop_date,
+    end_date: projectEndDate(result.rows, input.sop_date),
+    rows: result.rows,
+    demand_ids: result.demandIds,
+  });
+  syncProjectSeatDemands();
+  return null;
+}
+
+export function updateTaktUp(
+  taktId: string,
+  input: { plant: TaktCase["plant"]; date: string; takt_before: number; takt_after: number; rows: NeedRowDraft[] }
+): string | null {
+  const takt = taktStore.get(taktId);
+  if (!takt || takt.category !== "up") return "Takt Up tidak ditemukan.";
+  const result = reconcileNeedRows(takt.need_rows ?? [], takt.demand_ids, input.rows, "TaktUp", takt.id, (row) =>
+    `Takt Up ${input.plant} - ${row.division} - ${row.dept}`
+  );
+  if (!result.ok) return result.error;
+  taktStore.update(taktId, {
+    plant: input.plant,
+    date: input.date,
+    takt_before: input.takt_before,
+    takt_after: input.takt_after,
+    need_rows: result.rows,
+    demand_ids: result.demandIds,
+  });
+  return null;
+}
+
+/** Same invariant as deleteProject: untouched demands go with the case,
+ * anything already in progress stays standing on its own. */
+export function deleteTaktUp(taktId: string): boolean {
+  const takt = taktStore.get(taktId);
+  if (!takt || takt.category !== "up") return false;
+  for (const id of takt.demand_ids) {
+    const d = demandStore.get(id);
+    if (d && isEditableDemand(d)) demandStore.remove(id);
+  }
+  taktStore.remove(taktId);
+  return true;
+}
+
+export type ManualDemandInput = Parameters<typeof createManualDemand>[0];
+
+/** Edits a manual demand's own details. Its category only changes while
+ * nobody has been mapped to it yet. */
+export function updateManualDemand(demandId: string, input: ManualDemandInput): string | null {
+  const d = demandStore.get(demandId);
+  if (!d) return "Demand tidak ditemukan.";
+  if (input.category !== d.category && !isEditableDemand(d)) return "Kategori tidak bisa diubah setelah ada kandidat.";
+  demandStore.update(demandId, {
+    category: input.category,
+    origin_type: input.origin_type,
+    origin_label: input.origin_label,
+    outgoing_noreg: input.outgoing_noreg,
+    outgoing_nama: input.outgoing_nama,
+    div: input.div,
+    dept: input.dept,
+    fulfill_date: input.fulfill_date,
+  });
+  return null;
+}
+
+export function deleteManualDemand(demandId: string): string | null {
+  const d = demandStore.get(demandId);
+  if (!d) return "Demand tidak ditemukan.";
+  if (!isEditableDemand(d)) return "Demand ini sudah punya kandidat/pemenuhan, tidak bisa dihapus.";
+  demandStore.remove(demandId);
+  return null;
+}
+
+const KAIZEN_LABEL = /^Kaizen (\d{4}) Labor (\S+) - (.*) \((.*)\)$/;
+
+/** Parts of a Kaizen batch label ("Kaizen 2026 Labor A/F - Div (activity)"). */
+export function parseKaizenLabel(label: string): { year: string; group: string; div: string; activity: string } | null {
+  const m = KAIZEN_LABEL.exec(label);
+  return m ? { year: m[1], group: m[2], div: m[3], activity: m[4] } : null;
+}
+
+/** Renames a Kaizen batch's activity and moves its release date. People
+ * already utilized keep their entry as it is, except for the label, so the
+ * batch stays one group. */
+export function updateKaizenBatch(label: string, input: { activity: string; releaseDate: string }): string | null {
+  const parts = parseKaizenLabel(label);
+  if (!parts) return "Batch Kaizen tidak dikenali.";
+  const entries = utilPoolStore.list().filter((e) => e.source === "Kaizen" && e.source_label === label);
+  if (entries.length === 0) return "Batch Kaizen tidak ditemukan.";
+  const nextLabel = `Kaizen ${input.releaseDate.slice(0, 4) || parts.year} Labor ${parts.group} - ${parts.div} (${input.activity})`;
+  for (const e of entries) {
+    utilPoolStore.update(e.id, {
+      source_label: nextLabel,
+      ...(e.status === "Open" && input.releaseDate ? { entered_pool_date: input.releaseDate } : {}),
+    });
+  }
+  return null;
+}
+
+/** Takes one person back out of a Kaizen batch while still Open. */
+export function removeKaizenPerson(entryId: string): string | null {
+  const e = utilPoolStore.get(entryId);
+  if (!e || e.source !== "Kaizen") return "Data tidak ditemukan.";
+  if (e.status !== "Open") return "Sudah diutilize, tidak bisa dihapus.";
+  removePoolEntry(e);
+  return null;
+}
+
+/** Deletes a Kaizen batch: Open people are removed; anyone already
+ * utilized stays in the pool. Returns how many were kept. */
+export function deleteKaizenBatch(label: string): number {
+  let kept = 0;
+  for (const e of utilPoolStore.list().filter((x) => x.source === "Kaizen" && x.source_label === label)) {
+    if (e.status === "Open") removePoolEntry(e);
+    else kept++;
+  }
+  return kept;
 }
 
 /** §7 / §12 project releases, run when Demand/Supply/Project pages open
@@ -1129,12 +1369,8 @@ export function createTaktUp(input: {
     released_pool_ids: [],
   };
   taktStore.insert(takt);
-  const demandIds: string[] = [];
-  for (const row of takt.need_rows ?? []) {
-    const created = createDemandsFromTaktRow(takt, row);
-    demandIds.push(...created.map((d) => d.id));
-  }
-  return taktStore.update(takt.id, { demand_ids: demandIds })!;
+  const needRows = (takt.need_rows ?? []).map((row) => ({ ...row, demand_ids: createDemandsFromTaktRow(takt, row).map((d) => d.id) }));
+  return taktStore.update(takt.id, { need_rows: needRows, demand_ids: needRows.flatMap((r) => r.demand_ids) })!;
 }
 
 /** The plan row a released person's composition matches (division + dept +

@@ -263,7 +263,7 @@ export function CompositionRowsEditor({
                           />
                         )}
                         {locked ? (
-                          <span className="mb-1.5 text-[10px] text-slate-400">qty awal: {minQtyFor?.(row)}</span>
+                          <span className="mb-1.5 text-[10px] text-slate-500">{minQtyFor?.(row)} sudah berjalan</span>
                         ) : (
                           removableCount > 1 && (
                             <button

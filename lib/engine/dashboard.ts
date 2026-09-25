@@ -488,6 +488,87 @@ export interface DemandSupplyRow {
   percent: number;
 }
 
+/** PKWT review results for one batch: Continue, Terminate, and not
+ * filled in yet. */
+export interface ReviewOutcome {
+  total: number;
+  continued: number;
+  terminated: number;
+  pending: number;
+}
+
+export function reviewOutcome(reviews: PkwtReview[]): ReviewOutcome {
+  const continued = reviews.filter((r) => r.review_result === "Continue").length;
+  const terminated = reviews.filter((r) => r.review_result === "Terminate").length;
+  return { total: reviews.length, continued, terminated, pending: reviews.length - continued - terminated };
+}
+
+/** How far a demand has got: nobody yet, a candidate mapped, contract
+ * signed / assignment verified, received by the shop — or not replaced. */
+export type FulfillmentStage = "open" | "candidate" | "signed" | "received" | "noReplace";
+
+export function fulfillmentStage(d: Demand): FulfillmentStage {
+  if (d.replacement_status === "No Replace") return "noReplace";
+  if (d.shop_confirmed_date) return "received";
+  if (d.fulfillment_confirmed_date || d.status === "Fulfilled") return "signed";
+  if (d.replacement_noreg) return "candidate";
+  return "open";
+}
+
+/** Month a demand belongs to on the Dashboard: a PKWT Terminate / Vokasi
+ * Ended demand sits in the month of its review / batch end (the same month
+ * the Monitoring charts put it in), everything else in the month it has to
+ * be filled. */
+export function demandMonthKey(d: Demand): string {
+  if ((d.origin_type === "PkwtTerminate" || d.origin_type === "VokasiEnded") && d.tgl_ended_outgoing) {
+    return d.tgl_ended_outgoing.slice(0, 7);
+  }
+  return demandTargetDate(d).slice(0, 7);
+}
+
+/** One Demand-Supply row per Replacement Need. The stage counts are
+ * cumulative (a signed demand also had a candidate); done = received by
+ * the shop or No Replace, the same "done" the Demand page uses. */
+export interface FulfillmentRow {
+  reason: string;
+  demand: number;
+  candidate: number;
+  signed: number;
+  received: number;
+  noReplace: number;
+  done: number;
+  percent: number;
+}
+
+const STAGE_RANK: Record<FulfillmentStage, number> = { open: 0, candidate: 1, signed: 2, received: 3, noReplace: 3 };
+
+export function fulfillmentRows(demands: Demand[], category: DemandCategory): FulfillmentRow[] {
+  const byReason = new Map<string, FulfillmentRow>();
+  for (const d of demands) {
+    if (effectiveDemandCategory(d) !== category) continue;
+    const reason = demandOriginLabel(d);
+    const row =
+      byReason.get(reason) ?? { reason, demand: 0, candidate: 0, signed: 0, received: 0, noReplace: 0, done: 0, percent: 0 };
+    const stage = fulfillmentStage(d);
+    row.demand++;
+    if (stage === "noReplace") row.noReplace++;
+    else {
+      if (STAGE_RANK[stage] >= 1) row.candidate++;
+      if (STAGE_RANK[stage] >= 2) row.signed++;
+      if (stage === "received") row.received++;
+    }
+    row.done = row.received + row.noReplace;
+    row.percent = (row.done / row.demand) * 100;
+    byReason.set(reason, row);
+  }
+  return Array.from(byReason.values()).sort((a, b) => b.demand - a.demand);
+}
+
+export function isFulfillmentDone(d: Demand): boolean {
+  const stage = fulfillmentStage(d);
+  return stage === "received" || stage === "noReplace";
+}
+
 /** One row per origin reason (Replacement Need) for the given category — Demand =
  * every demand ever raised for that reason, Supply = how many are Fulfilled. */
 export function demandSupplyRows(demands: Demand[], category: DemandCategory): DemandSupplyRow[] {

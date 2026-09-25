@@ -10,6 +10,7 @@ import { EmptyState, FilteredEmptyState, TableWrap, Td, Th } from "@/components/
 import { Skeleton } from "@/components/ui/Skeleton";
 import { MultiSelect } from "@/components/ui/MultiSelect";
 import { BatchTileRow } from "@/components/ui/BatchTileRow";
+import { RegisteredList, type RegisteredItem } from "@/components/ui/RegisteredList";
 import { DEMAND_JENIS_LABEL as JENIS_LABEL, buildDemandBatchCategories } from "@/lib/engine/batches";
 import { RatioWidget, RatioScenarioCompare } from "@/components/ui/RatioWidget";
 import { CollapsibleSection } from "@/components/ui/Collapsible";
@@ -42,6 +43,9 @@ import {
   setDemandFulfillDate,
   setDemandNoReplace,
   setDemandReplacementByNoreg,
+  deleteManualDemand,
+  deleteProject,
+  deleteTaktUp,
   findRehiredEmployee,
   isRehiredAlumnus,
   linkedZparNoreg,
@@ -61,6 +65,8 @@ import type {
   DemandOriginType,
   EmployeeRecord,
   EmploymentStatus,
+  Project,
+  TaktCase,
   ReplacementStatus,
   UtilPoolEntry,
   VokasiRecord,
@@ -166,6 +172,47 @@ function todayKey(): string {
   return format(new Date(), "yyyy-MM-dd");
 }
 
+const MANUAL_ORIGINS: DemandOriginType[] = ["Resign", "Pension", "PensionDini", "GST", "Unfit", "Others", "Manual"];
+
+/** What's already been entered under the selected input tab, newest first,
+ * for the "Sudah terdaftar" list (edit / delete). */
+function registeredInputs(tab: "project" | "taktup" | "manual", projects: Project[], taktCases: TaktCase[], demands: Demand[]): RegisteredItem[] {
+  const byId = new Map(demands.map((d) => [d.id, d]));
+  const progress = (ids: string[]) => {
+    const list = ids.map((id) => byId.get(id)).filter((d): d is Demand => Boolean(d));
+    return `${list.filter((d) => d.status === "Fulfilled").length}/${list.length} terpenuhi`;
+  };
+  if (tab === "project") {
+    return [...projects]
+      .sort((a, b) => b.start_date.localeCompare(a.start_date))
+      .map((p) => ({
+        id: p.id,
+        title: p.name,
+        meta: `SOP ${fmtDate(p.start_date)} · ${p.rows.reduce((n, r) => n + r.qty, 0)} MP · ${progress(p.demand_ids)}`,
+        status: p.status === "Finish" ? { label: "Selesai", tone: "slate" as const } : { label: "Ongoing", tone: "blue" as const },
+      }));
+  }
+  if (tab === "taktup") {
+    return taktCases
+      .filter((t) => t.category === "up")
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .map((t) => ({
+        id: t.id,
+        title: `Takt Up ${t.plant}`,
+        meta: `${fmtDate(t.date)} · ${(t.need_rows ?? []).reduce((n, r) => n + r.qty, 0)} MP · ${progress(t.demand_ids)}`,
+      }));
+  }
+  return demands
+    .filter((d) => MANUAL_ORIGINS.includes(d.origin_type))
+    .sort((a, b) => b.created_at.localeCompare(a.created_at))
+    .map((d) => ({
+      id: d.id,
+      title: `${JENIS_LABEL[d.origin_type]} — ${d.outgoing_nama || d.outgoing_noreg}`,
+      meta: `${d.dept} · ${d.category === "PKWT" ? "Kontrak" : "Vokasi"} · pemenuhan ${fmtDate(d.fulfill_date)}`,
+      status: d.status === "Fulfilled" ? { label: "Terpenuhi", tone: "green" as const } : undefined,
+    }));
+}
+
 /** Nothing left to do: received by the shop, or not being replaced. */
 function isDemandDone(d: Demand): boolean {
   return Boolean(d.shop_confirmed_date) || d.replacement_status === "No Replace";
@@ -263,6 +310,10 @@ export function DemandPageClient() {
   const [projectModalOpen, setProjectModalOpen] = useState(false);
   const [taktUpOpen, setTaktUpOpen] = useState(false);
   const [manualOpen, setManualOpen] = useState(false);
+  const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
+  const [editingTaktUpId, setEditingTaktUpId] = useState<string | null>(null);
+  const [editingManualId, setEditingManualId] = useState<string | null>(null);
+  const registered = useMemo(() => registeredInputs(inputTab, projects, taktCases, demands), [inputTab, projects, taktCases, demands]);
 
   // ---- Detail dan Mapping Demand ----
   const [tab, setTab] = useSessionState<DemandCategory>("demand.detail.tab", "PKWT");
@@ -503,11 +554,50 @@ export function DemandPageClient() {
                   {inputTab === "project" ? "+ Project Baru" : inputTab === "taktup" ? "+ Takt Up" : "+ Manual Demand"}
                 </Button>
               </div>
+              <RegisteredList
+                items={registered}
+                emptyText={
+                  inputTab === "project"
+                    ? "Belum ada project."
+                    : inputTab === "taktup"
+                      ? "Belum ada Takt Up."
+                      : "Belum ada manual demand."
+                }
+                onEdit={(id) =>
+                  inputTab === "project" ? setEditingProjectId(id) : inputTab === "taktup" ? setEditingTaktUpId(id) : setEditingManualId(id)
+                }
+                onDelete={(id) => {
+                  if (inputTab === "project") {
+                    deleteProject(id);
+                    pushToast("Project dihapus.", "success");
+                  } else if (inputTab === "taktup") {
+                    deleteTaktUp(id);
+                    pushToast("Takt Up dihapus.", "success");
+                  } else {
+                    const error = deleteManualDemand(id);
+                    pushToast(error ?? "Manual demand dihapus.", error ? "error" : "success");
+                  }
+                }}
+                deleteNote={
+                  inputTab === "manual"
+                    ? "Demand ini akan dihapus. Demand yang sudah punya kandidat atau pemenuhan tidak bisa dihapus."
+                    : "Demand yang belum berjalan ikut terhapus. Demand yang sudah punya kandidat atau pemenuhan tetap tersimpan."
+                }
+              />
             </div>
           </Card>
           {projectModalOpen && <NewProjectModal open onClose={() => setProjectModalOpen(false)} />}
           {taktUpOpen && <TaktUpModal open onClose={() => setTaktUpOpen(false)} />}
           {manualOpen && <ManualDemandModal open onClose={() => setManualOpen(false)} />}
+          {editingProjectId && projects.find((p) => p.id === editingProjectId) && (
+            <NewProjectModal open project={projects.find((p) => p.id === editingProjectId)} onClose={() => setEditingProjectId(null)} />
+          )}
+          {editingTaktUpId && taktCases.find((t) => t.id === editingTaktUpId) && (
+            <TaktUpModal open editing={taktCases.find((t) => t.id === editingTaktUpId)} onClose={() => setEditingTaktUpId(null)} />
+          )}
+          {editingManualId && demands.find((d) => d.id === editingManualId) && (
+            <ManualDemandModal open editing={demands.find((d) => d.id === editingManualId)} onClose={() => setEditingManualId(null)} />
+          )}
         </div>
       )}
 

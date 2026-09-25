@@ -39,7 +39,7 @@ import {
   ageMovementForecast,
   candidateBatchesNeedingAction,
   currentMonthKey,
-  demandSupplyRows,
+  demandMonthKey,
   deptsOfAny,
   diffEmployees,
   directorates,
@@ -58,12 +58,17 @@ import {
   reviewBatchesNeedingAction,
   shopConfirmBatchesNeedingAction,
   type ActionBatch,
-  type DemandSupplyRow,
+  fulfillmentRows,
+  fulfillmentStage,
+  isFulfillmentDone,
+  reviewOutcome,
+  type FulfillmentRow,
+  type ReviewOutcome,
   type EmployeeDiff,
   type MovementStatus,
 } from "@/lib/engine/dashboard";
-import { demandTargetDate, filterByDivDept } from "@/lib/engine/enrollment";
-import { computeVokasiStatus, demandVisibleDate } from "@/lib/engine/compute";
+import { effectiveDemandCategory, filterByDivDept, isDemandDue } from "@/lib/engine/enrollment";
+import { computeVokasiStatus } from "@/lib/engine/compute";
 import { LABOR_TYPES, isPermanenForRatio } from "@/lib/types";
 import { useRole } from "@/lib/RoleContext";
 import type { Role } from "@/lib/roles";
@@ -1254,20 +1259,34 @@ function CompactDetailList({ items, unit }: { items: { key: string; count: numbe
 }
 
 /** Both PKWT/Vokasi Monitoring cards fold their category's Demand-Supply
- * table in directly (the standalone "Demand-Supply Overview" card is gone —
- * it only ever showed the same two tables side by side). Scoped to the real
- * current month, same demandVisibleDate/demandTargetDate window Demand Pool
- * itself uses, plus the page's org filter. */
-function scopedDemandSupplyRows(
+ * table in directly. It follows the month picked on the card's chart (a
+ * Terminate / Vokasi Ended demand sits in its review / batch-end month,
+ * the rest in their fulfilment month) and the page's org filter, and shows
+ * how far each demand got — candidate, signed, received. Open demands
+ * from earlier months are counted as carry-over so nothing drops off. */
+function monthFulfillment(
   demands: Demand[],
   category: DemandCategory,
+  month: string,
   divisionScope: string[],
   selDepts: string[]
-): DemandSupplyRow[] {
-  const today = currentMonthKey();
-  const monthDemands = demands.filter((d) => demandVisibleDate(demandTargetDate(d)).slice(0, 7) === today);
-  const scoped = filterByDivDept(monthDemands, divisionScope, selDepts);
-  return demandSupplyRows(scoped, category);
+): { rows: FulfillmentRow[]; carryOver: number } {
+  const scoped = filterByDivDept(
+    demands.filter((d) => effectiveDemandCategory(d) === category),
+    divisionScope,
+    selDepts
+  );
+  return {
+    rows: fulfillmentRows(
+      scoped.filter((d) => demandMonthKey(d) === month),
+      category
+    ),
+    carryOver: scoped.filter((d) => demandMonthKey(d) < month && isDemandDue(d) && !isFulfillmentDone(d)).length,
+  };
+}
+
+function monthLabel(month: string): string {
+  return /^\d{4}-\d{2}$/.test(month) ? format(new Date(`${month}-01T00:00:00`), "MMM yyyy") : month;
 }
 
 function PkwtReviewChartBlock({
@@ -1293,20 +1312,22 @@ function PkwtReviewChartBlock({
   const { buckets, byMonth } = monthBuckets(filteredReviews, (r) => r.tgl_review?.slice(0, 7), 3, 5, today);
   const [selected, setSelected] = useSessionState("dash.pkwtReview.month", today);
   const detailItems = byMonth.get(selected) ?? [];
+  const outcome = reviewOutcome(detailItems);
   const byStatusKontrak = groupCountBy(detailItems, (r) => r.status_kontrak);
   const byLaborType = groupCountBy(detailItems, (r) => r.labor_type || "Other");
-  const demandSupply = scopedDemandSupplyRows(demands, "PKWT", divisionScope, selDepts);
+  const fulfillment = monthFulfillment(demands, "PKWT", selected, divisionScope, selDepts);
 
   return (
-    <Card title="PKWT Monitoring">
+    <Card title="PKWT Monitoring" subtitle="Review kontrak per bulan, hasilnya, dan pemenuhan penggantinya">
       <div className="space-y-4">
         <MonthBarChart data={buckets} selectedMonth={selected} onSelect={setSelected} showValueLabels />
         <div>
-          <div className="text-xs font-semibold text-slate-500">Detail: {selected}</div>
+          <div className="text-xs font-semibold text-slate-500">Detail: {monthLabel(selected)}</div>
           <div className="mt-1 text-2xl font-bold text-slate-800 dark:text-slate-100">
             {detailItems.length} <span className="text-sm font-normal text-slate-500">orang review</span>
           </div>
-          <div className="mt-3 grid gap-4 sm:grid-cols-2 sm:divide-x sm:divide-slate-200 dark:sm:divide-slate-800">
+          <ReviewOutcomePanel outcome={outcome} />
+          <div className="mt-4 grid gap-4 sm:grid-cols-2 sm:divide-x sm:divide-slate-200 dark:sm:divide-slate-800">
             <div>
               <div className="text-xs font-medium text-slate-500">By Status Kontrak</div>
               <CompactDetailList items={byStatusKontrak} unit="review" />
@@ -1318,11 +1339,54 @@ function PkwtReviewChartBlock({
           </div>
         </div>
         <div className="border-t border-slate-100 pt-4 dark:border-slate-800">
-          <div className="mb-2 text-xs font-semibold text-slate-500">Demand-Supply — Bulan berjalan ({today})</div>
-          <DemandSupplyTable label="PKWT" rows={demandSupply} />
+          <div className="mb-2 text-xs font-semibold text-slate-500">Pemenuhan Demand PKWT — {monthLabel(selected)}</div>
+          <FulfillmentTable rows={fulfillment.rows} carryOver={fulfillment.carryOver} />
         </div>
       </div>
     </Card>
+  );
+}
+
+/** Continue / Terminate / belum diisi for the picked review month, as one
+ * stacked bar with its legend — the review results HR fills in on the
+ * Demand page. */
+function ReviewOutcomePanel({ outcome }: { outcome: ReviewOutcome }) {
+  if (outcome.total === 0) return null;
+  const reviewed = outcome.continued + outcome.terminated;
+  const parts = [
+    { key: "continue", label: "Continue", value: outcome.continued, bar: "bg-emerald-500", dot: "bg-emerald-500" },
+    { key: "terminate", label: "Terminate", value: outcome.terminated, bar: "bg-rose-500", dot: "bg-rose-500" },
+    { key: "pending", label: "Belum diisi", value: outcome.pending, bar: "bg-slate-200 dark:bg-slate-700", dot: "bg-slate-300 dark:bg-slate-600" },
+  ];
+  return (
+    <div className="mt-3 rounded-2xl border border-slate-100 p-3 dark:border-slate-800">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <div className="text-xs font-medium text-slate-500">Hasil Review</div>
+        <div className="text-xs text-slate-600 dark:text-slate-300">
+          <span className="font-semibold text-slate-800 dark:text-slate-100">
+            {reviewed}/{outcome.total}
+          </span>{" "}
+          sudah direview
+        </div>
+      </div>
+      <div
+        className="mt-2 flex h-2.5 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800"
+        role="img"
+        aria-label={`Continue ${outcome.continued}, Terminate ${outcome.terminated}, belum diisi ${outcome.pending}`}
+      >
+        {parts.map((p) =>
+          p.value > 0 ? <div key={p.key} className={`h-full ${p.bar}`} style={{ width: `${(p.value / outcome.total) * 100}%` }} /> : null
+        )}
+      </div>
+      <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-600 dark:text-slate-300">
+        {parts.map((p) => (
+          <li key={p.key} className="flex items-center gap-1.5">
+            <span aria-hidden className={`size-2 rounded-full ${p.dot}`} />
+            {p.label} <span className="font-semibold tabular-nums text-slate-800 dark:text-slate-100">{p.value}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -1347,101 +1411,172 @@ function VokasiEndedChartBlock({
   const { buckets, byMonth } = monthBuckets(filteredVokasi, (v) => v.tgl_ended?.slice(0, 7), 3, 5, today);
   const [selected, setSelected] = useSessionState("dash.vokasiEnded.month", today);
   const detailItems = byMonth.get(selected) ?? [];
-  const demandSupply = scopedDemandSupplyRows(demands, "Vokasi", divisionScope, selDepts);
+  const fulfillment = monthFulfillment(demands, "Vokasi", selected, divisionScope, selDepts);
+  const totals = sumFulfillment(fulfillment.rows);
 
   return (
-    <Card title="Vokasi Monitoring">
+    <Card title="Vokasi Monitoring" subtitle="Vokasi yang berakhir per bulan dan pemenuhan penggantinya">
       <div className="space-y-4">
         <MonthBarChart data={buckets} selectedMonth={selected} onSelect={setSelected} showValueLabels />
         <div>
-          <div className="text-xs font-semibold text-slate-500">Detail: {selected}</div>
+          <div className="text-xs font-semibold text-slate-500">Detail: {monthLabel(selected)}</div>
           <div className="mt-1 text-2xl font-bold text-slate-800 dark:text-slate-100">
             {detailItems.length} <span className="text-sm font-normal text-slate-500">ended</span>
           </div>
+          {totals.demand > 0 && (
+            <div className="mt-1 text-xs text-slate-600 dark:text-slate-300">
+              <span className="font-semibold text-slate-800 dark:text-slate-100">
+                {totals.done}/{totals.demand}
+              </span>{" "}
+              demand sudah selesai
+              {totals.noReplace > 0 ? ` (${totals.noReplace} No Replace)` : ""}
+            </div>
+          )}
         </div>
         <div className="border-t border-slate-100 pt-4 dark:border-slate-800">
-          <div className="mb-2 text-xs font-semibold text-slate-500">Demand-Supply — Bulan berjalan ({today})</div>
-          <DemandSupplyTable label="Vokasi" rows={demandSupply} />
+          <div className="mb-2 text-xs font-semibold text-slate-500">Pemenuhan Demand Vokasi — {monthLabel(selected)}</div>
+          <FulfillmentTable rows={fulfillment.rows} carryOver={fulfillment.carryOver} />
         </div>
       </div>
     </Card>
   );
 }
 
-function DemandSupplyTable({ label, rows }: { label: string; rows: DemandSupplyRow[] }) {
-  const totalDemand = rows.reduce((sum, r) => sum + r.demand, 0);
-  const totalSupply = rows.reduce((sum, r) => sum + r.supply, 0);
-  const totalPercent = totalDemand ? (totalSupply / totalDemand) * 100 : 0;
+function sumFulfillment(rows: FulfillmentRow[]) {
+  const sum = (key: "demand" | "candidate" | "signed" | "received" | "noReplace" | "done") =>
+    rows.reduce((n, r) => n + r[key], 0);
+  return {
+    demand: sum("demand"),
+    candidate: sum("candidate"),
+    signed: sum("signed"),
+    received: sum("received"),
+    noReplace: sum("noReplace"),
+    done: sum("done"),
+  };
+}
 
+function FulfillmentTable({ rows, carryOver }: { rows: FulfillmentRow[]; carryOver: number }) {
+  const total = sumFulfillment(rows);
+  const totalPercent = total.demand ? (total.done / total.demand) * 100 : 0;
+  const carryOverNote =
+    carryOver > 0 ? (
+      <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">
+        + {carryOver} demand dari bulan sebelumnya belum selesai.{" "}
+        <Link href="/demand" className="font-medium underline underline-offset-2 hover:text-amber-900 dark:hover:text-amber-100">
+          Buka Demand
+        </Link>
+      </p>
+    ) : null;
+
+  if (rows.length === 0) {
+    return (
+      <div>
+        <EmptyState text="Belum ada demand di bulan ini." />
+        {carryOverNote}
+      </div>
+    );
+  }
   return (
     <div>
-      <h4 className="mb-2 text-xs font-semibold text-slate-500">{label}</h4>
-      {rows.length === 0 ? (
-        <EmptyState text="Belum ada demand." />
-      ) : (
-        <TableWrap>
-          <thead>
-            <tr>
-              <Th>Replacement Need</Th>
-              <Th>Demand</Th>
-              <Th>Supply</Th>
-              <Th>Progress</Th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.reason}>
-                <Td>{r.reason}</Td>
-                <Td>{r.demand}</Td>
-                <Td>{r.supply}</Td>
-                <Td>
-                  <div className="w-28">
-                    <ProgressBar percent={r.percent} />
-                  </div>
-                </Td>
-              </tr>
-            ))}
-            <tr className="border-t-2 border-slate-200 font-semibold dark:border-slate-700">
-              <Td>Total</Td>
-              <Td>{totalDemand}</Td>
-              <Td>{totalSupply}</Td>
+      <TableWrap>
+        <thead>
+          <tr>
+            <Th>Replacement Need</Th>
+            <Th>Demand</Th>
+            <Th>Kandidat</Th>
+            <Th>Sign / Verified</Th>
+            <Th>Diterima Shop</Th>
+            <Th>Progress</Th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.reason}>
+              <Td>{r.reason}</Td>
+              <Td className="tabular-nums">{r.demand}</Td>
+              <Td className="tabular-nums">{r.candidate}</Td>
+              <Td className="tabular-nums">{r.signed}</Td>
+              <Td className="tabular-nums">
+                {r.received}
+                {r.noReplace > 0 && <span className="text-xs text-slate-500"> +{r.noReplace} No Replace</span>}
+              </Td>
               <Td>
                 <div className="w-28">
-                  <ProgressBar percent={totalPercent} />
+                  <ProgressBar percent={r.percent} />
                 </div>
               </Td>
             </tr>
-          </tbody>
-        </TableWrap>
-      )}
+          ))}
+          <tr className="border-t-2 border-slate-200 font-semibold dark:border-slate-700">
+            <Td>Total</Td>
+            <Td className="tabular-nums">{total.demand}</Td>
+            <Td className="tabular-nums">{total.candidate}</Td>
+            <Td className="tabular-nums">{total.signed}</Td>
+            <Td className="tabular-nums">
+              {total.received}
+              {total.noReplace > 0 && <span className="text-xs font-normal text-slate-500"> +{total.noReplace} No Replace</span>}
+            </Td>
+            <Td>
+              <div className="w-28">
+                <ProgressBar percent={totalPercent} />
+              </div>
+            </Td>
+          </tr>
+        </tbody>
+      </TableWrap>
+      <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+        Progress = diterima shop atau No Replace, dibagi total demand.
+      </p>
+      {carryOverNote}
     </div>
   );
 }
 
 function ProjectSummaryBlock({ projects, demands }: { projects: Project[]; demands: Demand[] }) {
   const ongoing = projects.filter((p) => p.status === "Ongoing");
+  const byId = new Map(demands.map((d) => [d.id, d]));
   return (
-    <Card title="Project Monitoring">
+    <Card
+      title="Project Monitoring"
+      action={
+        <Link href="/projects" className="text-xs font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300">
+          Lihat semua →
+        </Link>
+      }
+    >
       {ongoing.length === 0 ? (
         <EmptyState text="Tidak ada project Ongoing." />
       ) : (
-        <ul className="divide-y divide-slate-100 dark:divide-slate-800">
+        <ul className="-mx-2 divide-y divide-slate-100 dark:divide-slate-800">
           {ongoing.map((p) => {
-            const needed = p.rows.reduce((sum, r) => sum + r.qty, 0);
-            const gap = demands.filter((d) => p.demand_ids.includes(d.id) && d.status === "Open").length;
+            const list = p.demand_ids.map((id) => byId.get(id)).filter((d): d is Demand => d !== undefined && isDemandDue(d));
+            const signed = list.filter((d) => d.status === "Fulfilled" || fulfillmentStage(d) === "noReplace").length;
+            const gap = list.length - signed;
             return (
-              <li key={p.id} className="flex items-center justify-between py-2 text-sm">
-                <div>
-                  <div className="font-medium text-slate-800 dark:text-slate-100">{p.name}</div>
-                  <div className="text-xs text-slate-500">
-                    Kebutuhan: {needed} orang · SOP {p.start_date}
+              <li key={p.id}>
+                <Link
+                  href={`/projects/${p.id}`}
+                  className="flex items-center justify-between gap-3 rounded-xl px-2 py-2.5 text-sm transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/60"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate font-medium text-slate-800 dark:text-slate-100">{p.name}</div>
+                    <div className="text-xs text-slate-500">
+                      SOP {p.start_date} · {signed}/{list.length} terpenuhi
+                    </div>
+                    <div className="mt-1.5 h-1.5 w-full max-w-48 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
+                      <div
+                        className="h-full rounded-full bg-gradient-to-r from-blue-500 to-indigo-600"
+                        style={{ width: `${list.length ? (signed / list.length) * 100 : 0}%` }}
+                      />
+                    </div>
                   </div>
-                </div>
-                {gap === 0 ? (
-                  <Badge tone="green">✅ MP Terpenuhi</Badge>
-                ) : (
-                  <Badge tone="amber">⚠️ Perlu {gap} MP lagi</Badge>
-                )}
+                  {gap <= 0 ? (
+                    <Badge tone="green">✅ MP Terpenuhi</Badge>
+                  ) : (
+                    <Badge tone="amber">⚠️ Perlu {gap} MP lagi</Badge>
+                  )}
+                  <ChevronRight size={15} aria-hidden className="shrink-0 text-slate-400" />
+                </Link>
               </li>
             );
           })}
@@ -1468,7 +1603,14 @@ function TaktSummaryBlock({
   const plants: Plant[] = ["Plant 1", "Plant 2"];
   const todayStr = format(new Date(), "yyyy-MM-dd");
   return (
-    <Card title="Takt Time Monitoring">
+    <Card
+      title="Takt Time Monitoring"
+      action={
+        <Link href="/takt" className="text-xs font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300">
+          Lihat semua →
+        </Link>
+      }
+    >
       <div className="space-y-4">
         {plants.map((plant) => {
           const cases = taktCases.filter((t) => t.plant === plant);
