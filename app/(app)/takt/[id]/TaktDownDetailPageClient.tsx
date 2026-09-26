@@ -70,8 +70,8 @@ export function TaktDownDetailPageClient({ id }: { id: string }) {
           <Badge tone="violet">{fmtDate(takt.date)}</Badge>
         </div>
         <p className="text-sm text-slate-500 dark:text-slate-400">
-          {takt.takt_before} menit → {takt.takt_after} menit · {persons.length} personil dilepas ·{" "}
-          {totalUtilized}/{persons.length} sudah diutilisasi
+          {takt.takt_before} menit → {takt.takt_after} menit · {persons.length} personil dilepas · {totalUtilized}/
+          {persons.length} sudah diutilisasi
         </p>
       </div>
 

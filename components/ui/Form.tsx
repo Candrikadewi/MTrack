@@ -30,11 +30,7 @@ export function Input(props: InputHTMLAttributes<HTMLInputElement>) {
  * borderless usage (e.g. the Dashboard's "Bulan" picker, already paired with
  * its own icon+label chrome) — everywhere else gets a chevron consistent
  * with MultiSelect instead of the native OS arrow. */
-export function Select({
-  bare,
-  className = "",
-  ...props
-}: SelectHTMLAttributes<HTMLSelectElement> & { bare?: boolean }) {
+export function Select({ bare, className = "", ...props }: SelectHTMLAttributes<HTMLSelectElement> & { bare?: boolean }) {
   if (bare) {
     return <select {...props} className={`${fieldClass} ${className}`} />;
   }

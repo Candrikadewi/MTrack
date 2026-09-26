@@ -63,7 +63,12 @@ export function CompositionChart({ data, heightClass = "h-72" }: { data: Composi
             textAnchor={data.length > 5 ? "end" : "middle"}
             height={data.length > 5 ? 50 : 30}
           />
-          <YAxis allowDecimals={false} axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: isDark ? "#898781" : "#6b6a64" }} />
+          <YAxis
+            allowDecimals={false}
+            axisLine={false}
+            tickLine={false}
+            tick={{ fontSize: 12, fill: isDark ? "#898781" : "#6b6a64" }}
+          />
           <Tooltip
             cursor={{ fill: "rgba(148,163,184,0.12)" }}
             contentStyle={{

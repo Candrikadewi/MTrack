@@ -9,7 +9,6 @@ import { ProgressBar } from "@/components/ui/StatTile";
 import { MonthBarChart } from "@/components/ui/MonthBarChart";
 import { EmptyState, TableWrap, Td, Th } from "@/components/ui/Table";
 import {
-  currentMonthKey,
   demandMonthKey,
   effectiveDivisionScope,
   groupCountBy,
@@ -22,6 +21,7 @@ import {
 } from "@/lib/engine/dashboard";
 import { effectiveDemandCategory, filterByDivDept, isDemandDue } from "@/lib/engine/enrollment";
 import type { Demand, DemandCategory, EmployeeRecord, PkwtReview, VokasiRecord } from "@/lib/types";
+import { currentMonthKey } from "@/lib/dates";
 import { CompactDetailList } from "./CompactDetailList";
 
 /** Both PKWT/Vokasi Monitoring cards fold their category's Demand-Supply
@@ -122,7 +122,13 @@ function ReviewOutcomePanel({ outcome }: { outcome: ReviewOutcome }) {
   const parts = [
     { key: "continue", label: "Continue", value: outcome.continued, bar: "bg-emerald-500", dot: "bg-emerald-500" },
     { key: "terminate", label: "Terminate", value: outcome.terminated, bar: "bg-rose-500", dot: "bg-rose-500" },
-    { key: "pending", label: "Belum diisi", value: outcome.pending, bar: "bg-slate-200 dark:bg-slate-700", dot: "bg-slate-300 dark:bg-slate-600" },
+    {
+      key: "pending",
+      label: "Belum diisi",
+      value: outcome.pending,
+      bar: "bg-slate-200 dark:bg-slate-700",
+      dot: "bg-slate-300 dark:bg-slate-600",
+    },
   ];
   return (
     <div className="mt-3 rounded-2xl border border-slate-100 p-3 dark:border-slate-800">
@@ -141,7 +147,9 @@ function ReviewOutcomePanel({ outcome }: { outcome: ReviewOutcome }) {
         aria-label={`Continue ${outcome.continued}, Terminate ${outcome.terminated}, belum diisi ${outcome.pending}`}
       >
         {parts.map((p) =>
-          p.value > 0 ? <div key={p.key} className={`h-full ${p.bar}`} style={{ width: `${(p.value / outcome.total) * 100}%` }} /> : null
+          p.value > 0 ? (
+            <div key={p.key} className={`h-full ${p.bar}`} style={{ width: `${(p.value / outcome.total) * 100}%` }} />
+          ) : null
         )}
       </div>
       <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-600 dark:text-slate-300">

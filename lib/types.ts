@@ -1,5 +1,6 @@
-// Core domain types for M-TRACK — Manpower Tracking Application
-// See MTRACK_SPEC.md §3 for the conceptual data model this mirrors.
+// Core domain types for CAMP — Centralized Access for Manpower Planning.
+// The shape of every record the app reads and writes (see PRODUCT.md for
+// what each one means to the business).
 
 export type StatusKontrak =
   | "Permanen"

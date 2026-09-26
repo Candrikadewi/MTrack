@@ -1,4 +1,4 @@
--- M-TRACK Supabase schema — run this once in Supabase SQL Editor
+-- CAMP Supabase schema — run this once in Supabase SQL Editor
 -- (Project → SQL Editor → New query → paste this whole file → Run)
 --
 -- Design notes:

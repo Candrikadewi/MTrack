@@ -15,7 +15,14 @@ import type { Plant, ProjectMpNeedRow, TaktCase } from "@/lib/types";
 // submits as "Proses", a value nothing downstream branches on (it's purely
 // a display badge on Project's own detail view).
 function toNeedRow(row: CompositionRow): Omit<ProjectMpNeedRow, "id"> {
-  return { division: row.division, dept: row.dept, status_mp: row.status_mp, mp_role: "Proses", qty: row.qty, fulfill_date: row.date };
+  return {
+    division: row.division,
+    dept: row.dept,
+    status_mp: row.status_mp,
+    mp_role: "Proses",
+    qty: row.qty,
+    fulfill_date: row.date,
+  };
 }
 
 function fromNeedRow(row: ProjectMpNeedRow): CompositionRow {
@@ -68,7 +75,12 @@ export function TaktUpModal({ open, onClose, editing }: { open: boolean; onClose
   }
 
   return (
-    <Modal open={open} onClose={onClose} title={editing ? `Edit Takt Up ${editing.plant}` : "Takt Up: Tambah Kebutuhan MP"} width="max-w-4xl">
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={editing ? `Edit Takt Up ${editing.plant}` : "Takt Up: Tambah Kebutuhan MP"}
+      width="max-w-4xl"
+    >
       <div className="space-y-4">
         <div className="grid grid-cols-4 gap-4">
           <Field label="Plant">

@@ -33,11 +33,7 @@ export type RatioDelta = { permanen: number; kontrak: number; vokasi: number };
  * not a replacement of someone departing) — origin_ref there is a
  * project/case id, not a person, so this deliberately doesn't try to
  * resolve one for them. */
-function outgoingBucket(
-  d: Demand,
-  empByNoreg: Map<string, EmployeeRecord>,
-  vokasiNoregs: Set<string>
-): keyof RatioDelta | null {
+function outgoingBucket(d: Demand, empByNoreg: Map<string, EmployeeRecord>, vokasiNoregs: Set<string>): keyof RatioDelta | null {
   if (d.origin_type === "Project" || d.origin_type === "TaktUp") return null;
   if (d.origin_type === "PkwtTerminate") return "kontrak";
   if (d.origin_type === "VokasiEnded") return "vokasi";

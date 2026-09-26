@@ -28,7 +28,11 @@ export function RehiredNoreg({ demand: d }: { demand: Demand }) {
         Noreg ZPAR: <span className="font-semibold text-emerald-700 dark:text-emerald-400">{linked}</span>
         {!emp && <span>(belum di ZPAR aktif)</span>}
         {isAdmin && (
-          <button type="button" onClick={() => setEditing(true)} className="font-medium text-blue-700 hover:underline dark:text-blue-400">
+          <button
+            type="button"
+            onClick={() => setEditing(true)}
+            className="font-medium text-blue-700 hover:underline dark:text-blue-400"
+          >
             Ubah
           </button>
         )}
@@ -46,7 +50,9 @@ export function RehiredNoreg({ demand: d }: { demand: Demand }) {
     <div className="mt-1.5 space-y-1.5 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs dark:border-amber-500/30 dark:bg-amber-500/10">
       <div className="font-semibold text-amber-800 dark:text-amber-200">Noreg ZPAR belum dikonfirmasi</div>
       {candidates.length === 0 ? (
-        <p className="text-amber-800/80 dark:text-amber-200/80">Belum ada nama yang sama di ZPAR aktif. Tunggu ZPAR berikutnya, atau isi noreg-nya.</p>
+        <p className="text-amber-800/80 dark:text-amber-200/80">
+          Belum ada nama yang sama di ZPAR aktif. Tunggu ZPAR berikutnya, atau isi noreg-nya.
+        </p>
       ) : (
         <ul className="space-y-1.5">
           {candidates.map((c) => (
@@ -98,7 +104,11 @@ export function RehiredNoreg({ demand: d }: { demand: Demand }) {
             aria-label={`Noreg ZPAR untuk ${d.replacement_nama || d.replacement_noreg}`}
             className="min-w-0 flex-1 rounded-md border border-slate-300 bg-white px-2 py-1 dark:border-slate-700 dark:bg-slate-900"
           />
-          <button type="submit" disabled={!manual.trim()} className="rounded-md border border-slate-300 bg-white px-2 py-1 font-medium disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900">
+          <button
+            type="submit"
+            disabled={!manual.trim()}
+            className="rounded-md border border-slate-300 bg-white px-2 py-1 font-medium disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900"
+          >
             Simpan
           </button>
           {editing && (

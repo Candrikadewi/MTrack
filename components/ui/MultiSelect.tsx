@@ -82,7 +82,10 @@ export function MultiSelect({
               {label}
             </span>
           )}
-          <span id={`${panelId}-value`} className={`truncate ${selected.length === 0 ? "text-slate-500" : inlineLabel ? "font-medium text-blue-700 dark:text-blue-300" : ""}`}>
+          <span
+            id={`${panelId}-value`}
+            className={`truncate ${selected.length === 0 ? "text-slate-500" : inlineLabel ? "font-medium text-blue-700 dark:text-blue-300" : ""}`}
+          >
             {summary}
           </span>
         </span>

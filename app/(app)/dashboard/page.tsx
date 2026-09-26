@@ -125,9 +125,7 @@ export default function DashboardPage() {
 
   const permanenCount = filteredEmployees.filter((e) => isPermanenForRatio(e.status_kontrak));
   const kontrakCount = filteredEmployees.filter((e) => !isPermanenForRatio(e.status_kontrak));
-  const vokasiActive = filteredVokasi.filter(
-    (v) => computeVokasiStatus(v.tgl_ended, fulfilledVokasiIds.has(v.id)) !== "Ended"
-  );
+  const vokasiActive = filteredVokasi.filter((v) => computeVokasiStatus(v.tgl_ended, fulfilledVokasiIds.has(v.id)) !== "Ended");
 
   const genderCount = (arr: { gender: string }[]) => ({
     L: arr.filter((x) => x.gender === "L").length,

@@ -105,9 +105,7 @@ export function proposePoolCandidate(poolEntryId: string | null, demandId: strin
   const entryBefore = entry ? { status: entry.status, action_note: entry.action_note } : undefined;
 
   const replacement_status: ReplacementStatus =
-    demand.replacement_status === "" || demand.replacement_status === "No Replace"
-      ? "MP Excess"
-      : demand.replacement_status;
+    demand.replacement_status === "" || demand.replacement_status === "No Replace" ? "MP Excess" : demand.replacement_status;
   const fs_status = entry ? computeFsStatus(replacement_status, demand.dept, entry.prev_dept, undefined) : "";
 
   if (releasing) utilPoolStore.patchLocal(releasing.id, { status: "Open", action_note: "" });

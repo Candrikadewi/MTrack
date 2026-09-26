@@ -1,11 +1,18 @@
 // Small shared pieces of the Demand page: source options, labels, and what counts as done.
 import { addMonths, format } from "date-fns";
+import { currentMonthKey } from "@/lib/dates";
 import { DEMAND_JENIS_LABEL as JENIS_LABEL } from "@/lib/engine/batches";
 import type { Demand, DemandOriginType, EmploymentStatus, ReplacementStatus } from "@/lib/types";
 
 export const POOL_SOURCES: ReplacementStatus[] = ["MP Excess", "MP Back Up"];
 
-export const PKWT_SOURCE_OPTIONS: ReplacementStatus[] = ["PKWT New Hire", "Vokasi New Hire", "MP Excess", "MP Back Up", "No Replace"];
+export const PKWT_SOURCE_OPTIONS: ReplacementStatus[] = [
+  "PKWT New Hire",
+  "Vokasi New Hire",
+  "MP Excess",
+  "MP Back Up",
+  "No Replace",
+];
 
 export const VOKASI_SOURCE_OPTIONS: ReplacementStatus[] = ["Vokasi New Hire", "MP Excess", "MP Back Up", "No Replace"];
 
@@ -15,10 +22,6 @@ export const EMPLOYMENT_STATUS_LABEL: Record<EmploymentStatus, string> = {
   Permanen: "Permanen",
   Vokasi: "Vokasi",
 };
-
-export function currentMonthKey(): string {
-  return format(new Date(), "yyyy-MM");
-}
 
 export function monthOptions(): string[] {
   const base = new Date(`${currentMonthKey()}-01T00:00:00`);
@@ -40,10 +43,6 @@ export const TILE_JENIS: Record<string, string[]> = {
 };
 
 export const STATUS_OPTIONS = ["Open", "DELAY", "Need Replace ASAP", "Fulfilled Ontime", "Fulfilled but Delay"];
-
-export function todayKey(): string {
-  return format(new Date(), "yyyy-MM-dd");
-}
 
 /** Nothing left to do: received by the shop, or not being replaced. */
 export function isDemandDone(d: Demand): boolean {

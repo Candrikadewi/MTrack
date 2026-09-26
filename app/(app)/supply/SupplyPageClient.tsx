@@ -31,7 +31,6 @@ const urgencyClass: Record<string, string> = {
   none: "text-slate-600 dark:text-slate-400",
 };
 
-
 export function SupplyPageClient() {
   const role = useRole();
   const [kaizenOpen, setKaizenOpen] = useState(false);
@@ -51,10 +50,7 @@ export function SupplyPageClient() {
   }, [role, releaseInputsReady]);
   // Copy before sorting: list() hands back the store's live cache, and an
   // in-place sort would reshuffle it for every other reader mid-render.
-  const entries = useMemo(
-    () => [...poolList].sort((a, b) => b.entered_pool_date.localeCompare(a.entered_pool_date)),
-    [poolList]
-  );
+  const entries = useMemo(() => [...poolList].sort((a, b) => b.entered_pool_date.localeCompare(a.entered_pool_date)), [poolList]);
   const taktCases = useStoreList(taktStore);
   const snapshots = useStoreList(zparStore);
   // Live lookup, not snapshotted — Posisi (Struktural) only exists on the
@@ -95,20 +91,35 @@ export function SupplyPageClient() {
   const [selOpenMonth, setSelOpenMonth] = useSessionState<string>("utilpool.open.month", "");
 
   const openSourceOptions = useMemo(() => Array.from(new Set(openAllEntries.map(jenisOf))).sort(), [openAllEntries]);
-  const openDivOptions = useMemo(() => Array.from(new Set(openAllEntries.map((e) => e.prev_div).filter(Boolean))).sort(), [openAllEntries]);
+  const openDivOptions = useMemo(
+    () => Array.from(new Set(openAllEntries.map((e) => e.prev_div).filter(Boolean))).sort(),
+    [openAllEntries]
+  );
   const openDeptOptions = useMemo(
     () =>
       Array.from(
-        new Set(openAllEntries.filter((e) => selOpenDivs.length === 0 || selOpenDivs.includes(e.prev_div)).map((e) => e.prev_dept).filter(Boolean))
+        new Set(
+          openAllEntries
+            .filter((e) => selOpenDivs.length === 0 || selOpenDivs.includes(e.prev_div))
+            .map((e) => e.prev_dept)
+            .filter(Boolean)
+        )
       ).sort(),
     [openAllEntries, selOpenDivs]
   );
   const openStatusOptions = useMemo(() => Array.from(new Set(openAllEntries.map((e) => e.type))).sort(), [openAllEntries]);
   const openPosisiOptions = useMemo(
-    () => Array.from(new Set(openAllEntries.map((e) => posisiByNoreg.get(e.noreg)).filter((p): p is string => Boolean(p)))).sort(),
+    () =>
+      Array.from(new Set(openAllEntries.map((e) => posisiByNoreg.get(e.noreg)).filter((p): p is string => Boolean(p)))).sort(),
     [openAllEntries, posisiByNoreg]
   );
-  const openMonthOptions = useMemo(() => Array.from(new Set(openAllEntries.map((e) => e.entered_pool_date.slice(0, 7)))).sort().reverse(), [openAllEntries]);
+  const openMonthOptions = useMemo(
+    () =>
+      Array.from(new Set(openAllEntries.map((e) => e.entered_pool_date.slice(0, 7))))
+        .sort()
+        .reverse(),
+    [openAllEntries]
+  );
 
   const openEntries = useMemo(
     () =>
@@ -144,14 +155,20 @@ export function SupplyPageClient() {
         </p>
       </div>
 
-      <SectionHeading n={1} title="Ringkasan per Batch" subtitle="Jumlah MP di Supply Pool yang belum diutilize, dari total yang masuk. Klik tile untuk rincian." divider={false} />
+      <SectionHeading
+        n={1}
+        title="Ringkasan per Batch"
+        subtitle="Jumlah MP di Supply Pool yang belum diutilize, dari total yang masuk. Klik tile untuk rincian."
+        divider={false}
+      />
       <BatchTileRow
         categories={batchCategories}
         pendingLabel="belum diutilize"
         batchActions={
           role === "admin"
             ? (key, batch) => {
-                const keep = "MP yang belum diutilize ikut dikeluarkan dari Supply Pool. MP yang sudah diutilize tetap tersimpan.";
+                const keep =
+                  "MP yang belum diutilize ikut dikeluarkan dari Supply Pool. MP yang sudah diutilize tetap tersimpan.";
                 if (key === "TaktDown" && taktCases.some((t) => t.id === batch.id)) {
                   return {
                     onEdit: () => setEditingTaktDownId(batch.id),
@@ -167,7 +184,10 @@ export function SupplyPageClient() {
                     onEdit: () => setEditingKaizenLabel(batch.id),
                     onDelete: () => {
                       const kept = deleteKaizenBatch(batch.id);
-                      pushToast(kept ? `Kaizen dihapus. ${kept} MP yang sudah diutilize tetap tersimpan.` : "Kaizen dihapus.", "success");
+                      pushToast(
+                        kept ? `Kaizen dihapus. ${kept} MP yang sudah diutilize tetap tersimpan.` : "Kaizen dihapus.",
+                        "success"
+                      );
                     },
                     deleteNote: keep,
                   };
@@ -183,33 +203,33 @@ export function SupplyPageClient() {
           <SectionHeading n={2} title="Input Supply Baru" divider={false} />
           <Card>
             <div className="space-y-4">
-            <FullWidthTabs
-              tabs={[
-                { key: "taktdown", label: "Takt Down" },
-                { key: "kaizen", label: "Kaizen" },
-              ]}
-              active={inputTab}
-              onChange={(k) => setInputTab(k as typeof inputTab)}
-            />
-            {inputTab === "taktdown" ? (
-              <div className="flex flex-col gap-3 rounded-xl border border-dashed border-slate-300 p-4 sm:flex-row sm:items-center sm:justify-between dark:border-slate-700">
-                <p className="text-sm text-slate-600 dark:text-slate-400">
-                  Lepas personil dari shop akibat takt time turun — rencana per shop dulu, baru mapping name-by-name.
-                </p>
-                <Button variant="primary" className="shrink-0" onClick={() => setTaktDownOpen(true)}>
-                  + Takt Down
-                </Button>
-              </div>
-            ) : (
-              <div className="flex flex-col gap-3 rounded-xl border border-dashed border-slate-300 p-4 sm:flex-row sm:items-center sm:justify-between dark:border-slate-700">
-                <p className="text-sm text-slate-600 dark:text-slate-400">
-                  Catat supply dari hasil improvement/Kaizen — personil yang jadi excess karena efisiensi proses.
-                </p>
-                <Button variant="primary" className="shrink-0" onClick={() => setKaizenOpen(true)}>
-                  + Tambah Kaizen
-                </Button>
-              </div>
-            )}
+              <FullWidthTabs
+                tabs={[
+                  { key: "taktdown", label: "Takt Down" },
+                  { key: "kaizen", label: "Kaizen" },
+                ]}
+                active={inputTab}
+                onChange={(k) => setInputTab(k as typeof inputTab)}
+              />
+              {inputTab === "taktdown" ? (
+                <div className="flex flex-col gap-3 rounded-xl border border-dashed border-slate-300 p-4 sm:flex-row sm:items-center sm:justify-between dark:border-slate-700">
+                  <p className="text-sm text-slate-600 dark:text-slate-400">
+                    Lepas personil dari shop akibat takt time turun — rencana per shop dulu, baru mapping name-by-name.
+                  </p>
+                  <Button variant="primary" className="shrink-0" onClick={() => setTaktDownOpen(true)}>
+                    + Takt Down
+                  </Button>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-3 rounded-xl border border-dashed border-slate-300 p-4 sm:flex-row sm:items-center sm:justify-between dark:border-slate-700">
+                  <p className="text-sm text-slate-600 dark:text-slate-400">
+                    Catat supply dari hasil improvement/Kaizen — personil yang jadi excess karena efisiensi proses.
+                  </p>
+                  <Button variant="primary" className="shrink-0" onClick={() => setKaizenOpen(true)}>
+                    + Tambah Kaizen
+                  </Button>
+                </div>
+              )}
             </div>
           </Card>
           {kaizenOpen && <KaizenModal open onClose={() => setKaizenOpen(false)} />}
@@ -360,8 +380,9 @@ export function SupplyPageClient() {
       >
         {pendingRelease && (
           <>
-            <strong className="font-semibold text-slate-800 dark:text-slate-100">{pendingRelease.nama}</strong> ({pendingRelease.noreg}) keluar dari
-            Supply Pool dan tidak bisa lagi diusulkan ke demand. Tindakan ini tidak bisa dibatalkan.
+            <strong className="font-semibold text-slate-800 dark:text-slate-100">{pendingRelease.nama}</strong> (
+            {pendingRelease.noreg}) keluar dari Supply Pool dan tidak bisa lagi diusulkan ke demand. Tindakan ini tidak bisa
+            dibatalkan.
           </>
         )}
       </ConfirmDialog>

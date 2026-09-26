@@ -105,7 +105,8 @@ export async function repairMissingPlanDemands(): Promise<number> {
     if (project.rows.every((r) => r.demand_ids)) {
       for (const row of project.rows) recreate(row.demand_ids ?? [], row, "Project", project.id, project.name);
     } else {
-      for (const [row, ids] of byPosition(project.demand_ids, project.rows)) recreate(ids, row, "Project", project.id, project.name);
+      for (const [row, ids] of byPosition(project.demand_ids, project.rows))
+        recreate(ids, row, "Project", project.id, project.name);
     }
   }
   for (const takt of taktStore.list()) {
@@ -129,12 +130,7 @@ export function createDemandsFromProjectRow(project: Project, row: ProjectMpNeed
 }
 
 export function createDemandsFromTaktRow(takt: TaktCase, row: ProjectMpNeedRow): Demand[] {
-  return expandRowToDemands(
-    row,
-    "TaktUp",
-    takt.id,
-    `Takt Up ${takt.plant} - ${row.division} - ${row.dept}`
-  );
+  return expandRowToDemands(row, "TaktUp", takt.id, `Takt Up ${takt.plant} - ${row.division} - ${row.dept}`);
 }
 
 export function createManualDemand(input: {

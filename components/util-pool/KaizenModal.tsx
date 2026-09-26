@@ -8,16 +8,13 @@ import { ReleaseMappingStep, StepNav, resolvePlanRow } from "@/components/takt/R
 import { getActiveSnapshot } from "@/lib/repo";
 import { createKaizenSupply } from "@/lib/engine/actions";
 import { pushToast } from "@/lib/toast";
+import { todayKey } from "@/lib/dates";
 import { KAIZEN_LABOR_GROUPS, inKaizenLaborGroup, type KaizenLaborGroup, type TaktDownPerson } from "@/lib/types";
 
 const GROUP_DETAIL: Record<KaizenLaborGroup, string> = {
   "A/F": "Labor type A dan F",
   "B/C": "Labor type B1–B4 dan C1–C2",
 };
-
-function todayKey(): string {
-  return new Date().toISOString().slice(0, 10);
-}
 
 /** The one decision that scopes the whole Kaizen form, so it gets a
  * prominent card per option rather than a small toggle. */
@@ -33,7 +30,9 @@ function LaborGroupPicker({ value, onChange }: { value: KaizenLaborGroup | ""; o
   function onKeyDown(e: KeyboardEvent, index: number) {
     if (!["ArrowRight", "ArrowLeft", "ArrowDown", "ArrowUp"].includes(e.key)) return;
     e.preventDefault();
-    const next = (index + (e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : -1) + KAIZEN_LABOR_GROUPS.length) % KAIZEN_LABOR_GROUPS.length;
+    const next =
+      (index + (e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : -1) + KAIZEN_LABOR_GROUPS.length) %
+      KAIZEN_LABOR_GROUPS.length;
     onChange(KAIZEN_LABOR_GROUPS[next]);
     refs.current[next]?.focus();
   }
@@ -61,16 +60,22 @@ function LaborGroupPicker({ value, onChange }: { value: KaizenLaborGroup | ""; o
             }`}
           >
             <span>
-              <span className={`block text-base font-semibold ${checked ? "text-blue-800 dark:text-blue-200" : "text-slate-800 dark:text-slate-100"}`}>
+              <span
+                className={`block text-base font-semibold ${checked ? "text-blue-800 dark:text-blue-200" : "text-slate-800 dark:text-slate-100"}`}
+              >
                 Kaizen Labor {g}
               </span>
               <span className="mt-0.5 block text-sm text-slate-600 dark:text-slate-400">{GROUP_DETAIL[g]}</span>
-              <span className="mt-2 block text-xs text-slate-500 tabular-nums dark:text-slate-400">{headcount[g]} MP aktif di ZPAR</span>
+              <span className="mt-2 block text-xs text-slate-500 tabular-nums dark:text-slate-400">
+                {headcount[g]} MP aktif di ZPAR
+              </span>
             </span>
             <span
               aria-hidden
               className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 ${
-                checked ? "border-blue-600 bg-blue-600 text-white dark:border-blue-400 dark:bg-blue-400 dark:text-slate-900" : "border-slate-300 dark:border-slate-600"
+                checked
+                  ? "border-blue-600 bg-blue-600 text-white dark:border-blue-400 dark:bg-blue-400 dark:text-slate-900"
+                  : "border-slate-300 dark:border-slate-600"
               }`}
             >
               {checked && <Check size={12} strokeWidth={3} />}
@@ -147,10 +152,13 @@ export function KaizenModal({ open, onClose }: { open: boolean; onClose: () => v
             {step === "plan" && (
               <div className="space-y-3">
                 <p className="text-xs text-slate-600 dark:text-slate-400">
-                  Satu Kaizen bisa melepas personil dari beberapa shop sekaligus — divisi sama tapi beda department, atau status MP berbeda.
-                  Isi per baris: shop, status MP, jumlah, activity, dan tanggal rilisnya. Pilih orangnya di langkah berikutnya.
+                  Satu Kaizen bisa melepas personil dari beberapa shop sekaligus — divisi sama tapi beda department, atau status
+                  MP berbeda. Isi per baris: shop, status MP, jumlah, activity, dan tanggal rilisnya. Pilih orangnya di langkah
+                  berikutnya.
                 </p>
-                <h4 className="text-xs font-semibold text-slate-600 dark:text-slate-400">Rencana rilis per shop · Kaizen Labor {laborGroup}</h4>
+                <h4 className="text-xs font-semibold text-slate-600 dark:text-slate-400">
+                  Rencana rilis per shop · Kaizen Labor {laborGroup}
+                </h4>
                 <CompositionRowsEditor
                   rows={planRows}
                   onChange={setPlanRows}
@@ -168,12 +176,21 @@ export function KaizenModal({ open, onClose }: { open: boolean; onClose: () => v
 
             {step === "names" && (
               <div className="space-y-4">
-                <ReleaseMappingStep planRows={planRows} selected={selected} onChange={setSelected} laborTypeFilter={matchesLabor} />
+                <ReleaseMappingStep
+                  planRows={planRows}
+                  selected={selected}
+                  onChange={setSelected}
+                  laborTypeFilter={matchesLabor}
+                />
                 {(unplanned > 0 || incompleteRows.length > 0) && (
-                  <div role="status" className="space-y-1 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+                  <div
+                    role="status"
+                    className="space-y-1 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200"
+                  >
                     {unplanned > 0 && (
                       <p>
-                        {unplanned} personil tidak cocok dengan baris rencana manapun — tambahkan barisnya di Rencana per Shop, atau hapus orangnya.
+                        {unplanned} personil tidak cocok dengan baris rencana manapun — tambahkan barisnya di Rencana per Shop,
+                        atau hapus orangnya.
                       </p>
                     )}
                     {incompleteRows.length > 0 && (

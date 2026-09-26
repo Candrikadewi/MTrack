@@ -10,12 +10,7 @@ function movementPeriod(demandTgl: string, fulfillDate: string): string {
 export function buildHandoverForm(dept: string, period: string): HandoverForm {
   const rows: HandoverRow[] = demandStore
     .list()
-    .filter(
-      (d) =>
-        d.status === "Fulfilled" &&
-        d.dept === dept &&
-        movementPeriod(d.tgl_ended_outgoing, d.fulfill_date) === period
-    )
+    .filter((d) => d.status === "Fulfilled" && d.dept === dept && movementPeriod(d.tgl_ended_outgoing, d.fulfill_date) === period)
     .map((d, idx) => ({
       id: genId("hrow"),
       no: idx + 1,

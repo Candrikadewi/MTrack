@@ -51,7 +51,10 @@ export function ManpowerMovementBlock({
   // Mar 2019…Mar 2025) plus this FY's months — drawn oldest → newest.
   const refDate = useMemo(() => new Date(), []);
   const periodOptions = useMemo(
-    () => Array.from(new Set([...snapshotsByPeriod.keys(), ...fiscalYearMonths(refDate)])).sort().reverse(),
+    () =>
+      Array.from(new Set([...snapshotsByPeriod.keys(), ...fiscalYearMonths(refDate)]))
+        .sort()
+        .reverse(),
     [snapshotsByPeriod, refDate]
   );
   const movementRows = useMemo(
@@ -67,7 +70,18 @@ export function ManpowerMovementBlock({
         refDate,
         selPeriods.filter((p) => periodOptions.includes(p))
       ),
-    [snapshotsByPeriod, vokasi, selDirectorates, selDivisions, selDepts, selLaborTypes, selStatuses, refDate, selPeriods, periodOptions]
+    [
+      snapshotsByPeriod,
+      vokasi,
+      selDirectorates,
+      selDivisions,
+      selDepts,
+      selLaborTypes,
+      selStatuses,
+      refDate,
+      selPeriods,
+      periodOptions,
+    ]
   );
 
   const [diffMonth, setDiffMonth] = useSessionState<string>("dash.movement.diffMonth", "");
@@ -85,7 +99,18 @@ export function ManpowerMovementBlock({
       divisions: selDivisions,
       depts: selDepts,
     });
-  }, [diffMonth, prevMonth, snapshotsByPeriod, reviews, demands, selDirectorates, selDivisions, selDepts, selLaborTypes, selStatuses]);
+  }, [
+    diffMonth,
+    prevMonth,
+    snapshotsByPeriod,
+    reviews,
+    demands,
+    selDirectorates,
+    selDivisions,
+    selDepts,
+    selLaborTypes,
+    selStatuses,
+  ]);
 
   return (
     <Card
@@ -122,12 +147,7 @@ export function ManpowerMovementBlock({
           placeholder="Tahun fiskal berjalan"
           labelOf={(m) => format(new Date(`${m}-01T00:00:00`), "MMM yyyy")}
         />
-        <MultiSelect
-          label="Labor Type"
-          options={[...LABOR_TYPES]}
-          selected={selLaborTypes}
-          onChange={setSelLaborTypes}
-        />
+        <MultiSelect label="Labor Type" options={[...LABOR_TYPES]} selected={selLaborTypes} onChange={setSelLaborTypes} />
         <MultiSelect
           label="Status"
           options={MOVEMENT_STATUSES}

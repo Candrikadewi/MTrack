@@ -1,0 +1,12 @@
+# Generated or vendored
+node_modules
+.next
+package-lock.json
+next-env.d.ts
+# Prose and SQL keep their hand formatting
+*.md
+supabase
+# Agent tooling
+.claude
+.agents
+skills-lock.json

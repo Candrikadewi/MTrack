@@ -1,15 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import {
-  Upload,
-  LayoutDashboard,
-  ArrowLeftRight,
-  Boxes,
-  History,
-  FileStack,
-  LogOut,
-} from "lucide-react";
+import { Upload, LayoutDashboard, ArrowLeftRight, Boxes, History, FileStack, LogOut } from "lucide-react";
 import { logout } from "@/app/login/actions";
 import { canAccessModule, type Role } from "@/lib/roles";
 import { clearSessionState } from "@/lib/useSessionState";
@@ -115,9 +107,7 @@ export function Sidebar({ role, email }: { role: Role; email: string }) {
       </nav>
       <div className="border-t border-slate-100 px-5 py-4 dark:border-slate-800">
         <div className="mb-3 flex items-center gap-2">
-          <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${ROLE_TONE[role]}`}>
-            {ROLE_LABEL[role]}
-          </span>
+          <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${ROLE_TONE[role]}`}>{ROLE_LABEL[role]}</span>
           <span className="truncate text-xs text-slate-500 dark:text-slate-400">{email}</span>
         </div>
         <form action={logout} onSubmit={clearSessionState}>

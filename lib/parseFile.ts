@@ -24,15 +24,25 @@ async function readSheet(file: File): Promise<{ rows: Record<string, unknown>[];
  * header formatting quirks (incl. ZPAR's trailing-space "MPP ") don't break
  * column matching. */
 export function normalizeHeader(s: string): string {
-  return s.replace(/\uFEFF/g, "").trim().toLowerCase().replace(/[\s()]+/g, "");
+  return s
+    .replace(/\uFEFF/g, "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s()]+/g, "");
 }
 
+/** A cell's value as text. Real spreadsheet date cells (Date objects) come
+ * back as yyyy-MM-dd — String() would give "Mon Mar 09 2015 …", which no
+ * date parser here reads. */
 function findValue(row: Record<string, unknown>, aliases: string[]): string {
   const keys = Object.keys(row);
   const normalizedAliases = aliases.map(normalizeHeader);
   for (const alias of normalizedAliases) {
     const key = keys.find((k) => normalizeHeader(k) === alias);
-    if (key !== undefined && row[key] !== "") return String(row[key]);
+    if (key === undefined || row[key] === "") continue;
+    const value = row[key];
+    if (value instanceof Date) return isNaN(value.getTime()) ? "" : format(value, "yyyy-MM-dd");
+    return String(value);
   }
   return "";
 }
@@ -152,13 +162,60 @@ function addWarning(b: SkipBreakdown, label: string) {
 // ---------------------------------------------------------------------------
 
 const ZPAR_BASELINE_COLUMNS = [
-  "No", "Period", "Noreg", "Posisi (struktural)", "Labor Type", "Tgl Masuk", "Status", "EG", "ESG", "Pers Area",
-  "Directorat", "Division", "Department", "Section", "Line", "Group", "Tgl Lahir", "Gender", "Tingkat Pendidikan",
-  "Nama", "Posisi", "Psubarea", "Org Unit", "Org Key", "Task (IT0019)", "Due Date Task", "Transaction", "Tgl Transaksi",
-  "Reason Transaksi", "PE Bonus", "PE Salary", "PE Bonus Y-1", "PE Bonus Y-2", "PE Bonus Y-3", "PE Salary Y-1",
-  "PE Salary Y-2", "PE Salary Y-3", "Family Status", "Nationality", "Jumlah Anak", "Kelompok Penyakit", "Jenis Penyakit",
-  "Pemeriksa", "Kategori Penyakit", "Posisi Before", "Posisi (struktural) Before", "ESG Before", "Directorat Before",
-  "Division Before", "Department Before", "Section Before", "Line Before", "Group Before", "Perusahaan ICT/Expat",
+  "No",
+  "Period",
+  "Noreg",
+  "Posisi (struktural)",
+  "Labor Type",
+  "Tgl Masuk",
+  "Status",
+  "EG",
+  "ESG",
+  "Pers Area",
+  "Directorat",
+  "Division",
+  "Department",
+  "Section",
+  "Line",
+  "Group",
+  "Tgl Lahir",
+  "Gender",
+  "Tingkat Pendidikan",
+  "Nama",
+  "Posisi",
+  "Psubarea",
+  "Org Unit",
+  "Org Key",
+  "Task (IT0019)",
+  "Due Date Task",
+  "Transaction",
+  "Tgl Transaksi",
+  "Reason Transaksi",
+  "PE Bonus",
+  "PE Salary",
+  "PE Bonus Y-1",
+  "PE Bonus Y-2",
+  "PE Bonus Y-3",
+  "PE Salary Y-1",
+  "PE Salary Y-2",
+  "PE Salary Y-3",
+  "Family Status",
+  "Nationality",
+  "Jumlah Anak",
+  "Kelompok Penyakit",
+  "Jenis Penyakit",
+  "Pemeriksa",
+  "Kategori Penyakit",
+  "Posisi Before",
+  "Posisi (struktural) Before",
+  "ESG Before",
+  "Directorat Before",
+  "Division Before",
+  "Department Before",
+  "Section Before",
+  "Line Before",
+  "Group Before",
+  "Perusahaan ICT/Expat",
   "Posisi ICT/Expat",
 ];
 
@@ -372,9 +429,31 @@ const VOKASI_ALIASES = {
  * address, phone, bank, BPJS) and non-system operational fields. Treated
  * as known so they're never offered as "Pakai" and never stored. */
 const VOKASI_DROPPED = [
-  "No.", "No", "Tempat Lahir", "Tanggal Lahir", "Alamat", "RT/RW", "Kelurahan/Desa", "Kecamatan", "Kota", "Kode Pos",
-  "Provinsi", "Nomor HP", "NIK", "NPWP", "Status BPJS Kesehatan", "Nomor BPJS Kesehatan", "Nama Bank", "No. Rekening",
-  "Nama Sekolah dan Kota Sekolah", "Jurusan Sekolah", "Model Baju", "Ukuran Baju", "Ukuran Sepatu", "Alamat Email", "Nama BKK",
+  "No.",
+  "No",
+  "Tempat Lahir",
+  "Tanggal Lahir",
+  "Alamat",
+  "RT/RW",
+  "Kelurahan/Desa",
+  "Kecamatan",
+  "Kota",
+  "Kode Pos",
+  "Provinsi",
+  "Nomor HP",
+  "NIK",
+  "NPWP",
+  "Status BPJS Kesehatan",
+  "Nomor BPJS Kesehatan",
+  "Nama Bank",
+  "No. Rekening",
+  "Nama Sekolah dan Kota Sekolah",
+  "Jurusan Sekolah",
+  "Model Baju",
+  "Ukuran Baju",
+  "Ukuran Sepatu",
+  "Alamat Email",
+  "Nama BKK",
 ];
 
 const VOKASI_KNOWN = new Set(
@@ -452,7 +531,23 @@ export function suggestShop(raw: string): string {
 }
 
 const MONTHS: Record<string, number> = {
-  JAN: 1, FEB: 2, MAR: 3, APR: 4, MAY: 5, MEI: 5, JUN: 6, JUL: 7, AUG: 8, AGU: 8, AGS: 8, SEP: 9, OCT: 10, OKT: 10, NOV: 11, DEC: 12, DES: 12,
+  JAN: 1,
+  FEB: 2,
+  MAR: 3,
+  APR: 4,
+  MAY: 5,
+  MEI: 5,
+  JUN: 6,
+  JUL: 7,
+  AUG: 8,
+  AGU: 8,
+  AGS: 8,
+  SEP: 9,
+  OCT: 10,
+  OKT: 10,
+  NOV: 11,
+  DEC: 12,
+  DES: 12,
 };
 
 /** "28 MAY 2026" / "28 MEI 2026" → "2026-05-28". */
@@ -483,7 +578,12 @@ async function readVokasiSheet(file: File): Promise<{ rows: Record<string, unkno
   const headerCells = grid[headerIdx].map((c) => String(c ?? "").trim());
   const title = grid
     .slice(0, headerIdx)
-    .map((r) => r.map((c) => String(c ?? "").trim()).filter(Boolean).join(" "))
+    .map((r) =>
+      r
+        .map((c) => String(c ?? "").trim())
+        .filter(Boolean)
+        .join(" ")
+    )
     .join(" ");
   const rows: Record<string, unknown>[] = [];
   for (const r of grid.slice(headerIdx + 1)) {
@@ -665,7 +765,9 @@ export async function parseVokasiFile(file: File, defaultTglMasuk: string): Prom
   const batches = Array.from(batchCounts, ([batch, count]) => ({ batch, count })).sort((a, b) =>
     a.batch.localeCompare(b.batch, undefined, { numeric: true })
   );
-  const shopValues = Array.from(shopCounts.values()).sort((a, b) => Number(Boolean(a.standard)) - Number(Boolean(b.standard)) || b.count - a.count);
+  const shopValues = Array.from(shopCounts.values()).sort(
+    (a, b) => Number(Boolean(a.standard)) - Number(Boolean(b.standard)) || b.count - a.count
+  );
   return {
     records,
     totalRows: rows.length,

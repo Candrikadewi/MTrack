@@ -17,11 +17,7 @@ import { syncProjectSeatDemands } from "./projects";
  * `replacementStatus` only applies to the Kontrak (PKWT) tab's "PKWT New
  * Hire / MP Excess / MP Back Up" flow; the Vokasi tab leaves it "".
  */
-export function setDemandReplacementByNoreg(
-  demandId: string,
-  noreg: string,
-  replacementStatus: ReplacementStatus = ""
-): void {
+export function setDemandReplacementByNoreg(demandId: string, noreg: string, replacementStatus: ReplacementStatus = ""): void {
   const demand = demandStore.get(demandId);
   if (!demand) return;
 
@@ -146,14 +142,14 @@ export function confirmDemandFulfillment(demandId: string, confirmedDate: string
 export function confirmShopReceipt(demandId: string, confirmedDate: string): void {
   const previous = demandStore.get(demandId);
   if (!previous) return;
-  demandStore.update(demandId, { shop_confirmed_date: confirmedDate });
+  demandStore.patchLocal(demandId, { shop_confirmed_date: confirmedDate });
   const supabase = createClient();
   supabase
     .rpc("confirm_shop_receipt", { p_demand_id: demandId, p_confirmed_date: confirmedDate || null })
     .then((res: { error: { message: string } | null }) => {
       if (res.error) {
         console.error("confirm_shop_receipt failed:", res.error.message);
-        demandStore.update(demandId, { shop_confirmed_date: previous.shop_confirmed_date });
+        demandStore.patchLocal(demandId, { shop_confirmed_date: previous.shop_confirmed_date });
         pushToast(`Gagal konfirmasi shop: ${res.error.message}`);
         return;
       }

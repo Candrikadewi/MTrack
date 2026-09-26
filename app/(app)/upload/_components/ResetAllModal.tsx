@@ -56,19 +56,13 @@ export function ResetAllModal({ open, onClose }: { open: boolean; onClose: () =>
     <Modal open={open} onClose={handleClose} title="Konfirmasi Reset All Data">
       <div className="space-y-4">
         <p className="text-sm text-slate-600 dark:text-slate-300">
-          Ini akan menghapus <b>seluruh data CAMP</b> secara permanen. Masukkan email dan password akun Anda untuk
-          melanjutkan.
+          Ini akan menghapus <b>seluruh data CAMP</b> secara permanen. Masukkan email dan password akun Anda untuk melanjutkan.
         </p>
         <Field label="Email">
           <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="username" />
         </Field>
         <Field label="Password">
-          <Input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete="current-password"
-          />
+          <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
         </Field>
         {error && <p className="text-sm text-red-600">{error}</p>}
         <div className="flex justify-end gap-2 pt-2">

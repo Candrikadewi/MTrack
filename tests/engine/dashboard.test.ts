@@ -26,7 +26,9 @@ describe("fulfillmentStage", () => {
 
 describe("demandMonthKey", () => {
   it("puts PKWT Terminate / Vokasi Ended demands in their review / end month", () => {
-    expect(demandMonthKey(demand({ origin_type: "PkwtTerminate", tgl_ended_outgoing: "2026-10-03", fulfill_date: "2026-09-19" }))).toBe("2026-10");
+    expect(
+      demandMonthKey(demand({ origin_type: "PkwtTerminate", tgl_ended_outgoing: "2026-10-03", fulfill_date: "2026-09-19" }))
+    ).toBe("2026-10");
   });
   it("puts other demands in their fulfilment month", () => {
     expect(demandMonthKey(demand({ origin_type: "Project", fulfill_date: "2026-11-01" }))).toBe("2026-11");
@@ -39,8 +41,21 @@ describe("fulfillmentRows", () => {
       [
         demand({ id: "1", origin_type: "PkwtTerminate" }),
         demand({ id: "2", origin_type: "PkwtTerminate", replacement_noreg: "N" }),
-        demand({ id: "3", origin_type: "PkwtTerminate", replacement_noreg: "N", status: "Fulfilled", fulfillment_confirmed_date: "2026-09-01" }),
-        demand({ id: "4", origin_type: "PkwtTerminate", replacement_noreg: "N", status: "Fulfilled", fulfillment_confirmed_date: "2026-09-01", shop_confirmed_date: "2026-09-02" }),
+        demand({
+          id: "3",
+          origin_type: "PkwtTerminate",
+          replacement_noreg: "N",
+          status: "Fulfilled",
+          fulfillment_confirmed_date: "2026-09-01",
+        }),
+        demand({
+          id: "4",
+          origin_type: "PkwtTerminate",
+          replacement_noreg: "N",
+          status: "Fulfilled",
+          fulfillment_confirmed_date: "2026-09-01",
+          shop_confirmed_date: "2026-09-02",
+        }),
         demand({ id: "5", origin_type: "PkwtTerminate", replacement_status: "No Replace" }),
         demand({ id: "6", origin_type: "PkwtTerminate", category: "Vokasi" }),
       ],

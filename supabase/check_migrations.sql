@@ -1,4 +1,4 @@
--- M-TRACK migration status check — run this in Supabase SQL Editor.
+-- CAMP migration status check — run this in Supabase SQL Editor.
 -- Read-only, safe to run anytime. Shows applied = true/false for each
 -- migration by checking a distinctive column/constraint/function it adds.
 

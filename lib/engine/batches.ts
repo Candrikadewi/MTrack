@@ -51,11 +51,7 @@ export const DEMAND_JENIS_LABEL: Record<DemandOriginType, string> = {
  * of the demand it has. Vokasi counts from the month its batch ends, and
  * No Replace has nothing to fill, so neither is in the total. Batches with
  * nothing left are not listed. */
-export function buildDemandBatchCategories(
-  demands: Demand[],
-  projects: Project[],
-  taktCases: TaktCase[]
-): BatchTileCategory[] {
+export function buildDemandBatchCategories(demands: Demand[], projects: Project[], taktCases: TaktCase[]): BatchTileCategory[] {
   const active = demands.filter((d) => d.replacement_status !== "No Replace" && isDemandDue(d));
   const isOpen = (d: Demand) => d.status !== "Fulfilled";
 
@@ -76,7 +72,13 @@ export function buildDemandBatchCategories(
       .sort((a, b) => order(a.id, b.id));
   }
 
-  function category(key: string, label: string, tone: BatchTileCategory["tone"], items: Demand[], batches: BatchTileCategory["batches"]) {
+  function category(
+    key: string,
+    label: string,
+    tone: BatchTileCategory["tone"],
+    items: Demand[],
+    batches: BatchTileCategory["batches"]
+  ) {
     return { key, label, tone, count: items.filter(isOpen).length, total: items.length, batches };
   }
 
@@ -97,41 +99,67 @@ export function buildDemandBatchCategories(
       "Project",
       "blue",
       projectDemands,
-      batchesOf(projectDemands, (d) => d.origin_ref, (ref) => {
-        const p = projects.find((x) => x.id === ref);
-        return { label: p?.name ?? "Project", meta: p ? `SOP ${fmtDate(p.start_date)}` : undefined, href: p ? `/projects/${p.id}` : "/projects" };
-      })
+      batchesOf(
+        projectDemands,
+        (d) => d.origin_ref,
+        (ref) => {
+          const p = projects.find((x) => x.id === ref);
+          return {
+            label: p?.name ?? "Project",
+            meta: p ? `SOP ${fmtDate(p.start_date)}` : undefined,
+            href: p ? `/projects/${p.id}` : "/projects",
+          };
+        }
+      )
     ),
     category(
       "taktup",
       "Takt Up",
       "blue",
       taktUpDemands,
-      batchesOf(taktUpDemands, (d) => d.origin_ref, (ref) => {
-        const t = taktCases.find((x) => x.id === ref);
-        return { label: t ? `Takt Up — ${t.plant}` : "Takt Up", meta: t ? fmtDate(t.date) : undefined };
-      })
+      batchesOf(
+        taktUpDemands,
+        (d) => d.origin_ref,
+        (ref) => {
+          const t = taktCases.find((x) => x.id === ref);
+          return { label: t ? `Takt Up — ${t.plant}` : "Takt Up", meta: t ? fmtDate(t.date) : undefined };
+        }
+      )
     ),
     category(
       "pkwt",
       "PKWT",
       "amber",
       pkwtDemands,
-      batchesOf(pkwtDemands, (d) => demandTargetDate(d).slice(0, 7) || "-", (m) => ({ label: monthLabel("Enrollment PKWT", m) }), byMonthDesc)
+      batchesOf(
+        pkwtDemands,
+        (d) => demandTargetDate(d).slice(0, 7) || "-",
+        (m) => ({ label: monthLabel("Enrollment PKWT", m) }),
+        byMonthDesc
+      )
     ),
     category(
       "vokasi",
       "Vokasi",
       "violet",
       vokasiDemands,
-      batchesOf(vokasiDemands, (d) => demandTargetDate(d).slice(0, 7) || "-", (m) => ({ label: monthLabel("Vokasi Ended", m) }), byMonthDesc)
+      batchesOf(
+        vokasiDemands,
+        (d) => demandTargetDate(d).slice(0, 7) || "-",
+        (m) => ({ label: monthLabel("Vokasi Ended", m) }),
+        byMonthDesc
+      )
     ),
     category(
       "lainnya",
       "Lainnya",
       "slate",
       lainnyaDemands,
-      batchesOf(lainnyaDemands, (d) => d.origin_type, (type) => ({ label: DEMAND_JENIS_LABEL[type as DemandOriginType] }))
+      batchesOf(
+        lainnyaDemands,
+        (d) => d.origin_type,
+        (type) => ({ label: DEMAND_JENIS_LABEL[type as DemandOriginType] })
+      )
     ),
   ];
 }
@@ -150,7 +178,6 @@ export function jenisOf(e: UtilPoolEntry): string {
   const group = kaizenLaborGroupOf(e.source_label);
   return group ? `Kaizen Labor ${group}` : "Kaizen";
 }
-
 
 /** ProjectFinish/Kaizen entries have no single owning record to group by —
  * source_label (e.g. "Kaizen 2026 Labor A/F - Assembly (activity)") is the closest

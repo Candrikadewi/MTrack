@@ -5,12 +5,7 @@ import { demandStore, projectStore, utilPoolStore, valueMappingStore, vokasiStor
 import { computeReviewDate, sisaHari } from "../compute";
 import { isPermanenForRatio, projectEndDate, rowReleaseDate } from "../../types";
 import type { Demand, MpStatusKategori, Project, ProjectMpNeedRow } from "../../types";
-import {
-  mapMpStatusToDemandCategory,
-  getActiveEmployeeByNoreg,
-  getEmploymentStatus,
-  estimateContractEnd,
-} from "./people";
+import { mapMpStatusToDemandCategory, getActiveEmployeeByNoreg, getEmploymentStatus, estimateContractEnd } from "./people";
 import { expandRowToDemands, createDemandsFromProjectRow, isEditableDemand } from "./demands";
 import { setDemandNoReplace } from "./replacement";
 import {
@@ -28,11 +23,7 @@ import { pushToUtilPool } from "./pool";
 
 /** Registers a project from its name, Tanggal SOP and MP need-rows. Each
  * row carries its own release (date or No Release); end_date is derived. */
-export function createProject(input: {
-  name: string;
-  sop_date: string;
-  rows: Omit<ProjectMpNeedRow, "id">[];
-}): Project {
+export function createProject(input: { name: string; sop_date: string; rows: Omit<ProjectMpNeedRow, "id">[] }): Project {
   const project: Project = {
     id: genId("project"),
     name: input.name,
@@ -54,7 +45,11 @@ export function projectRowOfDemand(project: Project, demand: Demand): ProjectMpN
   return (
     project.rows.find((r) => r.demand_ids?.includes(demand.id)) ??
     project.rows.find(
-      (r) => !r.demand_ids && r.division === demand.div && r.dept === demand.dept && mapMpStatusToDemandCategory(r.status_mp) === demand.category
+      (r) =>
+        !r.demand_ids &&
+        r.division === demand.div &&
+        r.dept === demand.dept &&
+        mapMpStatusToDemandCategory(r.status_mp) === demand.category
     )
   );
 }
@@ -76,8 +71,7 @@ export function projectSeatOccupants(seat: Demand, demands: Demand[] = demandSto
     // Terminate — under the new noreg — never via their old Vokasi record.
     current = demands.find(
       (d) =>
-        noregs.includes(d.outgoing_noreg) &&
-        (d.origin_type === "PkwtTerminate" || (d.origin_type === "VokasiEnded" && !rehired))
+        noregs.includes(d.outgoing_noreg) && (d.origin_type === "PkwtTerminate" || (d.origin_type === "VokasiEnded" && !rehired))
     );
   }
   return chain;
@@ -139,7 +133,11 @@ export function updateProjectDetails(projectId: string, input: { name?: string; 
 
 /** Changes a registered row's release (date or No Release) until it has
  * actually been released, then re-syncs its seats' replacement demands. */
-export function updateProjectRowRelease(projectId: string, rowId: string, release: { release_date: string; no_release: boolean }): void {
+export function updateProjectRowRelease(
+  projectId: string,
+  rowId: string,
+  release: { release_date: string; no_release: boolean }
+): void {
   const project = projectStore.get(projectId);
   const row = project?.rows.find((r) => r.id === rowId);
   if (!project || !row || row.released) return;
@@ -173,7 +171,9 @@ export function increaseProjectRowQty(projectId: string, rowId: string, newQty: 
   const delta = newQty - row.qty;
   const created = expandRowToDemands({ ...row, qty: delta }, "Project", project.id, project.name);
   const updatedRows = project.rows.map((r) =>
-    r.id === rowId ? { ...r, qty: newQty, ...(r.demand_ids ? { demand_ids: [...r.demand_ids, ...created.map((d) => d.id)] } : {}) } : r
+    r.id === rowId
+      ? { ...r, qty: newQty, ...(r.demand_ids ? { demand_ids: [...r.demand_ids, ...created.map((d) => d.id)] } : {}) }
+      : r
   );
   projectStore.update(projectId, { rows: updatedRows, demand_ids: [...project.demand_ids, ...created.map((d) => d.id)] });
 }
@@ -290,7 +290,8 @@ function releaseSeatHolder(project: Project, seat: Demand, demands: Demand[], re
   let contractEnd: string | null;
   if (rehired) {
     type = emp && isPermanenForRatio(emp.status_kontrak) ? "Permanen" : "PKWT";
-    contractEnd = emp && !isPermanenForRatio(emp.status_kontrak) ? computeReviewDate(emp.tgl_masuk, emp.status_kontrak) || null : null;
+    contractEnd =
+      emp && !isPermanenForRatio(emp.status_kontrak) ? computeReviewDate(emp.tgl_masuk, emp.status_kontrak) || null : null;
   } else {
     const employment = getEmploymentStatus(holder.replacement_noreg);
     type =

@@ -65,11 +65,7 @@ export function MonthBarChart({
                 show one of the two facts at a time. */}
             <Bar dataKey="value" radius={[4, 4, 0, 0]} maxBarSize={44} cursor="pointer" isAnimationActive={false}>
               {showValueLabels && (
-                <LabelList
-                  dataKey="value"
-                  position="top"
-                  style={{ fontSize: 11, fill: isDark ? "#c3c2b7" : "#57564f" }}
-                />
+                <LabelList dataKey="value" position="top" style={{ fontSize: 11, fill: isDark ? "#c3c2b7" : "#57564f" }} />
               )}
               {data.map((d) => (
                 <Cell

@@ -102,7 +102,10 @@ function buildHistoryBatches(
   }
   for (const [label, list] of kaizenGroups) {
     if (!list.every((e) => e.status !== "Open")) continue;
-    const closureDates = list.map((e) => e.entered_pool_date).filter(Boolean).sort();
+    const closureDates = list
+      .map((e) => e.entered_pool_date)
+      .filter(Boolean)
+      .sort();
     batches.push({
       id: `kaizen-${label}`,
       jenis: "Kaizen",
@@ -150,7 +153,10 @@ export function HistoryPageClient() {
   const jenisOptions = useMemo(() => Array.from(new Set(allBatches.map((b) => b.jenis))).sort(), [allBatches]);
   const statusOptions = useMemo(() => Array.from(new Set(allBatches.map((b) => b.statusLabel))).sort(), [allBatches]);
   const periodeOptions = useMemo(
-    () => Array.from(new Set(allBatches.map((b) => b.closureMonth).filter(Boolean))).sort().reverse(),
+    () =>
+      Array.from(new Set(allBatches.map((b) => b.closureMonth).filter(Boolean)))
+        .sort()
+        .reverse(),
     [allBatches]
   );
   const plantOptions = useMemo(
@@ -215,7 +221,8 @@ export function HistoryPageClient() {
         <div>
           <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100">History</h1>
           <p className="text-sm text-slate-600 dark:text-slate-400">
-            Batch Project, Takt Up, Takt Down, dan Kaizen yang sudah selesai. Demand PKWT/Vokasi yang terpenuhi ada di Detail Demand.
+            Batch Project, Takt Up, Takt Down, dan Kaizen yang sudah selesai. Demand PKWT/Vokasi yang terpenuhi ada di Detail
+            Demand.
           </p>
         </div>
         <Button variant="secondary" onClick={exportCsv} disabled={filtered.length === 0}>
@@ -226,7 +233,13 @@ export function HistoryPageClient() {
       <div className="flex flex-wrap gap-2">
         <MultiSelect label="Jenis" options={jenisOptions} selected={jenisFilter} onChange={setJenisFilter} className="w-40" />
         <MultiSelect label="Status" options={statusOptions} selected={statusFilter} onChange={setStatusFilter} className="w-44" />
-        <MultiSelect label="Periode" options={periodeOptions} selected={periodeFilter} onChange={setPeriodeFilter} className="w-40" />
+        <MultiSelect
+          label="Periode"
+          options={periodeOptions}
+          selected={periodeFilter}
+          onChange={setPeriodeFilter}
+          className="w-40"
+        />
         <MultiSelect label="Plant" options={plantOptions} selected={plantFilter} onChange={setPlantFilter} className="w-36" />
         <MultiSelect
           label="Divisi"
@@ -279,7 +292,9 @@ export function HistoryPageClient() {
                   <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
                     {b.meta} · {b.statusLabel} · Periode {b.closureMonth || "-"}
                   </div>
-                  {indicator && <div className="mt-1 text-xs font-medium text-emerald-700 dark:text-emerald-400">{indicator}</div>}
+                  {indicator && (
+                    <div className="mt-1 text-xs font-medium text-emerald-700 dark:text-emerald-400">{indicator}</div>
+                  )}
                 </div>
                 <div className="text-sm font-semibold text-slate-600 dark:text-slate-300">{b.totalQty} MP</div>
               </div>

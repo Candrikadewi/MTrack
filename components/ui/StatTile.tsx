@@ -68,7 +68,9 @@ export function StatTile({
           </span>
         )}
       </div>
-      <div className={big ? `mt-1 text-3xl font-bold tabular-nums ${s.text}` : `mt-1 text-xl font-semibold tabular-nums ${s.text}`}>
+      <div
+        className={big ? `mt-1 text-3xl font-bold tabular-nums ${s.text}` : `mt-1 text-xl font-semibold tabular-nums ${s.text}`}
+      >
         {value}
       </div>
       {sub && <div className="mt-0.5 text-xs text-slate-600 dark:text-slate-400">{sub}</div>}

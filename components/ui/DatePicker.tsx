@@ -76,12 +76,7 @@ export function DatePicker({
     if (!open) return;
     function onClickOutside(e: MouseEvent) {
       const target = e.target as Node;
-      if (
-        triggerRef.current &&
-        !triggerRef.current.contains(target) &&
-        panelRef.current &&
-        !panelRef.current.contains(target)
-      ) {
+      if (triggerRef.current && !triggerRef.current.contains(target) && panelRef.current && !panelRef.current.contains(target)) {
         close();
       }
     }
@@ -140,9 +135,7 @@ export function DatePicker({
               >
                 <ChevronLeft size={16} />
               </button>
-              <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">
-                {format(viewMonth, "MMMM yyyy")}
-              </span>
+              <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">{format(viewMonth, "MMMM yyyy")}</span>
               <button
                 type="button"
                 onClick={() => setViewMonth((m) => addMonths(m, 1))}

@@ -1,4 +1,4 @@
-// Pure computed-field functions — see MTRACK_SPEC.md §12 "Aturan Bisnis & Field Turunan".
+// Pure computed-field functions: the business rules for derived dates and statuses.
 import {
   addBusinessDays,
   addDays,

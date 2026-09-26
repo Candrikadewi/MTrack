@@ -37,7 +37,11 @@ function RatioBar({ counts }: { counts: RatioCounts }) {
       {(["permanen", "kontrak", "vokasi"] as const).map(
         (k) =>
           counts[k] > 0 && (
-            <div key={k} style={{ width: `${pct(counts[k])}%`, backgroundColor: SEGMENT_COLOR[k] }} title={`${k}: ${counts[k]}`} />
+            <div
+              key={k}
+              style={{ width: `${pct(counts[k])}%`, backgroundColor: SEGMENT_COLOR[k] }}
+              title={`${k}: ${counts[k]}`}
+            />
           )
       )}
     </div>

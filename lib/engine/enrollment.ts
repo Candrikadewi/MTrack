@@ -79,11 +79,7 @@ export function deptsOfRows(rows: { div: string; dept: string }[], selectedDivis
   return Array.from(new Set(scoped.map((r) => r.dept).filter(Boolean))).sort();
 }
 
-export function filterByDivDept<T extends { div: string; dept: string }>(
-  rows: T[],
-  divisions: string[],
-  depts: string[]
-): T[] {
+export function filterByDivDept<T extends { div: string; dept: string }>(rows: T[], divisions: string[], depts: string[]): T[] {
   return rows.filter(
     (r) => (divisions.length === 0 || divisions.includes(r.div)) && (depts.length === 0 || depts.includes(r.dept))
   );
