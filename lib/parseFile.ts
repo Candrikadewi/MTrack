@@ -27,12 +27,18 @@ export function normalizeHeader(s: string): string {
   return s.replace(/\uFEFF/g, "").trim().toLowerCase().replace(/[\s()]+/g, "");
 }
 
+/** A cell's value as text. Real spreadsheet date cells (Date objects) come
+ * back as yyyy-MM-dd — String() would give "Mon Mar 09 2015 …", which no
+ * date parser here reads. */
 function findValue(row: Record<string, unknown>, aliases: string[]): string {
   const keys = Object.keys(row);
   const normalizedAliases = aliases.map(normalizeHeader);
   for (const alias of normalizedAliases) {
     const key = keys.find((k) => normalizeHeader(k) === alias);
-    if (key !== undefined && row[key] !== "") return String(row[key]);
+    if (key === undefined || row[key] === "") continue;
+    const value = row[key];
+    if (value instanceof Date) return isNaN(value.getTime()) ? "" : format(value, "yyyy-MM-dd");
+    return String(value);
   }
   return "";
 }
