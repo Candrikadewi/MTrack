@@ -9,7 +9,6 @@ import { ProgressBar } from "@/components/ui/StatTile";
 import { MonthBarChart } from "@/components/ui/MonthBarChart";
 import { EmptyState, TableWrap, Td, Th } from "@/components/ui/Table";
 import {
-  currentMonthKey,
   demandMonthKey,
   effectiveDivisionScope,
   groupCountBy,
@@ -22,6 +21,7 @@ import {
 } from "@/lib/engine/dashboard";
 import { effectiveDemandCategory, filterByDivDept, isDemandDue } from "@/lib/engine/enrollment";
 import type { Demand, DemandCategory, EmployeeRecord, PkwtReview, VokasiRecord } from "@/lib/types";
+import { currentMonthKey } from "@/lib/dates";
 import { CompactDetailList } from "./CompactDetailList";
 
 /** Both PKWT/Vokasi Monitoring cards fold their category's Demand-Supply

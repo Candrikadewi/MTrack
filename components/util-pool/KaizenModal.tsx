@@ -8,16 +8,13 @@ import { ReleaseMappingStep, StepNav, resolvePlanRow } from "@/components/takt/R
 import { getActiveSnapshot } from "@/lib/repo";
 import { createKaizenSupply } from "@/lib/engine/actions";
 import { pushToast } from "@/lib/toast";
+import { todayKey } from "@/lib/dates";
 import { KAIZEN_LABOR_GROUPS, inKaizenLaborGroup, type KaizenLaborGroup, type TaktDownPerson } from "@/lib/types";
 
 const GROUP_DETAIL: Record<KaizenLaborGroup, string> = {
   "A/F": "Labor type A dan F",
   "B/C": "Labor type B1–B4 dan C1–C2",
 };
-
-function todayKey(): string {
-  return new Date().toISOString().slice(0, 10);
-}
 
 /** The one decision that scopes the whole Kaizen form, so it gets a
  * prominent card per option rather than a small toggle. */

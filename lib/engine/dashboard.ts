@@ -444,10 +444,6 @@ export function monthBuckets<T>(
   return { buckets, byMonth };
 }
 
-export function currentMonthKey(): string {
-  return format(new Date(), "yyyy-MM");
-}
-
 export function groupCountBy<T>(items: T[], keyOf: (item: T) => string): { key: string; count: number }[] {
   const map = new Map<string, number>();
   for (const item of items) {

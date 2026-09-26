@@ -21,7 +21,8 @@ import {
 import { pushToast } from "@/lib/toast";
 import type { Demand, DemandCategory, ReplacementStatus, UtilPoolEntry } from "@/lib/types";
 import { RehiredNoreg } from "./RehiredNoreg";
-import { POOL_SOURCES, PKWT_SOURCE_OPTIONS, VOKASI_SOURCE_OPTIONS, todayKey, whoOf } from "./demandHelpers";
+import { todayKey } from "@/lib/dates";
+import { POOL_SOURCES, PKWT_SOURCE_OPTIONS, VOKASI_SOURCE_OPTIONS, whoOf } from "./demandHelpers";
 
 function confirmStepLabel(d: Demand): string {
   if (d.replacement_status === "PKWT New Hire" || d.replacement_status === "Vokasi New Hire") return "Sign kontrak";

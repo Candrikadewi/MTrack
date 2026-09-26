@@ -39,10 +39,7 @@ import { ResetAllModal } from "./_components/ResetAllModal";
 import { ReviewStatus } from "./_components/ReviewStatus";
 import { resolveShop, ShopMappingPanel } from "./_components/ShopMappingPanel";
 import { ValidationSummary } from "./_components/ValidationSummary";
-
-function currentMonthKey(): string {
-  return new Date().toISOString().slice(0, 7);
-}
+import { currentMonthKey } from "@/lib/dates";
 
 /** ZPAR cadence (docs/data-schema.md): 2019–2025 history exists only as
  * March snapshots; from 2026 onward ZPAR arrives every month. Options run
