@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
-import { Breadcrumbs, DASHBOARD_MONITORING_CRUMB } from "@/components/ui/Breadcrumbs";
+import { BackButton } from "@/components/ui/BackButton";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/Table";
@@ -18,18 +18,6 @@ function summarizeComposition(persons: TaktDownPerson[]): string {
     .join(", ");
 }
 
-function BackLink({ name }: { name?: string }) {
-  return (
-    <Breadcrumbs
-      items={[
-        DASHBOARD_MONITORING_CRUMB,
-        { label: "Takt Time Monitoring", href: "/takt" },
-        { label: name ?? "Detail" },
-      ]}
-    />
-  );
-}
-
 export function TaktDownDetailPageClient({ id }: { id: string }) {
   const cases = useStoreList(taktStore);
   const utilPool = useStoreList(utilPoolStore);
@@ -41,7 +29,7 @@ export function TaktDownDetailPageClient({ id }: { id: string }) {
   if (!takt) {
     return (
       <div className="space-y-4">
-        <BackLink />
+        <BackButton fallback="/supply" />
         <EmptyState text="Kasus Takt Down tidak ditemukan." />
       </div>
     );
@@ -75,7 +63,7 @@ export function TaktDownDetailPageClient({ id }: { id: string }) {
 
   return (
     <div className="space-y-6">
-      <BackLink name={`Takt Down — ${takt.plant}`} />
+      <BackButton fallback="/supply" />
       <div>
         <div className="flex items-center gap-2">
           <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100">Takt Down — {takt.plant}</h1>

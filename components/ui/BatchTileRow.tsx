@@ -1,11 +1,20 @@
 "use client";
-import { useId, useState } from "react";
+import { useId, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { AlertCircle, ArrowDown, CheckCircle2, ChevronDown } from "lucide-react";
+import { AlertCircle, ArrowDown, CheckCircle2, ChevronDown, Pencil, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
+import { ConfirmDialog } from "@/components/ui/Modal";
 import { EmptyState } from "@/components/ui/Table";
 
-import type { BatchTileCategory, BatchTone } from "@/lib/engine/batches";
+import type { BatchSummary, BatchTileCategory, BatchTone } from "@/lib/engine/batches";
+
+/** Edit / Hapus on one batch row (a project, a takt case, a Kaizen batch). */
+export interface BatchActions {
+  onEdit?: () => void;
+  onDelete?: () => void;
+  /** What deleting keeps or removes, shown in the confirmation. */
+  deleteNote?: ReactNode;
+}
 
 export type { BatchSummary, BatchTileCategory } from "@/lib/engine/batches";
 
@@ -27,8 +36,11 @@ export function BatchTileRow({
   categories,
   pendingLabel,
   onShowInTable,
+  batchActions,
 }: {
   categories: BatchTileCategory[];
+  /** Edit / Hapus for a batch, when that batch can be changed. */
+  batchActions?: (categoryKey: string, batch: BatchSummary) => BatchActions | null;
   /** What each count means, shown under it ("belum terpenuhi"). */
   pendingLabel?: string;
   /** When given, the expanded panel offers a jump that filters the page's
@@ -100,7 +112,7 @@ export function BatchTileRow({
           id={panelId}
           className="animate-reveal space-y-2 rounded-2xl border border-slate-200 bg-slate-50/60 p-3 dark:border-slate-800 dark:bg-slate-900/40"
         >
-          <BatchBreakdown category={expanded} />
+          <BatchBreakdown category={expanded} batchActions={batchActions} />
           {onShowInTable && expanded.count > 0 && (
             <div className="flex justify-end">
               <button
@@ -137,8 +149,15 @@ function PendingNote({ count, total, pendingLabel }: { count: number; total: num
   );
 }
 
-function BatchBreakdown({ category }: { category: BatchTileCategory }) {
+function BatchBreakdown({
+  category,
+  batchActions,
+}: {
+  category: BatchTileCategory;
+  batchActions?: (categoryKey: string, batch: BatchSummary) => BatchActions | null;
+}) {
   const [showAll, setShowAll] = useState(false);
+  const [confirming, setConfirming] = useState<{ batch: BatchSummary; actions: BatchActions } | null>(null);
   if (category.batches.length === 0) {
     return <EmptyState text={`Tidak ada batch untuk ${category.label}.`} />;
   }
@@ -150,20 +169,48 @@ function BatchBreakdown({ category }: { category: BatchTileCategory }) {
       {visible.map((b) => (
         <div
           key={b.id}
-          className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-800 dark:bg-slate-900"
+          className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-800 dark:bg-slate-900"
         >
-          <div>
+          <div className="min-w-0">
             <div className="font-medium text-slate-700 dark:text-slate-200">{b.label}</div>
             {b.meta && <div className="text-xs text-slate-500 dark:text-slate-400">{b.meta}</div>}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {(() => {
+              const actions = batchActions?.(category.key, b);
+              if (!actions) return null;
+              return (
+                <>
+                  {actions.onEdit && (
+                    <button
+                      type="button"
+                      onClick={actions.onEdit}
+                      aria-label={`Edit ${b.label}`}
+                      className="flex min-h-8 items-center gap-1 rounded-lg border border-slate-200 px-2 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                    >
+                      <Pencil size={12} aria-hidden /> Edit
+                    </button>
+                  )}
+                  {actions.onDelete && (
+                    <button
+                      type="button"
+                      onClick={() => setConfirming({ batch: b, actions })}
+                      aria-label={`Hapus ${b.label}`}
+                      className="flex min-h-8 items-center gap-1 rounded-lg border border-slate-200 px-2 text-xs font-medium text-slate-600 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500 dark:border-slate-700 dark:text-slate-300 dark:hover:border-red-900 dark:hover:bg-red-950 dark:hover:text-red-300"
+                    >
+                      <Trash2 size={12} aria-hidden /> Hapus
+                    </button>
+                  )}
+                </>
+              );
+            })()}
             {b.href && (
               <Link
                 href={b.href}
-                aria-label={`Kelola ${b.label}`}
+                aria-label={`Lihat ${b.label}`}
                 className="text-xs font-medium text-blue-700 hover:underline dark:text-blue-400"
               >
-                Kelola →
+                Lihat →
               </Link>
             )}
             {b.total !== undefined && b.count > 0 && (
@@ -193,6 +240,19 @@ function BatchBreakdown({ category }: { category: BatchTileCategory }) {
           + {hiddenCount} batch lainnya
         </button>
       )}
+      <ConfirmDialog
+        open={confirming !== null}
+        title={`Hapus ${confirming?.batch.label ?? ""}?`}
+        confirmLabel="Hapus"
+        tone="danger"
+        onCancel={() => setConfirming(null)}
+        onConfirm={() => {
+          confirming?.actions.onDelete?.();
+          setConfirming(null);
+        }}
+      >
+        {confirming?.actions.deleteNote ?? "Data ini akan dihapus."}
+      </ConfirmDialog>
     </div>
   );
 }
