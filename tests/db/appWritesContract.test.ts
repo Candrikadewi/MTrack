@@ -23,15 +23,15 @@ beforeAll(async () => {
   db = await createTestDatabase();
 }, 60000);
 
-function insertedRows(): { table: string; row: Record<string, unknown> }[] {
-  return calls
-    .filter((c) => c.op === "insert" && c.table)
-    .flatMap((c) =>
-      (Array.isArray(c.payload) ? c.payload : [c.payload]).map((row) => ({
-        table: c.table!,
-        row: row as Record<string, unknown>,
-      }))
-    );
+/** Everything the app sent, as apply_changes ops, in order: direct inserts
+ * plus the ops of each transaction (which already are apply_changes ops). */
+function sentChanges(): { op: string; table: string }[] {
+  return calls.flatMap((c) => {
+    if (c.op === "rpc:apply_changes") return (c.payload as { ops: { op: string; table: string }[] }).ops;
+    if (c.op !== "insert" || !c.table) return [];
+    const rows = Array.isArray(c.payload) ? c.payload : [c.payload];
+    return rows.map((row) => ({ op: "insert", table: c.table!, row }));
+  });
 }
 
 describe("what the app writes, the database accepts", () => {
@@ -97,17 +97,17 @@ describe("what the app writes, the database accepts", () => {
       ],
     });
 
-    const rows = insertedRows();
-    const tables = new Set(rows.map((r) => r.table));
+    const changes = sentChanges();
+    const tables = new Set(changes.filter((c) => c.op === "insert").map((c) => c.table));
     for (const t of ["zpar_snapshots", "vokasi_records", "pkwt_reviews", "demands", "projects", "takt_cases", "util_pool"]) {
       expect(tables, `no ${t} insert was exercised`).toContain(t);
     }
 
+    expect(
+      calls.some((c) => c.op === "rpc:apply_changes"),
+      "multi-row actions go through apply_changes"
+    ).toBe(true);
     await actAs(db, "admin");
-    await expect(
-      db.query("select apply_changes($1::jsonb)", [
-        JSON.stringify(rows.map((r) => ({ op: "insert", table: r.table, row: r.row }))),
-      ])
-    ).resolves.toBeDefined();
+    await expect(db.query("select apply_changes($1::jsonb)", [JSON.stringify(changes)])).resolves.toBeDefined();
   }, 60000);
 });

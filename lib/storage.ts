@@ -105,6 +105,72 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+// ---------------------------------------------------------------------------
+// Transactions: several writes saved together, or not at all
+// ---------------------------------------------------------------------------
+
+/** One write, in the shape the apply_changes database function takes. */
+type Change =
+  | { op: "insert" | "upsert"; table: string; row: object }
+  | { op: "update"; table: string; id: string; patch: object }
+  | { op: "delete"; table: string; id: string };
+
+interface QueuedChange {
+  change: Change;
+  /** Saves just this write, the way it's done outside a transaction. */
+  sendAlone: () => Promise<string | null>;
+  rollback: () => void;
+}
+
+let queued: QueuedChange[] | null = null;
+
+/** Runs `fn` — an action that writes to one or more stores — so that its
+ * writes are saved as one database transaction (apply_changes, see
+ * supabase/migration_15.sql): the screen updates straight away as usual,
+ * and if the database refuses any of the writes, all of them are rolled
+ * back. A transaction inside another simply joins it. */
+export function transaction<R>(fn: () => R): R {
+  if (queued) return fn();
+  queued = [];
+  let result: R;
+  try {
+    result = fn();
+  } catch (err) {
+    const changes = queued;
+    queued = null;
+    for (const c of [...changes].reverse()) c.rollback();
+    notify();
+    throw err;
+  }
+  const changes = queued;
+  queued = null;
+  if (changes.length === 1) void changes[0].sendAlone();
+  else if (changes.length > 1) void commit(changes);
+  return result;
+}
+
+/** apply_changes doesn't exist until migration_15 has been run. */
+function isMissingApplyChanges(message: string): boolean {
+  return /apply_changes/.test(message) && /could not find|does not exist/i.test(message);
+}
+
+async function commit(changes: QueuedChange[]): Promise<void> {
+  const error = await Promise.resolve(createClient().rpc("apply_changes", { ops: changes.map((c) => c.change) })).then(
+    (res: { error: { message: string } | null }) => res.error?.message ?? null,
+    (err: unknown) => errorMessage(err)
+  );
+  if (!error) return;
+  if (isMissingApplyChanges(error)) {
+    // Database not migrated yet: save them one by one, as before.
+    for (const c of changes) void c.sendAlone();
+    return;
+  }
+  console.error("apply_changes failed:", error);
+  for (const c of [...changes].reverse()) c.rollback();
+  notify();
+  reportWriteFailure(changes[0].change.table, error);
+}
+
 export interface Store<T extends { id: string }> {
   list(): T[];
   get(id: string): T | undefined;
@@ -231,6 +297,13 @@ export function createStore<T extends { id: string }>(table: string): Store<T> {
       });
   }
 
+  /** Sends one write now, or queues it when inside a transaction. */
+  function write(label: string, change: Change, send: () => PromiseLike<WriteResult>, rollback: () => void) {
+    const sendAlone = () => persist(label, send(), rollback);
+    if (queued) queued.push({ change, sendAlone, rollback });
+    else void sendAlone();
+  }
+
   function dropFromCache(ids: Set<string>) {
     cache = cache.filter((r) => !ids.has(r.id));
   }
@@ -261,13 +334,29 @@ export function createStore<T extends { id: string }>(table: string): Store<T> {
     insert(item) {
       cache = [...cache, item];
       notify();
-      void persist("insert into", client().from(table).insert(toRow(item)), () => dropFromCache(new Set([item.id])));
+      const row = toRow(item);
+      write(
+        "insert into",
+        { op: "insert", table, row },
+        () => client().from(table).insert(row),
+        () => dropFromCache(new Set([item.id]))
+      );
       return item;
     },
     insertMany(items) {
       cache = [...cache, ...items];
       notify();
-      if (items.length > 0) {
+      if (queued) {
+        for (const item of items) {
+          const row = toRow(item);
+          write(
+            "insert into",
+            { op: "insert", table, row },
+            () => client().from(table).insert(row),
+            () => dropFromCache(new Set([item.id]))
+          );
+        }
+      } else if (items.length > 0) {
         const ids = new Set(items.map((i) => i.id));
         void persist("insertMany into", client().from(table).insert(items.map(toRow)), () => dropFromCache(ids));
       }
@@ -293,7 +382,8 @@ export function createStore<T extends { id: string }>(table: string): Store<T> {
           return restored;
         });
       };
-      void persist("update", client().from(table).update(toRow(patch)).eq("id", id), rollback);
+      const row = toRow(patch);
+      write("update", { op: "update", table, id, patch: row }, () => client().from(table).update(row).eq("id", id), rollback);
       return updated;
     },
     patchLocal(id, patch) {
@@ -312,7 +402,8 @@ export function createStore<T extends { id: string }>(table: string): Store<T> {
         if (!cache.some((r) => r === item)) return;
         cache = previous ? cache.map((r) => (r === item ? previous : r)) : cache.filter((r) => r !== item);
       };
-      void persist("upsert into", client().from(table).upsert(toRow(item)), rollback);
+      const row = toRow(item);
+      write("upsert into", { op: "upsert", table, row }, () => client().from(table).upsert(row), rollback);
       return item;
     },
     remove(id) {
@@ -326,7 +417,7 @@ export function createStore<T extends { id: string }>(table: string): Store<T> {
         if (!removed || cache.some((r) => r.id === id)) return;
         cache = [...cache.slice(0, idx), removed, ...cache.slice(idx)];
       };
-      void persist("delete from", client().from(table).delete().eq("id", id), rollback);
+      write("delete from", { op: "delete", table, id }, () => client().from(table).delete().eq("id", id), rollback);
     },
   };
 }
