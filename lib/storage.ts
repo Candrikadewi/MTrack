@@ -1,9 +1,8 @@
 // Supabase-backed data access layer with an in-memory cache, so every store
-// still reads synchronously (list/get) the way the rest of the app expects —
-// see MTRACK_SPEC.md §13, which calls for exactly this: a generic data layer
-// that can move to Supabase "tanpa mengubah logic UI". Writes update the
-// cache immediately (optimistic) and persist to Supabase in the background;
-// a realtime subscription keeps every open tab/user in sync.
+// still reads synchronously (list/get) the way the rest of the app expects.
+// Writes update the cache immediately (optimistic) and persist to Supabase
+// in the background, rolling back if the database refuses them; a realtime
+// subscription keeps every open tab/user in sync.
 //
 // Network/realtime setup is deliberately lazy (triggered by Store.init(),
 // called from useStoreList's effect) rather than at module load — this file

@@ -1,5 +1,5 @@
-// Aggregation helpers for the Dashboard — pure functions over the raw
-// stores, read-only per MTRACK_SPEC.md §5 / §11.
+// Aggregation helpers for the Dashboard — pure, read-only functions over
+// the raw stores.
 import { addMonths, addYears, differenceInYears, endOfMonth, endOfYear, format, parseISO, startOfMonth, subMonths } from "date-fns";
 import { demandVisibleDate, fulfillmentDeadline, reviewFillDeadline, reviewReminderDate, sisaHari } from "./compute";
 import { demandTargetDate, effectiveDemandCategory } from "./enrollment";
@@ -586,7 +586,7 @@ export function demandSupplyRows(demands: Demand[], category: DemandCategory): D
 // Action Needed (Dashboard) — one row per (stage, category), each listing
 // every month-batch that's currently visible and still has a gap (done <
 // total), so a backlog spanning several months never gets hidden behind a
-// single "most urgent" pick. See MTRACK_SPEC.md §12 lead-time chain.
+// single "most urgent" pick. Lead-time chain: PRODUCT.md → Operating Context.
 // ---------------------------------------------------------------------------
 
 export type ActionKind = "review" | "candidate" | "shop_confirm";
