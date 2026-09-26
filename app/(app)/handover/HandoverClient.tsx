@@ -30,8 +30,7 @@ export function HandoverClient() {
   }
 
   function finalize(id: string) {
-    if (!confirm("Finalize form ini? Status akan permanen menjadi Completed dan tidak bisa dikembalikan ke Draft."))
-      return;
+    if (!confirm("Finalize form ini? Status akan permanen menjadi Completed dan tidak bisa dikembalikan ke Draft.")) return;
     finalizeHandoverForm(id);
   }
 
@@ -40,7 +39,13 @@ export function HandoverClient() {
   // year of monthly forms across several departments is one long flat scroll.
   const [selDepts, setSelDepts] = useSessionState<string[]>("handover.list.depts", []);
   const [selPeriod, setSelPeriod] = useSessionState<string>("handover.list.period", "");
-  const periodOptions = useMemo(() => Array.from(new Set(forms.map((f) => f.period))).sort().reverse(), [forms]);
+  const periodOptions = useMemo(
+    () =>
+      Array.from(new Set(forms.map((f) => f.period)))
+        .sort()
+        .reverse(),
+    [forms]
+  );
   const filteredForms = forms.filter(
     (f) => (selDepts.length === 0 || selDepts.includes(f.dept)) && (selPeriod === "" || f.period === selPeriod)
   );
@@ -100,54 +105,54 @@ export function HandoverClient() {
             <EmptyState text="Tidak ada Handover Form sesuai filter." />
           ) : (
             filteredForms.map((f) => (
-            <Card
-              key={f.id}
-              title={`${f.dept}: ${f.period}`}
-              action={
-                <div className="flex items-center gap-2">
-                  <Badge tone={statusTone(f.status)}>{f.status}</Badge>
-                  {f.status === "Draft" && (
-                    <div className="text-right">
-                      <Button size="sm" variant="primary" onClick={() => finalize(f.id)}>
-                        Finalize
-                      </Button>
-                      <p className="mt-0.5 text-[11px] text-slate-400">Permanen, tidak bisa dibatalkan</p>
-                    </div>
-                  )}
-                </div>
-              }
-            >
-              {f.rows.length === 0 ? (
-                <EmptyState text="Tidak ada movement pada dept/periode ini." />
-              ) : (
-                <TableWrap>
-                  <thead>
-                    <tr>
-                      <Th>No</Th>
-                      <Th>Tipe Movement</Th>
-                      <Th>Outgoing</Th>
-                      <Th>Incoming</Th>
-                      <Th>Labor Type</Th>
-                      <Th>Alasan</Th>
-                      <Th>Tanggal</Th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {f.rows.map((r) => (
-                      <tr key={r.id}>
-                        <Td>{r.no}</Td>
-                        <Td>{r.tipe_movement}</Td>
-                        <Td>{r.outgoing}</Td>
-                        <Td>{r.incoming || "-"}</Td>
-                        <Td>{r.labor_type}</Td>
-                        <Td>{r.alasan}</Td>
-                        <Td>{fmtDate(r.tanggal)}</Td>
+              <Card
+                key={f.id}
+                title={`${f.dept}: ${f.period}`}
+                action={
+                  <div className="flex items-center gap-2">
+                    <Badge tone={statusTone(f.status)}>{f.status}</Badge>
+                    {f.status === "Draft" && (
+                      <div className="text-right">
+                        <Button size="sm" variant="primary" onClick={() => finalize(f.id)}>
+                          Finalize
+                        </Button>
+                        <p className="mt-0.5 text-[11px] text-slate-400">Permanen, tidak bisa dibatalkan</p>
+                      </div>
+                    )}
+                  </div>
+                }
+              >
+                {f.rows.length === 0 ? (
+                  <EmptyState text="Tidak ada movement pada dept/periode ini." />
+                ) : (
+                  <TableWrap>
+                    <thead>
+                      <tr>
+                        <Th>No</Th>
+                        <Th>Tipe Movement</Th>
+                        <Th>Outgoing</Th>
+                        <Th>Incoming</Th>
+                        <Th>Labor Type</Th>
+                        <Th>Alasan</Th>
+                        <Th>Tanggal</Th>
                       </tr>
-                    ))}
-                  </tbody>
-                </TableWrap>
-              )}
-            </Card>
+                    </thead>
+                    <tbody>
+                      {f.rows.map((r) => (
+                        <tr key={r.id}>
+                          <Td>{r.no}</Td>
+                          <Td>{r.tipe_movement}</Td>
+                          <Td>{r.outgoing}</Td>
+                          <Td>{r.incoming || "-"}</Td>
+                          <Td>{r.labor_type}</Td>
+                          <Td>{r.alasan}</Td>
+                          <Td>{fmtDate(r.tanggal)}</Td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </TableWrap>
+                )}
+              </Card>
             ))
           )}
         </div>

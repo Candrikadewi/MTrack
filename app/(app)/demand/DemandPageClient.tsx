@@ -177,7 +177,10 @@ export function DemandPageClient() {
     () => tabDemands.filter((d) => isDemandDue(d) && (showDone || !isDemandDone(d))),
     [tabDemands, showDone]
   );
-  const jenisOptions = useMemo(() => Array.from(new Set(monthDemands.map((d) => JENIS_LABEL[d.origin_type]))).sort(), [monthDemands]);
+  const jenisOptions = useMemo(
+    () => Array.from(new Set(monthDemands.map((d) => JENIS_LABEL[d.origin_type]))).sort(),
+    [monthDemands]
+  );
   const divOptions = useMemo(() => divisionsOfRows(monthDemands), [monthDemands]);
   const deptOptions = useMemo(() => deptsOfRows(monthDemands, divs), [monthDemands, divs]);
   const statusMpOptions = Object.values(EMPLOYMENT_STATUS_LABEL);
@@ -200,7 +203,8 @@ export function DemandPageClient() {
   const totalCount = monthDemands.length;
   const shopReceivedCount = monthDemands.filter((d) => demandGranularStatus(d).startsWith("Fulfilled")).length;
   const awaitingCount = monthDemands.filter(awaitingVerification).length;
-  const activeFilterCount = jenis.length + divs.length + depts.length + statusMp.length + statusFilter.length + (onlyAwaiting ? 1 : 0);
+  const activeFilterCount =
+    jenis.length + divs.length + depts.length + statusMp.length + statusFilter.length + (onlyAwaiting ? 1 : 0);
 
   function resetDetailFilters() {
     setJenis([]);
@@ -214,7 +218,11 @@ export function DemandPageClient() {
   function showCategoryInTable(key: string) {
     const labels = TILE_JENIS[key] ?? [];
     const open = demands.filter(
-      (d) => d.status !== "Fulfilled" && d.replacement_status !== "No Replace" && isDemandDue(d) && labels.includes(JENIS_LABEL[d.origin_type])
+      (d) =>
+        d.status !== "Fulfilled" &&
+        d.replacement_status !== "No Replace" &&
+        isDemandDue(d) &&
+        labels.includes(JENIS_LABEL[d.origin_type])
     );
     const inTab = (c: DemandCategory) => open.filter((d) => effectiveDemandCategory(d) === c).length;
     const nextTab: DemandCategory =
@@ -306,7 +314,12 @@ export function DemandPageClient() {
         </p>
       </div>
 
-      <SectionHeading n={1} title="Ringkasan per Batch" subtitle="Jumlah MP yang belum terpenuhi (belum diverifikasi) dari total demand sampai bulan ini. Vokasi dihitung mulai bulan berakhirnya. Klik tile untuk rincian." divider={false} />
+      <SectionHeading
+        n={1}
+        title="Ringkasan per Batch"
+        subtitle="Jumlah MP yang belum terpenuhi (belum diverifikasi) dari total demand sampai bulan ini. Vokasi dihitung mulai bulan berakhirnya. Klik tile untuk rincian."
+        divider={false}
+      />
       <BatchTileRow
         categories={batchCategories}
         pendingLabel="belum terpenuhi"
@@ -321,7 +334,8 @@ export function DemandPageClient() {
                       deleteProject(batch.id);
                       pushToast(`Project ${batch.label} dihapus.`, "success");
                     },
-                    deleteNote: "Demand yang belum berjalan ikut terhapus. Demand yang sudah punya kandidat atau pemenuhan tetap tersimpan.",
+                    deleteNote:
+                      "Demand yang belum berjalan ikut terhapus. Demand yang sudah punya kandidat atau pemenuhan tetap tersimpan.",
                   };
                 }
                 if (key === "taktup" && taktCases.some((t) => t.id === batch.id)) {
@@ -331,7 +345,8 @@ export function DemandPageClient() {
                       deleteTaktUp(batch.id);
                       pushToast("Takt Up dihapus.", "success");
                     },
-                    deleteNote: "Demand yang belum berjalan ikut terhapus. Demand yang sudah punya kandidat atau pemenuhan tetap tersimpan.",
+                    deleteNote:
+                      "Demand yang belum berjalan ikut terhapus. Demand yang sudah punya kandidat atau pemenuhan tetap tersimpan.",
                   };
                 }
                 return null;
@@ -421,7 +436,11 @@ export function DemandPageClient() {
                   variant="primary"
                   className="shrink-0"
                   onClick={() =>
-                    inputTab === "project" ? setProjectModalOpen(true) : inputTab === "taktup" ? setTaktUpOpen(true) : setManualOpen(true)
+                    inputTab === "project"
+                      ? setProjectModalOpen(true)
+                      : inputTab === "taktup"
+                        ? setTaktUpOpen(true)
+                        : setManualOpen(true)
                   }
                 >
                   {inputTab === "project" ? "+ Project Baru" : inputTab === "taktup" ? "+ Takt Up" : "+ Manual Demand"}
@@ -433,10 +452,18 @@ export function DemandPageClient() {
           {taktUpOpen && <TaktUpModal open onClose={() => setTaktUpOpen(false)} />}
           {manualOpen && <ManualDemandModal open onClose={() => setManualOpen(false)} />}
           {editingProjectId && projects.find((p) => p.id === editingProjectId) && (
-            <NewProjectModal open project={projects.find((p) => p.id === editingProjectId)} onClose={() => setEditingProjectId(null)} />
+            <NewProjectModal
+              open
+              project={projects.find((p) => p.id === editingProjectId)}
+              onClose={() => setEditingProjectId(null)}
+            />
           )}
           {editingTaktUpId && taktCases.find((t) => t.id === editingTaktUpId) && (
-            <TaktUpModal open editing={taktCases.find((t) => t.id === editingTaktUpId)} onClose={() => setEditingTaktUpId(null)} />
+            <TaktUpModal
+              open
+              editing={taktCases.find((t) => t.id === editingTaktUpId)}
+              onClose={() => setEditingTaktUpId(null)}
+            />
           )}
           <ConfirmDialog
             open={deletingManual !== null}
@@ -455,12 +482,21 @@ export function DemandPageClient() {
             Demand ini belum punya kandidat, jadi bisa dihapus tanpa mengubah riwayat.
           </ConfirmDialog>
           {editingManualId && demands.find((d) => d.id === editingManualId) && (
-            <ManualDemandModal open editing={demands.find((d) => d.id === editingManualId)} onClose={() => setEditingManualId(null)} />
+            <ManualDemandModal
+              open
+              editing={demands.find((d) => d.id === editingManualId)}
+              onClose={() => setEditingManualId(null)}
+            />
           )}
         </div>
       )}
 
-      <section ref={detailRef} tabIndex={-1} aria-labelledby="detail-demand-heading" className="scroll-mt-4 space-y-4 outline-none">
+      <section
+        ref={detailRef}
+        tabIndex={-1}
+        aria-labelledby="detail-demand-heading"
+        className="scroll-mt-4 space-y-4 outline-none"
+      >
         <SectionHeading
           n={sectionNo.detail}
           title={<span id="detail-demand-heading">Detail dan Mapping Demand</span>}
@@ -482,7 +518,11 @@ export function DemandPageClient() {
           scopeLabel={divs.length || depts.length ? "Sesuai filter" : "Vehicle Plant · Labor A"}
           scenarios={[
             { label: "Sekarang", counts: scenarioBase },
-            { label: "Proyeksi", counts: projectionCounts, hint: `Mengikuti ${decidedCount} demand yang sudah punya Source dipilih` },
+            {
+              label: "Proyeksi",
+              counts: projectionCounts,
+              hint: `Mengikuti ${decidedCount} demand yang sudah punya Source dipilih`,
+            },
           ]}
         />
 
@@ -528,11 +568,13 @@ export function DemandPageClient() {
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3 text-sm text-slate-600 dark:text-slate-400">
             <p>
               <span className="font-semibold text-slate-800 tabular-nums dark:text-slate-100">{shopReceivedCount}</span> dari{" "}
-              <span className="font-semibold text-slate-800 tabular-nums dark:text-slate-100">{totalCount}</span> demand sudah diterima shop
+              <span className="font-semibold text-slate-800 tabular-nums dark:text-slate-100">{totalCount}</span> demand sudah
+              diterima shop
               {awaitingCount > 0 && (
                 <>
                   {" · "}
-                  <span className="font-semibold text-amber-700 tabular-nums dark:text-amber-300">{awaitingCount}</span> menunggu verifikasi
+                  <span className="font-semibold text-amber-700 tabular-nums dark:text-amber-300">{awaitingCount}</span> menunggu
+                  verifikasi
                 </>
               )}
               .
@@ -568,7 +610,9 @@ export function DemandPageClient() {
             </div>
           ) : filteredDemands.length === 0 ? (
             monthDemands.length === 0 ? (
-              <EmptyState text={`Tidak ada demand ${tab === "PKWT" ? "Kontrak" : "Vokasi"} yang ${showDone ? "tercatat" : "masih aktif"}.`} />
+              <EmptyState
+                text={`Tidak ada demand ${tab === "PKWT" ? "Kontrak" : "Vokasi"} yang ${showDone ? "tercatat" : "masih aktif"}.`}
+              />
             ) : (
               <FilteredEmptyState onReset={resetDetailFilters} />
             )
@@ -595,8 +639,16 @@ export function DemandPageClient() {
                     canEditFulfillDate={canEditFulfillDate}
                     canVerify={canVerify}
                     poolEntries={poolEntries}
-                    onEdit={isAdmin && MANUAL_ORIGINS.includes(d.origin_type) && isEditableDemand(d) ? () => setEditingManualId(d.id) : undefined}
-                    onDelete={isAdmin && MANUAL_ORIGINS.includes(d.origin_type) && isEditableDemand(d) ? () => setDeletingManual(d) : undefined}
+                    onEdit={
+                      isAdmin && MANUAL_ORIGINS.includes(d.origin_type) && isEditableDemand(d)
+                        ? () => setEditingManualId(d.id)
+                        : undefined
+                    }
+                    onDelete={
+                      isAdmin && MANUAL_ORIGINS.includes(d.origin_type) && isEditableDemand(d)
+                        ? () => setDeletingManual(d)
+                        : undefined
+                    }
                   />
                 ))}
               </tbody>

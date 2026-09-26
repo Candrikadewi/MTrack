@@ -19,7 +19,7 @@ function toNeedRow(row: CompositionRow): Omit<ProjectMpNeedRow, "id"> {
     mp_role: row.mp_role ?? "Project",
     qty: row.qty,
     fulfill_date: row.date,
-    release_date: row.noRelease ? "" : row.releaseDate ?? "",
+    release_date: row.noRelease ? "" : (row.releaseDate ?? ""),
     no_release: Boolean(row.noRelease),
   };
 }
@@ -144,9 +144,9 @@ export function NewProjectModal({ open, onClose, project }: { open: boolean; onC
           <div>
             <h4 className="mb-1 text-xs font-semibold text-slate-500">Komposisi MP</h4>
             <p className="mb-2 text-xs text-slate-500 dark:text-slate-400">
-              Tiap baris punya tanggal release sendiri. Pada tanggal itu, MP yang kontraknya masih ada masuk Supply Pool sebagai MP
-              Excess, dan kontrak yang habis setelahnya tidak diganti. Centang <b className="font-semibold">No Release</b> bila MP
-              tetap di shop: kebutuhannya terus dipenuhi seperti regular enrollment. MP Setting otomatis No Release.
+              Tiap baris punya tanggal release sendiri. Pada tanggal itu, MP yang kontraknya masih ada masuk Supply Pool sebagai
+              MP Excess, dan kontrak yang habis setelahnya tidak diganti. Centang <b className="font-semibold">No Release</b> bila
+              MP tetap di shop: kebutuhannya terus dipenuhi seperti regular enrollment. MP Setting otomatis No Release.
             </p>
             <CompositionRowsEditor
               rows={rows}
@@ -167,7 +167,10 @@ export function NewProjectModal({ open, onClose, project }: { open: boolean; onC
           </div>
 
           {showErrors && (headerMissing || validRows.length === 0 || problems.length > 0) && (
-            <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-800 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200">
+            <div
+              role="alert"
+              className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-800 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200"
+            >
               <ul className="list-disc space-y-0.5 pl-4">
                 {headerMissing && <li>Isi Nama Projek dan Tanggal SOP.</li>}
                 {validRows.length === 0 && <li>Tambahkan minimal satu baris MP (divisi, department, qty).</li>}
@@ -229,7 +232,8 @@ export function NewProjectModal({ open, onClose, project }: { open: boolean; onC
           </TableWrap>
           <p className="text-xs text-slate-500">
             Total kebutuhan awal: {validRows.reduce((sum, r) => sum + r.qty, 0)} orang. Demand awal langsung dibuat begitu
-            di-register; demand pengganti muncul sendiri saat kontrak pengisinya habis sebelum tanggal release (berlabel nama projek).
+            di-register; demand pengganti muncul sendiri saat kontrak pengisinya habis sebelum tanggal release (berlabel nama
+            projek).
           </p>
 
           <div className="flex justify-end gap-2 pt-2">

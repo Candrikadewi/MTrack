@@ -50,7 +50,25 @@ describe("parseZparFile", () => {
 
   it("reads real date cells from an .xlsx file", async () => {
     const header = ZPAR_HEADER.split(",");
-    const row = ["09.2026", "5000001", "Andi", "Permanen", "Active", "A", new Date(2015, 2, 9), new Date(1990, 6, 4), "Male", "Karawang 2", "Prod", "Assy", "Assy 1", "S1", "L1", "Team Member", ""];
+    const row = [
+      "09.2026",
+      "5000001",
+      "Andi",
+      "Permanen",
+      "Active",
+      "A",
+      new Date(2015, 2, 9),
+      new Date(1990, 6, 4),
+      "Male",
+      "Karawang 2",
+      "Prod",
+      "Assy",
+      "Assy 1",
+      "S1",
+      "L1",
+      "Team Member",
+      "",
+    ];
     const result = await parseZparFile(xlsxFile([header, row]));
     expect(result.employees[0]).toMatchObject({ tgl_masuk: "2015-03-09", tgl_lahir: "1990-07-04", plant: "Vehicle Plant" });
   });
@@ -77,7 +95,14 @@ describe("parseVokasiFile", () => {
     expect(result.format).toBe("starting");
     expect(result.skipBreakdown.reasons).toEqual({ "Lokasi di luar Karawang #1/#2": 1 });
     expect(result.records).toHaveLength(2);
-    expect(result.records[0]).toMatchObject({ noreg: "TM001", batch: "110", gender: "P", tgl_masuk: "2025-05-01", tgl_ended: "2025-10-31", labor_type: "A" });
+    expect(result.records[0]).toMatchObject({
+      noreg: "TM001",
+      batch: "110",
+      gender: "P",
+      tgl_masuk: "2025-05-01",
+      tgl_ended: "2025-10-31",
+      labor_type: "A",
+    });
     // A blank Tgl Masuk takes the batch's date, and is flagged for the uploader.
     expect(result.records[1]).toMatchObject({ gender: "L", tgl_masuk: "2025-05-01", lokasi: "KARAWANG #2" });
     expect(result.tglBlank).toEqual([false, true]);

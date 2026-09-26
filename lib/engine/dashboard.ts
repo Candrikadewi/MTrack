@@ -1,10 +1,28 @@
 // Aggregation helpers for the Dashboard — pure, read-only functions over
 // the raw stores.
-import { addMonths, addYears, differenceInYears, endOfMonth, endOfYear, format, parseISO, startOfMonth, subMonths } from "date-fns";
+import {
+  addMonths,
+  addYears,
+  differenceInYears,
+  endOfMonth,
+  endOfYear,
+  format,
+  parseISO,
+  startOfMonth,
+  subMonths,
+} from "date-fns";
 import { demandVisibleDate, fulfillmentDeadline, reviewFillDeadline, reviewReminderDate, sisaHari } from "./compute";
 import { demandTargetDate, effectiveDemandCategory } from "./enrollment";
 import { POSISI_STRUKTURAL_GROUPS } from "../types";
-import { isPermanenForRatio, type Demand, type DemandCategory, type DemandOriginType, type EmployeeRecord, type PkwtReview, type VokasiRecord } from "../types";
+import {
+  isPermanenForRatio,
+  type Demand,
+  type DemandCategory,
+  type DemandOriginType,
+  type EmployeeRecord,
+  type PkwtReview,
+  type VokasiRecord,
+} from "../types";
 
 export function directorates(employees: EmployeeRecord[]): string[] {
   return Array.from(new Set(employees.map((e) => e.directorat))).sort();
@@ -353,7 +371,11 @@ export interface LaborTypeMovementDetail {
  * many labor types stays a short, scannable summary rather than an N×N
  * matrix — the full person list for one specific retagging pair is still
  * available via that entry's `people`. */
-export function laborTypeMovementDetail(before: EmployeeRecord[], after: EmployeeRecord[], org?: OrgFilter): LaborTypeMovementDetail {
+export function laborTypeMovementDetail(
+  before: EmployeeRecord[],
+  after: EmployeeRecord[],
+  org?: OrgFilter
+): LaborTypeMovementDetail {
   const scopedBefore = org ? filterEmployees(before, org) : before;
   const scopedAfter = org ? filterEmployees(after, org) : after;
   const beforeByNoreg = new Map(scopedBefore.filter((e) => e.noreg).map((e) => [e.noreg, e]));
@@ -543,8 +565,16 @@ export function fulfillmentRows(demands: Demand[], category: DemandCategory): Fu
   for (const d of demands) {
     if (effectiveDemandCategory(d) !== category) continue;
     const reason = demandOriginLabel(d);
-    const row =
-      byReason.get(reason) ?? { reason, demand: 0, candidate: 0, signed: 0, received: 0, noReplace: 0, done: 0, percent: 0 };
+    const row = byReason.get(reason) ?? {
+      reason,
+      demand: 0,
+      candidate: 0,
+      signed: 0,
+      received: 0,
+      noReplace: 0,
+      done: 0,
+      percent: 0,
+    };
     const stage = fulfillmentStage(d);
     row.demand++;
     if (stage === "noReplace") row.noReplace++;
@@ -632,7 +662,15 @@ export function reviewBatchesNeedingAction(reviews: PkwtReview[]): ActionBatch[]
     const visibleRemaining = group.filter((r) => r.review_result === "" && sisaHari(reviewReminderDate(r.tgl_review)) <= 0);
     if (visibleRemaining.length === 0) continue;
     const dueDate = mostUrgent(visibleRemaining, (r) => reviewFillDeadline(r.tgl_review));
-    batches.push({ month, monthLabel: monthLabelOf(month), done, total, dueDate, daysRemaining: sisaHari(dueDate), href: "/demand" });
+    batches.push({
+      month,
+      monthLabel: monthLabelOf(month),
+      done,
+      total,
+      dueDate,
+      daysRemaining: sisaHari(dueDate),
+      href: "/demand",
+    });
   }
   return batches.sort((a, b) => a.month.localeCompare(b.month));
 }
@@ -661,7 +699,15 @@ export function candidateBatchesNeedingAction(demands: Demand[], category: Deman
     );
     if (visibleRemaining.length === 0) continue;
     const dueDate = mostUrgent(visibleRemaining, (d) => fulfillmentDeadline(demandTargetDate(d), d.fs_status));
-    batches.push({ month, monthLabel: monthLabelOf(month), done, total, dueDate, daysRemaining: sisaHari(dueDate), href: "/demand" });
+    batches.push({
+      month,
+      monthLabel: monthLabelOf(month),
+      done,
+      total,
+      dueDate,
+      daysRemaining: sisaHari(dueDate),
+      href: "/demand",
+    });
   }
   return batches.sort((a, b) => a.month.localeCompare(b.month));
 }
@@ -685,7 +731,15 @@ export function shopConfirmBatchesNeedingAction(demands: Demand[], category: Dem
     if (done >= total) continue;
     const remaining = group.filter((d) => !d.shop_confirmed_date);
     const dueDate = mostUrgent(remaining, (d) => demandTargetDate(d));
-    batches.push({ month, monthLabel: monthLabelOf(month), done, total, dueDate, daysRemaining: sisaHari(dueDate), href: "/demand" });
+    batches.push({
+      month,
+      monthLabel: monthLabelOf(month),
+      done,
+      total,
+      dueDate,
+      daysRemaining: sisaHari(dueDate),
+      href: "/demand",
+    });
   }
   return batches.sort((a, b) => a.month.localeCompare(b.month));
 }
@@ -789,7 +843,14 @@ export function ageMovementForecast(employees: EmployeeRecord[], today: Date = n
       }
     }
     const totalActive = Object.values(buckets).reduce((a, b) => a + b, 0);
-    result.push({ key, asOfDate: format(date, "yyyy-MM-dd"), buckets, totalActive, pensiunKumulatif: retiredNow.size, baruPensiun });
+    result.push({
+      key,
+      asOfDate: format(date, "yyyy-MM-dd"),
+      buckets,
+      totalActive,
+      pensiunKumulatif: retiredNow.size,
+      baruPensiun,
+    });
     prevRetired = retiredNow;
   }
   return result;

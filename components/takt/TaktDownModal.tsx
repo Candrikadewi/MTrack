@@ -58,7 +58,9 @@ export function TaktDownModal({
   const [taktAfter, setTaktAfter] = useState(editing?.takt_after ?? 0);
   const [planRows, setPlanRows] = useState<CompositionRow[]>(() => {
     if (!editing) return [emptyCompositionRow()];
-    const rows = editing.plan_rows?.length ? editing.plan_rows.map(fromPlanRow) : planRowsFromPersons(editing.released_persons ?? []);
+    const rows = editing.plan_rows?.length
+      ? editing.plan_rows.map(fromPlanRow)
+      : planRowsFromPersons(editing.released_persons ?? []);
     return rows.length ? rows : [emptyCompositionRow()];
   });
   const [selected, setSelected] = useState<TaktDownPerson[]>(() => (editing?.released_persons ?? []).map((p) => ({ ...p })));
@@ -122,8 +124,8 @@ export function TaktDownModal({
           <div className="space-y-3">
             <p className="text-xs text-slate-500 dark:text-slate-400">
               Satu perubahan takt time biasanya berdampak ke beberapa shop sekaligus, dengan komposisi status MP
-              (Permanen/Vokasi/Kontrak) yang berbeda-beda per shop. Tentukan rencana per shop dulu di sini, baru pilih
-              orangnya di langkah berikutnya.
+              (Permanen/Vokasi/Kontrak) yang berbeda-beda per shop. Tentukan rencana per shop dulu di sini, baru pilih orangnya di
+              langkah berikutnya.
             </p>
             <h4 className="text-xs font-semibold text-slate-500">Rencana Rilis per Shop</h4>
             <CompositionRowsEditor rows={planRows} onChange={setPlanRows} dateLabel="Tanggal Release" laborTypeFilter="A" />

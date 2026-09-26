@@ -122,7 +122,14 @@ export function CompositionRowsEditor({
   const employees = matchesLabor ? allEmployees.filter((e) => matchesLabor(e.labor_type)) : allEmployees;
   const divOptions = Array.from(new Set(employees.map((e) => e.division).filter(Boolean))).sort();
   const deptOptionsFor = (division: string) =>
-    Array.from(new Set(employees.filter((e) => e.division === division).map((e) => e.dept).filter(Boolean))).sort();
+    Array.from(
+      new Set(
+        employees
+          .filter((e) => e.division === division)
+          .map((e) => e.dept)
+          .filter(Boolean)
+      )
+    ).sort();
 
   function update(id: string, patch: Partial<CompositionRow>) {
     onChange(rows.map((r) => (r.id === id ? { ...r, ...patch } : r)));
@@ -152,9 +159,7 @@ export function CompositionRowsEditor({
           <div className="space-y-2">
             {dg.deptGroups.map((deptG, deptIdx) => (
               <div key={deptG.dept || `dept-${deptIdx}`} className="rounded-lg bg-slate-50 p-2 dark:bg-slate-900/50">
-                {deptG.dept && (
-                  <div className="mb-1.5 text-xs font-medium text-slate-500 dark:text-slate-400">{deptG.dept}</div>
-                )}
+                {deptG.dept && <div className="mb-1.5 text-xs font-medium text-slate-500 dark:text-slate-400">{deptG.dept}</div>}
                 <div className="space-y-1.5">
                   {deptG.rows.map((row) => {
                     const locked = isRowLocked?.(row) ?? false;
@@ -176,7 +181,9 @@ export function CompositionRowsEditor({
                           </Select>
                         </div>
                         <div className="w-36">
-                          <span className="mb-0.5 block text-[10px] font-medium text-slate-500 dark:text-slate-400">Department</span>
+                          <span className="mb-0.5 block text-[10px] font-medium text-slate-500 dark:text-slate-400">
+                            Department
+                          </span>
                           <Select
                             value={row.dept}
                             onChange={(e) => update(row.id, { dept: e.target.value })}
@@ -191,7 +198,9 @@ export function CompositionRowsEditor({
                           </Select>
                         </div>
                         <div className="w-28">
-                          <span className="mb-0.5 block text-[10px] font-medium text-slate-500 dark:text-slate-400">Status MP</span>
+                          <span className="mb-0.5 block text-[10px] font-medium text-slate-500 dark:text-slate-400">
+                            Status MP
+                          </span>
                           <Select
                             value={row.status_mp}
                             disabled={locked}
@@ -205,7 +214,9 @@ export function CompositionRowsEditor({
                         </div>
                         {withRole && (
                           <div className="w-32">
-                            <span className="mb-0.5 block text-[10px] font-medium text-slate-500 dark:text-slate-400">Jenis MP</span>
+                            <span className="mb-0.5 block text-[10px] font-medium text-slate-500 dark:text-slate-400">
+                              Jenis MP
+                            </span>
                             <Select
                               value={row.mp_role === "Proses" ? "Project" : row.mp_role}
                               disabled={locked}
@@ -234,7 +245,9 @@ export function CompositionRowsEditor({
                         </div>
                         {withActivity && (
                           <div className="min-w-[180px] flex-1">
-                            <span className="mb-0.5 block text-[10px] font-medium text-slate-500 dark:text-slate-400">Activity</span>
+                            <span className="mb-0.5 block text-[10px] font-medium text-slate-500 dark:text-slate-400">
+                              Activity
+                            </span>
                             <Input
                               value={row.activity ?? ""}
                               disabled={locked}
@@ -246,7 +259,9 @@ export function CompositionRowsEditor({
                         )}
                         {dateLabel && (
                           <div className="min-w-[150px]">
-                            <span className="mb-0.5 block text-[10px] font-medium text-slate-500 dark:text-slate-400">{dateLabel}</span>
+                            <span className="mb-0.5 block text-[10px] font-medium text-slate-500 dark:text-slate-400">
+                              {dateLabel}
+                            </span>
                             <Input
                               type="date"
                               disabled={locked}
@@ -353,7 +368,9 @@ function ReleaseField({
           No Release
         </label>
       </div>
-      {invalid && <span className="mt-0.5 block text-[10px] text-red-600 dark:text-red-400">Harus setelah tanggal pemenuhan</span>}
+      {invalid && (
+        <span className="mt-0.5 block text-[10px] text-red-600 dark:text-red-400">Harus setelah tanggal pemenuhan</span>
+      )}
     </div>
   );
 }

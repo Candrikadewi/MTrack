@@ -126,11 +126,7 @@ function ProjectCard({
               <Trash2 size={12} /> Hapus
             </button>
           )}
-          {gap <= 0 ? (
-            <Badge tone="green">✅ MP Terpenuhi</Badge>
-          ) : (
-            <Badge tone="amber">⚠️ Perlu {gap} MP lagi</Badge>
-          )}
+          {gap <= 0 ? <Badge tone="green">✅ MP Terpenuhi</Badge> : <Badge tone="amber">⚠️ Perlu {gap} MP lagi</Badge>}
         </div>
       </div>
     </Card>

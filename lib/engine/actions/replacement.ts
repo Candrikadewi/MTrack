@@ -17,11 +17,7 @@ import { syncProjectSeatDemands } from "./projects";
  * `replacementStatus` only applies to the Kontrak (PKWT) tab's "PKWT New
  * Hire / MP Excess / MP Back Up" flow; the Vokasi tab leaves it "".
  */
-export function setDemandReplacementByNoreg(
-  demandId: string,
-  noreg: string,
-  replacementStatus: ReplacementStatus = ""
-): void {
+export function setDemandReplacementByNoreg(demandId: string, noreg: string, replacementStatus: ReplacementStatus = ""): void {
   const demand = demandStore.get(demandId);
   if (!demand) return;
 

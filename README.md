@@ -94,13 +94,14 @@ file lama tidak diubah.
 ## Cek sebelum push
 
 ```
-npm run lint        # kerapian & kesalahan umum (ESLint)
+npm run format      # rapikan format semua file (Prettier) — CI mengecek dengan format:check
+npm run lint        # kesalahan umum (ESLint)
 npm run typecheck   # kesalahan tipe (TypeScript)
 npm test            # test otomatis (Vitest)
 npm run build       # build production
 ```
 
-GitHub Actions menjalankan keempatnya di setiap pull request (`.github/workflows/ci.yml`).
+GitHub Actions menjalankan semuanya (plus `format:check`) di setiap pull request (`.github/workflows/ci.yml`).
 
 ## Test
 

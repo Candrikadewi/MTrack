@@ -10,7 +10,14 @@ import { demand, employee, vokasi } from "../helpers/fixtures";
 // Supply Pool as MP Excess — under the noreg ZPAR knows her by.
 function setup(zparEmployees: EmployeeRecord[]) {
   vokasiStore.insert(vokasi());
-  zparStore.insert({ id: "z1", period: "2026-07", filename: "zpar.csv", upload_date: "2026-07-01", is_active: false, employees: zparEmployees });
+  zparStore.insert({
+    id: "z1",
+    period: "2026-07",
+    filename: "zpar.csv",
+    upload_date: "2026-07-01",
+    is_active: false,
+    employees: zparEmployees,
+  });
   activateSnapshot("z1");
   projectStore.insert({
     id: "p1",
@@ -84,7 +91,11 @@ describe("project release with a rehired Vokasi alumna", () => {
     autoProjectFinishCheck();
 
     expect(linkedZparNoreg("TM001")).toBeUndefined();
-    expect(rehireCandidates(demandStore.get("d1")!).map((c) => c.employee.noreg).sort()).toEqual(["026001", "026077"]);
+    expect(
+      rehireCandidates(demandStore.get("d1")!)
+        .map((c) => c.employee.noreg)
+        .sort()
+    ).toEqual(["026001", "026077"]);
     expect(utilPoolStore.list()[0]).toMatchObject({ noreg: "TM001" });
     expect(utilPoolStore.list()[0].action_note).toMatch(/belum dikonfirmasi/);
 
@@ -96,7 +107,16 @@ describe("project release with a rehired Vokasi alumna", () => {
   });
 
   it("never links someone who only shares the name", () => {
-    setup([employee({ noreg: "0081234", nama: "Luna", gender: "P", dept: "Paint 2", status_kontrak: "Permanen", tgl_masuk: "2012-03-01" })]);
+    setup([
+      employee({
+        noreg: "0081234",
+        nama: "Luna",
+        gender: "P",
+        dept: "Paint 2",
+        status_kontrak: "Permanen",
+        tgl_masuk: "2012-03-01",
+      }),
+    ]);
 
     autoProjectFinishCheck();
 

@@ -58,10 +58,12 @@ export function reconcileNeedRows(
     const locked = lockedDemandCount(ids);
     const next = nextRows.find((r) => r.id === prev.id);
     if (!next) {
-      if (locked > 0) return { ok: false, error: `Baris ${describe(prev)} sudah punya ${locked} kandidat/pemenuhan, tidak bisa dihapus.` };
+      if (locked > 0)
+        return { ok: false, error: `Baris ${describe(prev)} sudah punya ${locked} kandidat/pemenuhan, tidak bisa dihapus.` };
       continue;
     }
-    if (next.qty < locked) return { ok: false, error: `Qty ${describe(prev)} minimal ${locked} (sudah punya kandidat/pemenuhan).` };
+    if (next.qty < locked)
+      return { ok: false, error: `Qty ${describe(prev)} minimal ${locked} (sudah punya kandidat/pemenuhan).` };
     const reshaped = next.division !== prev.division || next.dept !== prev.dept || next.status_mp !== prev.status_mp;
     if (reshaped && locked > 0) {
       return { ok: false, error: `Divisi/Dept/Status ${describe(prev)} tidak bisa diubah karena sudah ada kandidat/pemenuhan.` };

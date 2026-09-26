@@ -62,7 +62,11 @@ function Step({ state, label, children }: { state: StepState; label: string; chi
               : "border border-slate-300 dark:border-slate-600"
         }`}
       >
-        {state === "done" ? <Check size={11} strokeWidth={3} /> : state === "current" ? <Circle size={5} className="fill-blue-600 text-blue-600 dark:fill-blue-400 dark:text-blue-400" /> : null}
+        {state === "done" ? (
+          <Check size={11} strokeWidth={3} />
+        ) : state === "current" ? (
+          <Circle size={5} className="fill-blue-600 text-blue-600 dark:fill-blue-400 dark:text-blue-400" />
+        ) : null}
       </span>
       <div className="min-w-0">
         <div
@@ -71,7 +75,9 @@ function Step({ state, label, children }: { state: StepState; label: string; chi
           }`}
         >
           {label}
-          <span className="sr-only">{state === "done" ? " — selesai" : state === "current" ? " — langkah berikutnya" : " — belum"}</span>
+          <span className="sr-only">
+            {state === "done" ? " — selesai" : state === "current" ? " — langkah berikutnya" : " — belum"}
+          </span>
         </div>
         {children}
       </div>
@@ -144,12 +150,20 @@ export function DemandRow({
         {(onEdit || onDelete) && (
           <div className="mt-1.5 flex gap-3 text-xs font-medium">
             {onEdit && (
-              <button type="button" onClick={onEdit} className="inline-flex items-center gap-1 text-blue-700 hover:underline dark:text-blue-400">
+              <button
+                type="button"
+                onClick={onEdit}
+                className="inline-flex items-center gap-1 text-blue-700 hover:underline dark:text-blue-400"
+              >
                 <Pencil size={11} aria-hidden /> Edit
               </button>
             )}
             {onDelete && (
-              <button type="button" onClick={onDelete} className="inline-flex items-center gap-1 text-red-700 hover:underline dark:text-red-400">
+              <button
+                type="button"
+                onClick={onDelete}
+                className="inline-flex items-center gap-1 text-red-700 hover:underline dark:text-red-400"
+              >
                 <Trash2 size={11} aria-hidden /> Hapus
               </button>
             )}
@@ -166,7 +180,11 @@ export function DemandRow({
       </Td>
       <Td>
         {canEditFulfillDate ? (
-          <DateInput value={d.fulfill_date || target} ariaLabel={`Tiba di shop, ${who}`} onCommit={(v) => setDemandFulfillDate(d.id, v)} />
+          <DateInput
+            value={d.fulfill_date || target}
+            ariaLabel={`Tiba di shop, ${who}`}
+            onCommit={(v) => setDemandFulfillDate(d.id, v)}
+          />
         ) : (
           fmtDate(target)
         )}
@@ -312,7 +330,8 @@ function CandidateSummary({ demand: d }: { demand: Demand }) {
   return (
     <div>
       <div className="text-slate-800 dark:text-slate-100">
-        {d.replacement_nama || d.replacement_noreg} <span className="text-xs text-slate-500 dark:text-slate-400">{d.replacement_noreg}</span>
+        {d.replacement_nama || d.replacement_noreg}{" "}
+        <span className="text-xs text-slate-500 dark:text-slate-400">{d.replacement_noreg}</span>
       </div>
       <CandidateMeta demand={{ ...d, replacement_nama: "" }} />
       <RehiredNoreg demand={d} />
@@ -419,7 +438,12 @@ function PoolProposal({ demand, who, poolEntries }: { demand: Demand; who: strin
 
   return (
     <div className="space-y-1.5">
-      <Select value={draftId} aria-label={`Pilih kandidat Supply Pool, ${who}`} onChange={(e) => setDraftId(e.target.value)} className="min-w-[200px]">
+      <Select
+        value={draftId}
+        aria-label={`Pilih kandidat Supply Pool, ${who}`}
+        onChange={(e) => setDraftId(e.target.value)}
+        className="min-w-[200px]"
+      >
         <option value="">- pilih dari Supply Pool -</option>
         {choices.map((e) => (
           <option key={e.id} value={e.id}>

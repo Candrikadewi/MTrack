@@ -24,8 +24,7 @@ export function DonutChart({
 }) {
   const isDark = typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: dark)").matches;
   const total = data.reduce((sum, d) => sum + d.value, 0);
-  const slices: DonutSlice[] =
-    total > 0 ? data : [{ key: "empty", label: "", value: 1, color: isDark ? "#3f3f46" : "#e2e8f0" }];
+  const slices: DonutSlice[] = total > 0 ? data : [{ key: "empty", label: "", value: 1, color: isDark ? "#3f3f46" : "#e2e8f0" }];
 
   return (
     <div className={`relative ${heightClass} w-full`}>
@@ -63,7 +62,9 @@ export function DonutChart({
           {centerValue !== undefined && (
             <div className="text-2xl font-bold tabular-nums text-slate-800 dark:text-slate-100">{centerValue}</div>
           )}
-          {centerLabel && <div className="text-center text-[11px] leading-tight text-slate-500 dark:text-slate-400">{centerLabel}</div>}
+          {centerLabel && (
+            <div className="text-center text-[11px] leading-tight text-slate-500 dark:text-slate-400">{centerLabel}</div>
+          )}
         </div>
       )}
     </div>

@@ -167,7 +167,9 @@ export function UploadCenterClient() {
   const zparValidPeriods = new Set(zparPeriodOptions());
   const zparMultiPeriod = (zparPreview?.periods.length ?? 0) > 1;
   const zparFilePeriods = zparPreview?.periods.map((p) => p.period) ?? [];
-  const zparPeriodMismatch = Boolean(zparPreview && !zparMultiPeriod && zparFilePeriods.length > 0 && !zparFilePeriods.includes(zparPeriod));
+  const zparPeriodMismatch = Boolean(
+    zparPreview && !zparMultiPeriod && zparFilePeriods.length > 0 && !zparFilePeriods.includes(zparPeriod)
+  );
   const zparOffSchedule = zparFilePeriods.filter((p) => !zparValidPeriods.has(p));
   /** What one click would upload: every on-schedule, not-yet-uploaded
    * period of a multi-period (starting) file, or the selected period. */
@@ -186,7 +188,7 @@ export function UploadCenterClient() {
     const used = usedColumns("zpar", zparPreview.columns.extra, decisions);
     const upload_date = new Date().toISOString();
     const created = zparPlan.map(({ period }) => {
-      const source = zparMultiPeriod ? zparPreview.employeesByPeriod[period] ?? [] : zparPreview.employees;
+      const source = zparMultiPeriod ? (zparPreview.employeesByPeriod[period] ?? []) : zparPreview.employees;
       const snapshot = {
         id: genId("zpar"),
         period,
@@ -250,9 +252,7 @@ export function UploadCenterClient() {
    * repeated within the file. */
   const vokasiShopByKey = new Map((vokasiPreview?.shopValues ?? []).map((v) => [v.key, resolveShop(v, valueMappings)]));
   const vokasiPendingShops = Array.from(vokasiShopByKey.values()).filter((v) => v === undefined).length;
-  const vokasiSkippedShop = vokasiPreview
-    ? vokasiPreview.records.filter((r) => vokasiShopByKey.get(r.shop) === "").length
-    : 0;
+  const vokasiSkippedShop = vokasiPreview ? vokasiPreview.records.filter((r) => vokasiShopByKey.get(r.shop) === "").length : 0;
   const vokasiResolved = vokasiPreview
     ? vokasiPreview.records
         .map((r, i) => {
@@ -279,13 +279,19 @@ export function UploadCenterClient() {
       }
     }
   }
-  const vokasiPendingColumns = vokasiPreview ? vokasiPreview.columns.extra.filter((c) => !decisionFor("vokasi", c, decisions)).length : 0;
+  const vokasiPendingColumns = vokasiPreview
+    ? vokasiPreview.columns.extra.filter((c) => !decisionFor("vokasi", c, decisions)).length
+    : 0;
   const vokasiNewBatches = new Set(vokasiNew.map((r) => r.batch));
 
   const vokasiPendingTgl = vokasiPreview ? vokasiPreview.blankTglBatches.filter((b) => !vokasiTglFill[b.batch]).length : 0;
 
   const vokasiBlocked =
-    vokasiNew.length === 0 || vokasiMissingBatch > 0 || vokasiPendingColumns > 0 || vokasiPendingShops > 0 || vokasiPendingTgl > 0;
+    vokasiNew.length === 0 ||
+    vokasiMissingBatch > 0 ||
+    vokasiPendingColumns > 0 ||
+    vokasiPendingShops > 0 ||
+    vokasiPendingTgl > 0;
 
   async function handleVokasiUpload() {
     if (!vokasiFile || !vokasiPreview || vokasiBlocked || vokasiBusy) return;
@@ -372,11 +378,7 @@ export function UploadCenterClient() {
             </Select>
           </Field>
           <Field label="File ZPAR (.xlsx / .csv)">
-            <Input
-              type="file"
-              accept=".xlsx,.xls,.csv"
-              onChange={(e) => handleZparFileChange(e.target.files?.[0] ?? null)}
-            />
+            <Input type="file" accept=".xlsx,.xls,.csv" onChange={(e) => handleZparFileChange(e.target.files?.[0] ?? null)} />
           </Field>
           <div className="flex items-end">
             {zparPreview ? (
@@ -386,7 +388,9 @@ export function UploadCenterClient() {
                 onClick={handleZparUpload}
                 className="w-full"
               >
-                {zparMultiPeriod ? `Upload ${zparPlan.length} periode (${zparPlanRows})` : `Konfirmasi & Upload (${zparPlanRows})`}
+                {zparMultiPeriod
+                  ? `Upload ${zparPlan.length} periode (${zparPlanRows})`
+                  : `Konfirmasi & Upload (${zparPlanRows})`}
               </Button>
             ) : (
               <Button variant="secondary" disabled={!zparFile || zparBusy} onClick={handleCheckZpar} className="w-full">
@@ -398,19 +402,31 @@ export function UploadCenterClient() {
         {zparPreview && (
           <>
             {zparOffSchedule.length > 0 && (
-              <p role="alert" className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200">
-                Periode {zparOffSchedule.join(", ")} di file tidak sesuai jadwal ZPAR: 2019–2025 hanya Maret, mulai 2026 per bulan. Cek lagi
-                kolom Period di file.
+              <p
+                role="alert"
+                className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200"
+              >
+                Periode {zparOffSchedule.join(", ")} di file tidak sesuai jadwal ZPAR: 2019–2025 hanya Maret, mulai 2026 per
+                bulan. Cek lagi kolom Period di file.
               </p>
             )}
             {zparMultiPeriod && (
-              <div role="status" className="mt-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-100">
-                <p className="mb-1.5 font-semibold">File berisi {zparPreview.periods.length} periode — semuanya diupload sekaligus sebagai snapshot terpisah:</p>
+              <div
+                role="status"
+                className="mt-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-100"
+              >
+                <p className="mb-1.5 font-semibold">
+                  File berisi {zparPreview.periods.length} periode — semuanya diupload sekaligus sebagai snapshot terpisah:
+                </p>
                 <div className="flex flex-wrap gap-1.5">
                   {[...zparPreview.periods]
                     .sort((a, b) => a.period.localeCompare(b.period))
                     .map((p) => {
-                      const state = !zparValidPeriods.has(p.period) ? "di luar jadwal" : takenPeriods.has(p.period) ? "sudah ada" : "baru";
+                      const state = !zparValidPeriods.has(p.period)
+                        ? "di luar jadwal"
+                        : takenPeriods.has(p.period)
+                          ? "sudah ada"
+                          : "baru";
                       return (
                         <Badge key={p.period} tone={state === "baru" ? "blue" : state === "sudah ada" ? "slate" : "red"}>
                           {format(new Date(`${p.period}-01T00:00:00`), "MMM yyyy")} · {p.count} · {state}
@@ -421,8 +437,12 @@ export function UploadCenterClient() {
               </div>
             )}
             {zparPeriodMismatch && (
-              <p role="status" className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
-                Kolom Period di file berisi {zparFilePeriods.join(", ")}, tapi yang dipilih {zparPeriod}. Pastikan periodenya benar sebelum upload.
+              <p
+                role="status"
+                className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200"
+              >
+                Kolom Period di file berisi {zparFilePeriods.join(", ")}, tapi yang dipilih {zparPeriod}. Pastikan periodenya
+                benar sebelum upload.
               </p>
             )}
             <ValidationSummary
@@ -526,20 +546,11 @@ export function UploadCenterClient() {
             />
           </Field>
           <Field label="File Vokasi (.xlsx / .csv)">
-            <Input
-              type="file"
-              accept=".xlsx,.xls,.csv"
-              onChange={(e) => handleVokasiFileChange(e.target.files?.[0] ?? null)}
-            />
+            <Input type="file" accept=".xlsx,.xls,.csv" onChange={(e) => handleVokasiFileChange(e.target.files?.[0] ?? null)} />
           </Field>
           <div className="flex items-end">
             {vokasiPreview ? (
-              <Button
-                variant="primary"
-                disabled={vokasiBusy || vokasiBlocked}
-                onClick={handleVokasiUpload}
-                className="w-full"
-              >
+              <Button variant="primary" disabled={vokasiBusy || vokasiBlocked} onClick={handleVokasiUpload} className="w-full">
                 Konfirmasi &amp; Upload ({vokasiNew.length})
               </Button>
             ) : (
@@ -551,7 +562,10 @@ export function UploadCenterClient() {
         </div>
         {vokasiPreview && (
           <>
-            <div role="status" className="mt-3 space-y-1.5 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-100">
+            <div
+              role="status"
+              className="mt-3 space-y-1.5 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-100"
+            >
               <p>
                 Format:{" "}
                 <b>
@@ -559,7 +573,8 @@ export function UploadCenterClient() {
                     ? `File bulanan mentah${vokasiPreview.title?.start ? ` — mulai ${fmtDate(vokasiPreview.title.start)}` : ""}${vokasiPreview.title?.end ? ` s/d ${fmtDate(vokasiPreview.title.end)}` : ""}`
                     : "Starting (sudah bersih)"}
                 </b>
-                {vokasiPreview.format === "raw" && " · kolom data pribadi (NIK, NPWP, alamat, no. HP, rekening, BPJS, dll.) dibuang, tidak disimpan"}
+                {vokasiPreview.format === "raw" &&
+                  " · kolom data pribadi (NIK, NPWP, alamat, no. HP, rekening, BPJS, dll.) dibuang, tidak disimpan"}
               </p>
               {vokasiPreview.batchFromFile ? (
                 <>
@@ -581,7 +596,10 @@ export function UploadCenterClient() {
                 {vokasiDuplicates > 0 && <> · {vokasiDuplicates} dilewati karena sudah ada (noreg + batch sama)</>}
                 {vokasiSkippedShop > 0 && <> · {vokasiSkippedShop} dilewati karena Shop bukan shop valid</>}
                 {vokasiMissingBatch > 0 && (
-                  <span className="font-semibold text-amber-800 dark:text-amber-200"> · {vokasiMissingBatch} baris belum punya batch — isi kolom Batch di atas</span>
+                  <span className="font-semibold text-amber-800 dark:text-amber-200">
+                    {" "}
+                    · {vokasiMissingBatch} baris belum punya batch — isi kolom Batch di atas
+                  </span>
                 )}
                 {vokasiNoDept > 0 && (
                   <span className="font-semibold text-amber-800 dark:text-amber-200">

@@ -22,14 +22,16 @@ export function BlankTglPanel({
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h4 className="text-sm font-semibold text-slate-800 dark:text-slate-100">Tgl Masuk kosong ({batches.length} batch)</h4>
         {pending > 0 ? (
-          <span className="text-xs font-semibold text-amber-700 dark:text-amber-300">{pending} batch perlu diisi sebelum upload</span>
+          <span className="text-xs font-semibold text-amber-700 dark:text-amber-300">
+            {pending} batch perlu diisi sebelum upload
+          </span>
         ) : (
           <span className="text-xs text-emerald-700 dark:text-emerald-400">Semua sudah terisi</span>
         )}
       </div>
       <p className="text-xs text-slate-600 dark:text-slate-400">
-        Tgl Masuk berlaku satu tanggal per batch dan menentukan tanggal berakhir (6 bulan − 1 hari). Cek tanggal yang disarankan, ubah
-        bila perlu.
+        Tgl Masuk berlaku satu tanggal per batch dan menentukan tanggal berakhir (6 bulan − 1 hari). Cek tanggal yang disarankan,
+        ubah bila perlu.
       </p>
       <ul className="divide-y divide-slate-100 dark:divide-slate-800">
         {batches.map((b) => {

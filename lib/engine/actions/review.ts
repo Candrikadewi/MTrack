@@ -116,7 +116,10 @@ export async function setReviewResults(reviewIds: string[], result: ReviewResult
   const queue = [...targets];
   async function worker() {
     for (let r = queue.shift(); r; r = queue.shift()) {
-      const res: { error: { message: string } | null } = await supabase.rpc("set_review_result", { p_review_id: r.id, p_result: result });
+      const res: { error: { message: string } | null } = await supabase.rpc("set_review_result", {
+        p_review_id: r.id,
+        p_result: result,
+      });
       if (res.error) {
         failed++;
         lastError = res.error.message;

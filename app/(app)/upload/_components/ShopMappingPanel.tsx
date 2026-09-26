@@ -43,13 +43,16 @@ export function ShopMappingPanel({ values, mappings }: { values: VokasiShopValue
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h4 className="text-sm font-semibold text-slate-800 dark:text-slate-100">Shop tidak standar ({nonStandard.length})</h4>
         {pending > 0 ? (
-          <span className="text-xs font-semibold text-amber-700 dark:text-amber-300">{pending} perlu dikonfirmasi sebelum upload</span>
+          <span className="text-xs font-semibold text-amber-700 dark:text-amber-300">
+            {pending} perlu dikonfirmasi sebelum upload
+          </span>
         ) : (
           <span className="text-xs text-emerald-700 dark:text-emerald-400">Semua sudah dikonfirmasi</span>
         )}
       </div>
       <p className="text-xs text-slate-600 dark:text-slate-400">
-        Kemungkinan typo. Pilih Shop standar yang benar lalu konfirmasi — dipakai untuk menentukan Div/Dept dan disimpan untuk upload berikutnya.
+        Kemungkinan typo. Pilih Shop standar yang benar lalu konfirmasi — dipakai untuk menentukan Div/Dept dan disimpan untuk
+        upload berikutnya.
       </p>
       <ul className="divide-y divide-slate-100 dark:divide-slate-800">
         {nonStandard.map((v) => {
@@ -59,7 +62,8 @@ export function ShopMappingPanel({ values, mappings }: { values: VokasiShopValue
             <li key={v.key} className="flex flex-wrap items-center justify-between gap-3 py-2">
               <div className="min-w-0">
                 <div className="text-sm font-medium text-slate-800 dark:text-slate-100">
-                  &ldquo;{v.raw}&rdquo; <span className="text-xs font-normal text-slate-500 dark:text-slate-400">· {v.count} baris</span>
+                  &ldquo;{v.raw}&rdquo;{" "}
+                  <span className="text-xs font-normal text-slate-500 dark:text-slate-400">· {v.count} baris</span>
                 </div>
                 <div className="text-xs text-slate-500 dark:text-slate-400">
                   {confirmed === undefined

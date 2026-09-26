@@ -48,13 +48,7 @@ export function resolvePlanRow(p: TaktDownPerson, rows: CompositionRow[]): Compo
 
 /** Two-step release flow header shared by Takt Down and Kaizen: step 1 plans
  * the release per shop and status MP, step 2 picks the actual people. */
-export function StepNav({
-  step,
-  onStep,
-}: {
-  step: "plan" | "names";
-  onStep: (step: "plan" | "names") => void;
-}) {
+export function StepNav({ step, onStep }: { step: "plan" | "names"; onStep: (step: "plan" | "names") => void }) {
   return (
     <nav aria-label="Langkah" className="flex items-center gap-2">
       <StepDot active={step === "plan"} done={step === "names"} label="1. Rencana per Shop" onClick={() => onStep("plan")} />
@@ -133,7 +127,9 @@ export function ReleaseMappingStep({
   }
 
   const activeRow = validPlanRows.find((r) => r.id === activePlanRowId);
-  const hasAmbiguousRows = validPlanRows.some((r, i) => validPlanRows.findIndex((o) => o.division === r.division && o.dept === r.dept && o.status_mp === r.status_mp) !== i);
+  const hasAmbiguousRows = validPlanRows.some(
+    (r, i) => validPlanRows.findIndex((o) => o.division === r.division && o.dept === r.dept && o.status_mp === r.status_mp) !== i
+  );
 
   /** Picks made while a plan row is focused are pinned to that row, so two
    * rows with the same shop and status MP (different activities) stay apart. */
@@ -153,12 +149,19 @@ export function ReleaseMappingStep({
   }
 
   const searchFiltered = query
-    ? candidates.filter((c) => c.noreg.toLowerCase().includes(query.toLowerCase()) || c.nama.toLowerCase().includes(query.toLowerCase()))
+    ? candidates.filter(
+        (c) => c.noreg.toLowerCase().includes(query.toLowerCase()) || c.nama.toLowerCase().includes(query.toLowerCase())
+      )
     : [];
 
   const divOptions = Array.from(new Set(candidates.map((c) => c.div).filter(Boolean))).sort();
   const deptOptions = Array.from(
-    new Set(candidates.filter((c) => filterDivs.length === 0 || filterDivs.includes(c.div)).map((c) => c.dept).filter(Boolean))
+    new Set(
+      candidates
+        .filter((c) => filterDivs.length === 0 || filterDivs.includes(c.div))
+        .map((c) => c.dept)
+        .filter(Boolean)
+    )
   ).sort();
   const checklistFiltered = candidates.filter(
     (c) =>
@@ -178,7 +181,14 @@ export function ReleaseMappingStep({
   }
 
   function processBulkNoregs(raw: string) {
-    const noregs = Array.from(new Set(raw.split(/[\n,;]+/).map((s) => s.trim()).filter(Boolean)));
+    const noregs = Array.from(
+      new Set(
+        raw
+          .split(/[\n,;]+/)
+          .map((s) => s.trim())
+          .filter(Boolean)
+      )
+    );
     const byNoreg = new Map(candidates.map((c) => [c.noreg.toLowerCase(), c]));
     const matched: TaktDownPerson[] = [];
     const notFound: string[] = [];
@@ -214,11 +224,13 @@ export function ReleaseMappingStep({
     <div className="space-y-4">
       {validPlanRows.length > 0 && (
         <div>
-          <h4 className="mb-2 text-xs font-semibold text-slate-600 dark:text-slate-400">Progres rencana per shop — klik untuk isi baris ini</h4>
+          <h4 className="mb-2 text-xs font-semibold text-slate-600 dark:text-slate-400">
+            Progres rencana per shop — klik untuk isi baris ini
+          </h4>
           {hasAmbiguousRows && (
             <p className="mb-2 text-xs text-amber-700 dark:text-amber-300">
-              Ada baris dengan divisi, department dan status MP yang sama. Klik barisnya dulu sebelum memilih orang supaya masuk ke baris
-              (aktivitas) yang benar.
+              Ada baris dengan divisi, department dan status MP yang sama. Klik barisnya dulu sebelum memilih orang supaya masuk
+              ke baris (aktivitas) yang benar.
             </p>
           )}
           <div className="flex flex-wrap gap-2">
@@ -273,7 +285,14 @@ export function ReleaseMappingStep({
               placeholder="Semua Divisi"
               className="w-52"
             />
-            <MultiSelect label="Department" options={deptOptions} selected={filterDepts} onChange={setFilterDepts} placeholder="Semua Department" className="w-52" />
+            <MultiSelect
+              label="Department"
+              options={deptOptions}
+              selected={filterDepts}
+              onChange={setFilterDepts}
+              placeholder="Semua Department"
+              className="w-52"
+            />
             <label className="block w-40">
               <span className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">Status MP</span>
               <Select value={filterType} onChange={(e) => setFilterType(e.target.value as MpStatusKategori | "")}>

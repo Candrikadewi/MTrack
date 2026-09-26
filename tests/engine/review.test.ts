@@ -21,7 +21,9 @@ describe("setReviewResults (bulk review)", () => {
     pkwtReviewStore.insert(review({ id: "a" }));
     pkwtReviewStore.insert(review({ id: "b" }));
     setRpcResponder((_fn, args) =>
-      (args as { p_review_id: string }).p_review_id === "b" ? { data: null, error: { message: "denied" } } : { data: null, error: null }
+      (args as { p_review_id: string }).p_review_id === "b"
+        ? { data: null, error: { message: "denied" } }
+        : { data: null, error: null }
     );
 
     const result = await setReviewResults(["a", "b"], "Terminate");

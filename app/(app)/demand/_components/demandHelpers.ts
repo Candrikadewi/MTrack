@@ -6,7 +6,13 @@ import type { Demand, DemandOriginType, EmploymentStatus, ReplacementStatus } fr
 
 export const POOL_SOURCES: ReplacementStatus[] = ["MP Excess", "MP Back Up"];
 
-export const PKWT_SOURCE_OPTIONS: ReplacementStatus[] = ["PKWT New Hire", "Vokasi New Hire", "MP Excess", "MP Back Up", "No Replace"];
+export const PKWT_SOURCE_OPTIONS: ReplacementStatus[] = [
+  "PKWT New Hire",
+  "Vokasi New Hire",
+  "MP Excess",
+  "MP Back Up",
+  "No Replace",
+];
 
 export const VOKASI_SOURCE_OPTIONS: ReplacementStatus[] = ["Vokasi New Hire", "MP Excess", "MP Back Up", "No Replace"];
 

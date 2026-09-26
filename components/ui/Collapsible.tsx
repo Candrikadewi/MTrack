@@ -49,12 +49,19 @@ export function CollapsibleSection({
           </span>
           <span className="flex shrink-0 items-center gap-2">
             {badge}
-            <ChevronDown size={16} aria-hidden className={`text-slate-500 transition-transform dark:text-slate-400 ${open ? "rotate-180" : ""}`} />
+            <ChevronDown
+              size={16}
+              aria-hidden
+              className={`text-slate-500 transition-transform dark:text-slate-400 ${open ? "rotate-180" : ""}`}
+            />
           </span>
         </button>
       </h2>
       {open && (
-        <div id={panelId} className="animate-reveal mt-3 space-y-4 rounded-3xl border border-slate-200/70 bg-white p-5 shadow-sm shadow-slate-200/60 dark:border-slate-800 dark:bg-slate-900">
+        <div
+          id={panelId}
+          className="animate-reveal mt-3 space-y-4 rounded-3xl border border-slate-200/70 bg-white p-5 shadow-sm shadow-slate-200/60 dark:border-slate-800 dark:bg-slate-900"
+        >
           {children}
         </div>
       )}

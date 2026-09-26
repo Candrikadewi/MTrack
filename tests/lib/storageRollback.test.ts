@@ -5,7 +5,9 @@ import { setWriteResponder } from "../helpers/fakeSupabase";
 import { demand } from "../helpers/fixtures";
 
 const refuse = (op: string) =>
-  setWriteResponder((_table, writeOp) => (writeOp === op ? { data: null, error: { message: "permission denied" } } : { data: null, error: null }));
+  setWriteResponder((_table, writeOp) =>
+    writeOp === op ? { data: null, error: { message: "permission denied" } } : { data: null, error: null }
+  );
 
 /** Lets the (fake) database answer. */
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));

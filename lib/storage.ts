@@ -209,7 +209,12 @@ export function createStore<T extends { id: string }>(table: string): Store<T> {
   /** Sends a write and, if the database refuses it (or the network
    * fails), runs `rollback` so the cache stops showing it as saved. Resolves
    * to the error message, or null once saved. */
-  function persist(label: string, request: PromiseLike<WriteResult>, rollback: () => void, report = true): Promise<string | null> {
+  function persist(
+    label: string,
+    request: PromiseLike<WriteResult>,
+    rollback: () => void,
+    report = true
+  ): Promise<string | null> {
     return Promise.resolve(request)
       .then(
         (res) => res.error?.message ?? null,

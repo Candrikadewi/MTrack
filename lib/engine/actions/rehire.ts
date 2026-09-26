@@ -10,7 +10,10 @@ import { getActiveEmployeeByNoreg, getVokasiByNoreg } from "./people";
 
 /** Name compared letters-only and case-insensitive ("LUNA  S." = "Luna S"). */
 function normalizedName(name: string): string {
-  return name.toUpperCase().replace(/[^A-Z]+/g, " ").trim();
+  return name
+    .toUpperCase()
+    .replace(/[^A-Z]+/g, " ")
+    .trim();
 }
 
 // A Vokasi alumnus hired as PKWT (Source "PKWT New Hire") signs under a
@@ -81,13 +84,16 @@ export function rehireCandidates(d: Demand): RehireCandidate[] {
       .map((m) => m.mapped_value)
   );
   const signed = d.fulfillment_confirmed_date;
-  const earliest = signed ? format(addDays(parseISO(signed), -45), "yyyy-MM-dd") : vokasi?.tgl_masuk ?? "";
+  const earliest = signed ? format(addDays(parseISO(signed), -45), "yyyy-MM-dd") : (vokasi?.tgl_masuk ?? "");
   return snap.employees
     .filter((e) => normalizedName(e.nama) === name && e.noreg !== d.replacement_noreg && !taken.has(e.noreg))
     .map((employee) => {
       const checks: RehireCheck[] = [
         { label: "Status Kontrak", ok: KONTRAK_REVIEW_STATUSES.includes(employee.status_kontrak) },
-        { label: "Tgl Masuk setelah sign kontrak", ok: Boolean(employee.tgl_masuk && earliest && employee.tgl_masuk >= earliest) },
+        {
+          label: "Tgl Masuk setelah sign kontrak",
+          ok: Boolean(employee.tgl_masuk && earliest && employee.tgl_masuk >= earliest),
+        },
         { label: "Dept sama", ok: !d.dept || employee.dept === d.dept },
         { label: "Gender sama", ok: !vokasi?.gender || employee.gender === vokasi.gender },
       ];

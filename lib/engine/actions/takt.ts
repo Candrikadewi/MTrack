@@ -14,8 +14,13 @@ export function updateTaktUp(
 ): string | null {
   const takt = taktStore.get(taktId);
   if (!takt || takt.category !== "up") return "Takt Up tidak ditemukan.";
-  const result = reconcileNeedRows(takt.need_rows ?? [], takt.demand_ids, input.rows, "TaktUp", takt.id, (row) =>
-    `Takt Up ${input.plant} - ${row.division} - ${row.dept}`
+  const result = reconcileNeedRows(
+    takt.need_rows ?? [],
+    takt.demand_ids,
+    input.rows,
+    "TaktUp",
+    takt.id,
+    (row) => `Takt Up ${input.plant} - ${row.division} - ${row.dept}`
   );
   if (!result.ok) return result.error;
   taktStore.update(taktId, {
@@ -61,7 +66,10 @@ export function createTaktUp(input: {
     released_pool_ids: [],
   };
   taktStore.insert(takt);
-  const needRows = (takt.need_rows ?? []).map((row) => ({ ...row, demand_ids: createDemandsFromTaktRow(takt, row).map((d) => d.id) }));
+  const needRows = (takt.need_rows ?? []).map((row) => ({
+    ...row,
+    demand_ids: createDemandsFromTaktRow(takt, row).map((d) => d.id),
+  }));
   return taktStore.update(takt.id, { need_rows: needRows, demand_ids: needRows.flatMap((r) => r.demand_ids) })!;
 }
 
@@ -72,9 +80,7 @@ export function createTaktUp(input: {
  * back to the case's own date when a person doesn't line up with any row
  * (e.g. added via bulk/search without a matching plan entry). */
 function releaseDateFor(person: TaktDownPerson, planRows: TaktDownPlanRow[], fallbackDate: string): string {
-  const row = planRows.find(
-    (r) => r.division === person.div && r.dept === person.dept && r.status_mp === person.type
-  );
+  const row = planRows.find((r) => r.division === person.div && r.dept === person.dept && r.status_mp === person.type);
   return row?.release_date || fallbackDate;
 }
 

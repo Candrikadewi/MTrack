@@ -16,7 +16,10 @@ export function ProjectSummaryBlock({ projects, demands }: { projects: Project[]
     <Card
       title="Project Monitoring"
       action={
-        <Link href="/projects" className="text-xs font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300">
+        <Link
+          href="/projects"
+          className="text-xs font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+        >
           Lihat semua →
         </Link>
       }
@@ -47,11 +50,7 @@ export function ProjectSummaryBlock({ projects, demands }: { projects: Project[]
                       />
                     </div>
                   </div>
-                  {gap <= 0 ? (
-                    <Badge tone="green">✅ MP Terpenuhi</Badge>
-                  ) : (
-                    <Badge tone="amber">⚠️ Perlu {gap} MP lagi</Badge>
-                  )}
+                  {gap <= 0 ? <Badge tone="green">✅ MP Terpenuhi</Badge> : <Badge tone="amber">⚠️ Perlu {gap} MP lagi</Badge>}
                   <ChevronRight size={15} aria-hidden className="shrink-0 text-slate-400" />
                 </Link>
               </li>
@@ -83,7 +82,10 @@ export function TaktSummaryBlock({
     <Card
       title="Takt Time Monitoring"
       action={
-        <Link href="/takt" className="text-xs font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300">
+        <Link
+          href="/takt"
+          className="text-xs font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+        >
           Lihat semua →
         </Link>
       }

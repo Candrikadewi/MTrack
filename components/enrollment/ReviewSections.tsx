@@ -87,7 +87,13 @@ export function ReviewSection({
             placeholder="Semua Divisi"
             className="w-44"
           />
-          <MultiSelect options={reviewDeptOptions} selected={depts} onChange={onDeptsChange} placeholder="Semua Department" className="w-44" />
+          <MultiSelect
+            options={reviewDeptOptions}
+            selected={depts}
+            onChange={onDeptsChange}
+            placeholder="Semua Department"
+            className="w-44"
+          />
         </div>
       }
     >
@@ -264,8 +270,9 @@ export function ReviewSection({
       >
         {pendingTerminate && (
           <>
-            Kontrak <strong className="font-semibold text-slate-800 dark:text-slate-100">{pendingTerminate.nama}</strong> ({pendingTerminate.noreg}) tidak
-            dilanjutkan. Ini akan membuka <strong className="font-semibold text-slate-800 dark:text-slate-100">1 demand replacement</strong> untuk{" "}
+            Kontrak <strong className="font-semibold text-slate-800 dark:text-slate-100">{pendingTerminate.nama}</strong> (
+            {pendingTerminate.noreg}) tidak dilanjutkan. Ini akan membuka{" "}
+            <strong className="font-semibold text-slate-800 dark:text-slate-100">1 demand replacement</strong> untuk{" "}
             {pendingTerminate.dept || pendingTerminate.div}.
           </>
         )}
@@ -349,7 +356,13 @@ export function VokasiEndedSection({
             placeholder="Semua Divisi"
             className="w-44"
           />
-          <MultiSelect options={deptOptions} selected={depts} onChange={onDeptsChange} placeholder="Semua Department" className="w-44" />
+          <MultiSelect
+            options={deptOptions}
+            selected={depts}
+            onChange={onDeptsChange}
+            placeholder="Semua Department"
+            className="w-44"
+          />
         </div>
       }
     >

@@ -119,7 +119,9 @@ function ActionSummaryRow({ section }: { section: ActionSectionSpec }) {
     >
       <span
         className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${
-          overdue ? "bg-red-600 text-white shadow-sm shadow-red-500/30" : "bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-400"
+          overdue
+            ? "bg-red-600 text-white shadow-sm shadow-red-500/30"
+            : "bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-400"
         }`}
       >
         <Icon size={14} strokeWidth={2.25} />
@@ -155,10 +157,11 @@ function SafeSectionsRow({ sections }: { sections: ActionSectionSpec[] }) {
         className="flex w-full items-center gap-3 py-2.5 pl-2.5 pr-3 text-left text-sm transition-colors hover:bg-slate-50 dark:hover:bg-slate-900/60"
       >
         <CheckCircle2 size={15} className="shrink-0 text-emerald-500" />
-        <span className="flex-1 text-slate-500 dark:text-slate-400">
-          {sections.length} tahap lainnya aman
-        </span>
-        <ChevronDown size={15} className={`shrink-0 text-slate-300 transition-transform dark:text-slate-600 ${expanded ? "rotate-180" : ""}`} />
+        <span className="flex-1 text-slate-500 dark:text-slate-400">{sections.length} tahap lainnya aman</span>
+        <ChevronDown
+          size={15}
+          className={`shrink-0 text-slate-300 transition-transform dark:text-slate-600 ${expanded ? "rotate-180" : ""}`}
+        />
       </button>
       {expanded && (
         <div className="divide-y divide-slate-50 pb-1 dark:divide-slate-900">
