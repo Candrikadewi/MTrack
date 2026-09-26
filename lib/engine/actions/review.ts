@@ -81,14 +81,14 @@ export async function generatePkwtReviews(): Promise<PkwtReviewRun> {
  */
 export function setReviewResult(reviewId: string, result: ReviewResult): void {
   const previous = pkwtReviewStore.get(reviewId)?.review_result;
-  pkwtReviewStore.update(reviewId, { review_result: result });
+  pkwtReviewStore.patchLocal(reviewId, { review_result: result });
   const supabase = createClient();
   supabase
     .rpc("set_review_result", { p_review_id: reviewId, p_result: result })
     .then((res: { error: { message: string } | null }) => {
       if (res.error) {
         console.error("set_review_result failed:", res.error.message);
-        pkwtReviewStore.update(reviewId, { review_result: previous ?? "" });
+        pkwtReviewStore.patchLocal(reviewId, { review_result: previous ?? "" });
         pushToast(`Gagal menyimpan review result: ${res.error.message}`);
         return;
       }
@@ -108,7 +108,7 @@ export async function setReviewResults(reviewIds: string[], result: ReviewResult
     .map((id) => pkwtReviewStore.get(id))
     .filter((r): r is PkwtReview => r !== undefined && r.review_result !== result);
   const previous = new Map(targets.map((r) => [r.id, r.review_result]));
-  for (const r of targets) pkwtReviewStore.update(r.id, { review_result: result });
+  for (const r of targets) pkwtReviewStore.patchLocal(r.id, { review_result: result });
   const supabase = createClient();
   let saved = 0;
   let failed = 0;
@@ -120,7 +120,7 @@ export async function setReviewResults(reviewIds: string[], result: ReviewResult
       if (res.error) {
         failed++;
         lastError = res.error.message;
-        pkwtReviewStore.update(r.id, { review_result: previous.get(r.id) ?? "" });
+        pkwtReviewStore.patchLocal(r.id, { review_result: previous.get(r.id) ?? "" });
       } else saved++;
     }
   }

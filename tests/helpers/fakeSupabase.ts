@@ -18,23 +18,38 @@ export function setRpcResponder(fn: typeof rpcResponder): void {
   rpcResponder = fn;
 }
 
+/** Answers table writes (insert / update / upsert / delete); "no error"
+ * unless a test says otherwise. */
+export let writeResponder: (table: string, op: string) => Result = () => ({ data: null, error: null });
+
+export function setWriteResponder(fn: typeof writeResponder): void {
+  writeResponder = fn;
+}
+
 export function resetFakeSupabase(): void {
   calls.length = 0;
   rpcResponder = () => ({ data: null, error: null });
+  writeResponder = () => ({ data: null, error: null });
 }
 
 function queryBuilder(table: string) {
-  const result: Result = { data: [], error: null };
+  let write: string | null = null;
+  const record = (op: string, payload?: unknown) => {
+    write = op;
+    calls.push({ table, op, payload });
+    return builder;
+  };
   const builder = {
     select: () => builder,
     order: () => builder,
     range: () => builder,
     eq: () => builder,
-    insert: (payload: unknown) => (calls.push({ table, op: "insert", payload }), builder),
-    update: (payload: unknown) => (calls.push({ table, op: "update", payload }), builder),
-    upsert: (payload: unknown) => (calls.push({ table, op: "upsert", payload }), builder),
-    delete: () => (calls.push({ table, op: "delete" }), builder),
-    then: (resolve: (r: Result) => unknown, reject?: (e: unknown) => unknown) => Promise.resolve(result).then(resolve, reject),
+    insert: (payload: unknown) => record("insert", payload),
+    update: (payload: unknown) => record("update", payload),
+    upsert: (payload: unknown) => record("upsert", payload),
+    delete: () => record("delete"),
+    then: (resolve: (r: Result) => unknown, reject?: (e: unknown) => unknown) =>
+      Promise.resolve(write ? writeResponder(table, write) : { data: [], error: null }).then(resolve, reject),
   };
   return builder;
 }
