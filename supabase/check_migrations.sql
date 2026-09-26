@@ -69,4 +69,12 @@ union all
 select
   'migration_14 (vokasi shop mappings)',
   exists (select 1 from information_schema.tables where table_name = 'value_mappings')
-  and exists (select 1 from information_schema.columns where table_name = 'vokasi_records' and column_name = 'shop');
+  and exists (select 1 from information_schema.columns where table_name = 'vokasi_records' and column_name = 'shop')
+union all
+select
+  'migration_15 (atomic saves + migration log)',
+  exists (select 1 from pg_proc where proname = 'apply_changes')
+union all
+select
+  'migration_16 (no duplicate rows)',
+  exists (select 1 from pg_indexes where indexname = 'pkwt_reviews_one_per_review_date');

@@ -1,6 +1,6 @@
 // Projects: registration, editing, deleting, the seat chain of each MP, and releasing MP
 // on each row's release date (holders with contract left go to the Supply Pool).
-import { genId } from "../../storage";
+import { genId, transaction } from "../../storage";
 import { demandStore, projectStore, utilPoolStore, valueMappingStore, vokasiStore, zparStore } from "../../repo";
 import { computeReviewDate, sisaHari } from "../compute";
 import { isPermanenForRatio, projectEndDate, rowReleaseDate } from "../../types";
@@ -24,18 +24,20 @@ import { pushToUtilPool } from "./pool";
 /** Registers a project from its name, Tanggal SOP and MP need-rows. Each
  * row carries its own release (date or No Release); end_date is derived. */
 export function createProject(input: { name: string; sop_date: string; rows: Omit<ProjectMpNeedRow, "id">[] }): Project {
-  const project: Project = {
-    id: genId("project"),
-    name: input.name,
-    start_date: input.sop_date,
-    end_date: projectEndDate(input.rows, input.sop_date),
-    status: "Ongoing",
-    rows: input.rows.map((r) => ({ ...r, id: genId("row") })),
-    demand_ids: [],
-  };
-  projectStore.insert(project);
-  const rows = project.rows.map((row) => ({ ...row, demand_ids: createDemandsFromProjectRow(project, row).map((d) => d.id) }));
-  return projectStore.update(project.id, { rows, demand_ids: rows.flatMap((r) => r.demand_ids) })!;
+  return transaction(() => {
+    const project: Project = {
+      id: genId("project"),
+      name: input.name,
+      start_date: input.sop_date,
+      end_date: projectEndDate(input.rows, input.sop_date),
+      status: "Ongoing",
+      rows: input.rows.map((r) => ({ ...r, id: genId("row") })),
+      demand_ids: [],
+    };
+    projectStore.insert(project);
+    const rows = project.rows.map((row) => ({ ...row, demand_ids: createDemandsFromProjectRow(project, row).map((d) => d.id) }));
+    return projectStore.update(project.id, { rows, demand_ids: rows.flatMap((r) => r.demand_ids) })!;
+  });
 }
 
 /** The need-row a project demand was expanded from. Rows record their own
@@ -121,13 +123,15 @@ export function projectSuppliedCount(project: Project): number {
  * which never delete or shrink existing demand records (only additive
  * changes are safe post-registration). */
 export function updateProjectDetails(projectId: string, input: { name?: string; sop_date?: string }): void {
-  const project = projectStore.get(projectId);
-  if (!project) return;
-  const sop = input.sop_date ?? project.start_date;
-  projectStore.update(projectId, {
-    ...(input.name !== undefined ? { name: input.name } : {}),
-    start_date: sop,
-    end_date: projectEndDate(project.rows, sop),
+  return transaction(() => {
+    const project = projectStore.get(projectId);
+    if (!project) return;
+    const sop = input.sop_date ?? project.start_date;
+    projectStore.update(projectId, {
+      ...(input.name !== undefined ? { name: input.name } : {}),
+      start_date: sop,
+      end_date: projectEndDate(project.rows, sop),
+    });
   });
 }
 
@@ -138,13 +142,15 @@ export function updateProjectRowRelease(
   rowId: string,
   release: { release_date: string; no_release: boolean }
 ): void {
-  const project = projectStore.get(projectId);
-  const row = project?.rows.find((r) => r.id === rowId);
-  if (!project || !row || row.released) return;
-  if (row.no_release === release.no_release && (row.release_date ?? "") === release.release_date) return;
-  const rows = project.rows.map((r) => (r.id === rowId ? { ...r, ...release } : r));
-  projectStore.update(projectId, { rows, end_date: projectEndDate(rows, project.start_date) });
-  syncProjectSeatDemands();
+  return transaction(() => {
+    const project = projectStore.get(projectId);
+    const row = project?.rows.find((r) => r.id === rowId);
+    if (!project || !row || row.released) return;
+    if (row.no_release === release.no_release && (row.release_date ?? "") === release.release_date) return;
+    const rows = project.rows.map((r) => (r.id === rowId ? { ...r, ...release } : r));
+    projectStore.update(projectId, { rows, end_date: projectEndDate(rows, project.start_date) });
+    syncProjectSeatDemands();
+  });
 }
 
 /** Adds a brand-new MP need row to an already-registered project, expanding
@@ -152,30 +158,34 @@ export function updateProjectRowRelease(
  * re-reads the project from the store so sequential calls in a loop don't
  * clobber each other's row/demand_ids updates. */
 export function addProjectRow(projectId: string, row: Omit<ProjectMpNeedRow, "id">): void {
-  const project = projectStore.get(projectId);
-  if (!project) return;
-  const newRow: ProjectMpNeedRow = { ...row, id: genId("row") };
-  const created = createDemandsFromProjectRow({ ...project, rows: [...project.rows, newRow] }, newRow);
-  const updatedRows = [...project.rows, { ...newRow, demand_ids: created.map((d) => d.id) }];
-  projectStore.update(projectId, { rows: updatedRows, demand_ids: [...project.demand_ids, ...created.map((d) => d.id)] });
+  return transaction(() => {
+    const project = projectStore.get(projectId);
+    if (!project) return;
+    const newRow: ProjectMpNeedRow = { ...row, id: genId("row") };
+    const created = createDemandsFromProjectRow({ ...project, rows: [...project.rows, newRow] }, newRow);
+    const updatedRows = [...project.rows, { ...newRow, demand_ids: created.map((d) => d.id) }];
+    projectStore.update(projectId, { rows: updatedRows, demand_ids: [...project.demand_ids, ...created.map((d) => d.id)] });
+  });
 }
 
 /** Increases an existing row's qty, creating demand records only for the
  * delta. Decreasing qty is intentionally not supported here — it would mean
  * silently deleting demand records that may already be Fulfilled. */
 export function increaseProjectRowQty(projectId: string, rowId: string, newQty: number): void {
-  const project = projectStore.get(projectId);
-  if (!project) return;
-  const row = project.rows.find((r) => r.id === rowId);
-  if (!row || newQty <= row.qty) return;
-  const delta = newQty - row.qty;
-  const created = expandRowToDemands({ ...row, qty: delta }, "Project", project.id, project.name);
-  const updatedRows = project.rows.map((r) =>
-    r.id === rowId
-      ? { ...r, qty: newQty, ...(r.demand_ids ? { demand_ids: [...r.demand_ids, ...created.map((d) => d.id)] } : {}) }
-      : r
-  );
-  projectStore.update(projectId, { rows: updatedRows, demand_ids: [...project.demand_ids, ...created.map((d) => d.id)] });
+  return transaction(() => {
+    const project = projectStore.get(projectId);
+    if (!project) return;
+    const row = project.rows.find((r) => r.id === rowId);
+    if (!row || newQty <= row.qty) return;
+    const delta = newQty - row.qty;
+    const created = expandRowToDemands({ ...row, qty: delta }, "Project", project.id, project.name);
+    const updatedRows = project.rows.map((r) =>
+      r.id === rowId
+        ? { ...r, qty: newQty, ...(r.demand_ids ? { demand_ids: [...r.demand_ids, ...created.map((d) => d.id)] } : {}) }
+        : r
+    );
+    projectStore.update(projectId, { rows: updatedRows, demand_ids: [...project.demand_ids, ...created.map((d) => d.id)] });
+  });
 }
 
 /**
@@ -185,37 +195,41 @@ export function increaseProjectRowQty(projectId: string, rowId: string, newQty: 
  * project never erases a real, already-completed assignment.
  */
 export function deleteProject(projectId: string): boolean {
-  const project = projectStore.get(projectId);
-  if (!project) return false;
+  return transaction(() => {
+    const project = projectStore.get(projectId);
+    if (!project) return false;
 
-  for (const demandId of project.demand_ids) {
-    const demand = demandStore.get(demandId);
-    if (demand && isEditableDemand(demand)) demandStore.remove(demandId);
-  }
-  projectStore.remove(projectId);
-  return true;
+    for (const demandId of project.demand_ids) {
+      const demand = demandStore.get(demandId);
+      if (demand && isEditableDemand(demand)) demandStore.remove(demandId);
+    }
+    projectStore.remove(projectId);
+    return true;
+  });
 }
 
 /** Full edit of a registered project: name, Tanggal SOP and every need
  * row (see reconcileNeedRows). Returns an error message when refused. */
 export function updateProject(projectId: string, input: { name: string; sop_date: string; rows: NeedRowDraft[] }): string | null {
-  const project = projectStore.get(projectId);
-  if (!project) return "Project tidak ditemukan.";
-  const rowsIn = input.rows.map((r) => {
-    const prev = r.id ? project.rows.find((p) => p.id === r.id) : undefined;
-    return prev?.released ? { ...r, release_date: prev.release_date, no_release: prev.no_release, released: true } : r;
+  return transaction(() => {
+    const project = projectStore.get(projectId);
+    if (!project) return "Project tidak ditemukan.";
+    const rowsIn = input.rows.map((r) => {
+      const prev = r.id ? project.rows.find((p) => p.id === r.id) : undefined;
+      return prev?.released ? { ...r, release_date: prev.release_date, no_release: prev.no_release, released: true } : r;
+    });
+    const result = reconcileNeedRows(project.rows, project.demand_ids, rowsIn, "Project", project.id, () => input.name);
+    if (!result.ok) return result.error;
+    projectStore.update(projectId, {
+      name: input.name,
+      start_date: input.sop_date,
+      end_date: projectEndDate(result.rows, input.sop_date),
+      rows: result.rows,
+      demand_ids: result.demandIds,
+    });
+    syncProjectSeatDemands();
+    return null;
   });
-  const result = reconcileNeedRows(project.rows, project.demand_ids, rowsIn, "Project", project.id, () => input.name);
-  if (!result.ok) return result.error;
-  projectStore.update(projectId, {
-    name: input.name,
-    start_date: input.sop_date,
-    end_date: projectEndDate(result.rows, input.sop_date),
-    rows: result.rows,
-    demand_ids: result.demandIds,
-  });
-  syncProjectSeatDemands();
-  return null;
 }
 
 /** §7 / §12 project releases, run when Demand/Supply/Project pages open

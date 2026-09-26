@@ -1,5 +1,5 @@
 // Takt Time: Takt Up opens demands, Takt Down releases people to the Supply Pool.
-import { genId } from "../../storage";
+import { genId, transaction } from "../../storage";
 import { demandStore, taktStore, utilPoolStore } from "../../repo";
 import type { ProjectMpNeedRow, TaktCase, TaktDownPerson, TaktDownPlanRow, UtilPoolEntry } from "../../types";
 import { estimateContractEnd } from "./people";
@@ -12,39 +12,43 @@ export function updateTaktUp(
   taktId: string,
   input: { plant: TaktCase["plant"]; date: string; takt_before: number; takt_after: number; rows: NeedRowDraft[] }
 ): string | null {
-  const takt = taktStore.get(taktId);
-  if (!takt || takt.category !== "up") return "Takt Up tidak ditemukan.";
-  const result = reconcileNeedRows(
-    takt.need_rows ?? [],
-    takt.demand_ids,
-    input.rows,
-    "TaktUp",
-    takt.id,
-    (row) => `Takt Up ${input.plant} - ${row.division} - ${row.dept}`
-  );
-  if (!result.ok) return result.error;
-  taktStore.update(taktId, {
-    plant: input.plant,
-    date: input.date,
-    takt_before: input.takt_before,
-    takt_after: input.takt_after,
-    need_rows: result.rows,
-    demand_ids: result.demandIds,
+  return transaction(() => {
+    const takt = taktStore.get(taktId);
+    if (!takt || takt.category !== "up") return "Takt Up tidak ditemukan.";
+    const result = reconcileNeedRows(
+      takt.need_rows ?? [],
+      takt.demand_ids,
+      input.rows,
+      "TaktUp",
+      takt.id,
+      (row) => `Takt Up ${input.plant} - ${row.division} - ${row.dept}`
+    );
+    if (!result.ok) return result.error;
+    taktStore.update(taktId, {
+      plant: input.plant,
+      date: input.date,
+      takt_before: input.takt_before,
+      takt_after: input.takt_after,
+      need_rows: result.rows,
+      demand_ids: result.demandIds,
+    });
+    return null;
   });
-  return null;
 }
 
 /** Same invariant as deleteProject: untouched demands go with the case,
  * anything already in progress stays standing on its own. */
 export function deleteTaktUp(taktId: string): boolean {
-  const takt = taktStore.get(taktId);
-  if (!takt || takt.category !== "up") return false;
-  for (const id of takt.demand_ids) {
-    const d = demandStore.get(id);
-    if (d && isEditableDemand(d)) demandStore.remove(id);
-  }
-  taktStore.remove(taktId);
-  return true;
+  return transaction(() => {
+    const takt = taktStore.get(taktId);
+    if (!takt || takt.category !== "up") return false;
+    for (const id of takt.demand_ids) {
+      const d = demandStore.get(id);
+      if (d && isEditableDemand(d)) demandStore.remove(id);
+    }
+    taktStore.remove(taktId);
+    return true;
+  });
 }
 
 export function createTaktUp(input: {
@@ -149,80 +153,91 @@ export function updateTaktDown(
     released_persons: TaktDownPerson[];
   }
 ): TaktCase | undefined {
-  const takt = taktStore.get(taktId);
-  if (!takt) return undefined;
+  return transaction(() => {
+    return transaction(() => {
+      return transaction(() => {
+        const takt = taktStore.get(taktId);
+        if (!takt) return undefined;
 
-  const poolByNoreg = new Map(
-    (takt.released_pool_ids ?? [])
-      .map((id) => utilPoolStore.get(id))
-      .filter((e): e is UtilPoolEntry => Boolean(e))
-      .map((e) => [e.noreg, e])
-  );
+        const poolByNoreg = new Map(
+          (takt.released_pool_ids ?? [])
+            .map((id) => utilPoolStore.get(id))
+            .filter((e): e is UtilPoolEntry => Boolean(e))
+            .map((e) => [e.noreg, e])
+        );
 
-  const nextNoregs = new Set(input.released_persons.map((p) => p.noreg));
-  const removedButLocked: TaktDownPerson[] = [];
-  const keptPoolIds: string[] = [];
+        const nextNoregs = new Set(input.released_persons.map((p) => p.noreg));
+        const removedButLocked: TaktDownPerson[] = [];
+        const keptPoolIds: string[] = [];
 
-  for (const [noreg, entry] of poolByNoreg) {
-    const stillPresent = nextNoregs.has(noreg);
-    if (stillPresent) {
-      keptPoolIds.push(entry.id);
-      // Keep the Supply Pool entry in sync with an in-place edit (e.g.
-      // correcting a person's shop or status) — only while it's still
-      // Open; an already-Assigned/Released entry keeps its snapshot.
-      if (entry.status === "Open") {
-        const edited = input.released_persons.find((p) => p.noreg === noreg);
-        if (
-          edited &&
-          (edited.nama !== entry.nama ||
-            edited.type !== entry.type ||
-            edited.div !== entry.prev_div ||
-            edited.dept !== entry.prev_dept)
-        ) {
-          utilPoolStore.update(entry.id, { nama: edited.nama, type: edited.type, prev_div: edited.div, prev_dept: edited.dept });
+        for (const [noreg, entry] of poolByNoreg) {
+          const stillPresent = nextNoregs.has(noreg);
+          if (stillPresent) {
+            keptPoolIds.push(entry.id);
+            // Keep the Supply Pool entry in sync with an in-place edit (e.g.
+            // correcting a person's shop or status) — only while it's still
+            // Open; an already-Assigned/Released entry keeps its snapshot.
+            if (entry.status === "Open") {
+              const edited = input.released_persons.find((p) => p.noreg === noreg);
+              if (
+                edited &&
+                (edited.nama !== entry.nama ||
+                  edited.type !== entry.type ||
+                  edited.div !== entry.prev_div ||
+                  edited.dept !== entry.prev_dept)
+              ) {
+                utilPoolStore.update(entry.id, {
+                  nama: edited.nama,
+                  type: edited.type,
+                  prev_div: edited.div,
+                  prev_dept: edited.dept,
+                });
+              }
+            }
+            continue;
+          }
+          if (entry.status === "Open") {
+            removePoolEntry(entry);
+          } else {
+            // Already utilized elsewhere — keep the pool entry and the person on
+            // the case instead of orphaning what it's now backing.
+            const prevPerson = (takt.released_persons ?? []).find((p) => p.noreg === noreg);
+            if (prevPerson) removedButLocked.push(prevPerson);
+            keptPoolIds.push(entry.id);
+          }
         }
-      }
-      continue;
-    }
-    if (entry.status === "Open") {
-      removePoolEntry(entry);
-    } else {
-      // Already utilized elsewhere — keep the pool entry and the person on
-      // the case instead of orphaning what it's now backing.
-      const prevPerson = (takt.released_persons ?? []).find((p) => p.noreg === noreg);
-      if (prevPerson) removedButLocked.push(prevPerson);
-      keptPoolIds.push(entry.id);
-    }
-  }
 
-  const newPersons = input.released_persons.filter((p) => !poolByNoreg.has(p.noreg));
-  const newPoolIds: string[] = [];
-  for (const p of newPersons) {
-    const contractEnd = estimateContractEnd(p.noreg, p.type);
-    const entry = pushToUtilPool({
-      noreg: p.noreg,
-      nama: p.nama,
-      type: p.type,
-      source: "TaktDown",
-      source_label: `Takt Down ${input.plant}`,
-      prev_div: p.div,
-      prev_dept: p.dept,
-      contract_end: contractEnd,
-      entered_pool_date: releaseDateFor(p, input.plan_rows, input.date),
+        const newPersons = input.released_persons.filter((p) => !poolByNoreg.has(p.noreg));
+        const newPoolIds: string[] = [];
+        for (const p of newPersons) {
+          const contractEnd = estimateContractEnd(p.noreg, p.type);
+          const entry = pushToUtilPool({
+            noreg: p.noreg,
+            nama: p.nama,
+            type: p.type,
+            source: "TaktDown",
+            source_label: `Takt Down ${input.plant}`,
+            prev_div: p.div,
+            prev_dept: p.dept,
+            contract_end: contractEnd,
+            entered_pool_date: releaseDateFor(p, input.plan_rows, input.date),
+          });
+          newPoolIds.push(entry.id);
+        }
+
+        const finalPersons = [...input.released_persons.filter((p) => nextNoregs.has(p.noreg)), ...removedButLocked];
+
+        return taktStore.update(taktId, {
+          plant: input.plant,
+          date: input.date,
+          takt_before: input.takt_before,
+          takt_after: input.takt_after,
+          plan_rows: input.plan_rows,
+          released_persons: finalPersons,
+          released_pool_ids: [...keptPoolIds, ...newPoolIds],
+        });
+      });
     });
-    newPoolIds.push(entry.id);
-  }
-
-  const finalPersons = [...input.released_persons.filter((p) => nextNoregs.has(p.noreg)), ...removedButLocked];
-
-  return taktStore.update(taktId, {
-    plant: input.plant,
-    date: input.date,
-    takt_before: input.takt_before,
-    takt_after: input.takt_after,
-    plan_rows: input.plan_rows,
-    released_persons: finalPersons,
-    released_pool_ids: [...keptPoolIds, ...newPoolIds],
   });
 }
 
@@ -235,13 +250,15 @@ export function updateTaktDown(
  * keeps standing on its own. Returns false if the case doesn't exist.
  */
 export function deleteTaktDown(taktId: string): boolean {
-  const takt = taktStore.get(taktId);
-  if (!takt || takt.category !== "down") return false;
+  return transaction(() => {
+    const takt = taktStore.get(taktId);
+    if (!takt || takt.category !== "down") return false;
 
-  for (const poolId of takt.released_pool_ids ?? []) {
-    const entry = utilPoolStore.get(poolId);
-    if (entry && entry.status === "Open") removePoolEntry(entry);
-  }
-  taktStore.remove(taktId);
-  return true;
+    for (const poolId of takt.released_pool_ids ?? []) {
+      const entry = utilPoolStore.get(poolId);
+      if (entry && entry.status === "Open") removePoolEntry(entry);
+    }
+    taktStore.remove(taktId);
+    return true;
+  });
 }

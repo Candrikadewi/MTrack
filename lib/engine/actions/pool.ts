@@ -1,6 +1,6 @@
 // Supply (Utilization) Pool: adding people, Kaizen supply, proposing a pool candidate for a
 // demand, and natural release.
-import { genId } from "../../storage";
+import { genId, transaction } from "../../storage";
 import { demandStore, utilPoolStore } from "../../repo";
 import { createClient } from "../../supabase/client";
 import { pushToast } from "../../toast";
@@ -67,19 +67,21 @@ export function createKaizenSupply(input: {
     releaseDate: string;
   }[];
 }): UtilPoolEntry[] {
-  return input.persons.map((p) => {
-    const contractEnd = estimateContractEnd(p.noreg, p.type);
-    const year = p.releaseDate.slice(0, 4);
-    return pushToUtilPool({
-      noreg: p.noreg,
-      nama: p.nama,
-      type: p.type,
-      source: "Kaizen",
-      source_label: `Kaizen ${year} Labor ${input.laborGroup} - ${p.div} (${p.activity})`,
-      prev_div: p.div,
-      prev_dept: p.dept,
-      contract_end: contractEnd,
-      entered_pool_date: p.releaseDate,
+  return transaction(() => {
+    return input.persons.map((p) => {
+      const contractEnd = estimateContractEnd(p.noreg, p.type);
+      const year = p.releaseDate.slice(0, 4);
+      return pushToUtilPool({
+        noreg: p.noreg,
+        nama: p.nama,
+        type: p.type,
+        source: "Kaizen",
+        source_label: `Kaizen ${year} Labor ${input.laborGroup} - ${p.div} (${p.activity})`,
+        prev_div: p.div,
+        prev_dept: p.dept,
+        contract_end: contractEnd,
+        entered_pool_date: p.releaseDate,
+      });
     });
   });
 }
