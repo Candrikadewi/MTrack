@@ -84,12 +84,24 @@ Butuh Node.js 22.
 
 ## Database
 
-Untuk database baru: jalankan `supabase/schema.sql`, lalu `migration_2.sql` sampai
-`migration_14.sql` **berurutan** di Supabase → SQL Editor.
-Untuk mengecek migration mana yang sudah jalan: `supabase/check_migrations.sql` (aman, hanya membaca).
+Untuk database baru: jalankan `supabase/schema.sql`, lalu `migration_2.sql` sampai migration
+terakhir **berurutan** di Supabase → SQL Editor. Untuk mengecek migration mana yang sudah jalan:
+`supabase/check_migrations.sql` (aman, hanya membaca). Sejak `migration_15`, setiap migration
+mencatat dirinya di tabel `app_migrations`, dan admin melihat peringatan di CAMP kalau ada yang
+belum dijalankan.
 
-Setiap perubahan struktur database ditambahkan sebagai file `migration_<n>.sql` baru —
-file lama tidak diubah.
+Setiap perubahan struktur database ditambahkan sebagai file `migration_<n>.sql` baru — file lama
+tidak diubah. Migration baru harus:
+
+1. aman dijalankan dua kali (`if not exists`, `create or replace`, …);
+2. diakhiri `insert into app_migrations (name) values ('migration_<n>') on conflict (name) do nothing;`;
+3. ditambahkan ke `REQUIRED_MIGRATIONS` di `lib/migrations.ts` dan ke `supabase/check_migrations.sql`.
+
+Test otomatis mengecek ketiganya.
+
+Aksi yang mengubah beberapa baris sekaligus (registrasi / edit / hapus projek, Takt, Kaizen,
+hapus data upload) disimpan sebagai **satu transaksi** lewat fungsi database `apply_changes`:
+berhasil semua atau batal semua (`transaction()` di `lib/storage.ts`).
 
 ## Cek sebelum push
 
@@ -107,9 +119,12 @@ GitHub Actions menjalankan semuanya (plus `format:check`) di setiap pull request
 
 Test ada di `tests/`, berjalan tanpa internet dan tanpa menyentuh database asli:
 
-- `tests/helpers/fakeSupabase.ts` — Supabase tiruan yang mencatat setiap panggilan.
-- `tests/helpers/fixtures.ts` — pembuat data contoh (karyawan, demand, review, ...).
-- "Hari ini" dikunci ke 2026-09-25 (`tests/setup.ts`) supaya hasil tidak berubah tiap hari.
+- `tests/engine`, `tests/lib` — logika bisnis dan helper. Supabase diganti tiruan
+  (`tests/helpers/fakeSupabase.ts`) yang mencatat setiap panggilan; data contoh dari
+  `tests/helpers/fixtures.ts`. "Hari ini" dikunci ke 2026-09-25 (`tests/setup.ts`).
+- `tests/db` — SQL sungguhan di Postgres dalam memori (PGlite): semua migration berjalan
+  berurutan dan aman diulang, `apply_changes` dan aturan RLS-nya, pencegah data dobel, dan
+  *contract test*: apa pun yang dikirim aplikasi harus diterima skema database.
 
 `npm run test:watch` menjalankan ulang test setiap file disimpan. Saat menambah aturan
 bisnis, tambahkan juga test-nya — test adalah dokumentasi aturan yang selalu dicek.

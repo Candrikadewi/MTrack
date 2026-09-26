@@ -6,6 +6,7 @@ import { MobileNav } from "@/components/MobileNav";
 import { ToastHost } from "@/components/ui/ToastHost";
 import { UpdateNotifier } from "@/components/UpdateNotifier";
 import { NavTracker } from "@/components/NavTracker";
+import { MigrationNotice } from "@/components/MigrationNotice";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const profile = await getCurrentProfile();
@@ -19,7 +20,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <Sidebar role={profile.role} email={profile.email} />
       <div className="flex min-h-screen flex-col md:pl-64">
         <MobileNav role={profile.role} />
-        <main className="flex-1 p-4 md:p-8">{children}</main>
+        <main className="flex-1 p-4 md:p-8">
+          {profile.role === "admin" && <MigrationNotice />}
+          {children}
+        </main>
       </div>
     </RoleProvider>
   );
