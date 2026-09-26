@@ -52,7 +52,7 @@ Before CAMP, this tracking lived entirely in Excel files and PowerPoint decks sa
 
 ## Evidence on Hand
 
-No real screenshots, customer names, testimonials, or usage metrics are on hand. The only representative data available is the synthetic sample dataset (`lib/sampleData.ts`), used for local development and QA — not real evidence and not to be presented as such.
+No real screenshots, customer names, testimonials, or usage metrics are on hand. The only representative data in the repo is the synthetic test fixtures (`tests/helpers/fixtures.ts`) — not real evidence and not to be presented as such.
 
 ## Product Principles
 
