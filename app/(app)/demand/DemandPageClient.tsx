@@ -270,7 +270,7 @@ export function DemandPageClient() {
     };
   }, [demands, divs, depts, empByNoreg, vokasiNoregs, scenarioBase]);
 
-  const monthLabel = showDone ? "Semua demand" : "Demand aktif";
+  const monthLabel = showDone ? "Termasuk yang selesai" : "Demand aktif";
 
   function exportReport() {
     import("xlsx").then((XLSX) => {
@@ -528,7 +528,7 @@ export function DemandPageClient() {
 
         <Card
           title={`Detail Demand — ${monthLabel}`}
-          subtitle="Semua demand yang masih berjalan dari bulan mana pun, urut dari Tiba di Shop terdekat. Selesai = sudah diterima shop atau No Replace."
+          subtitle="Semua demand yang masih berjalan dari bulan mana pun, urut dari Tiba di Shop terdekat. Selesai = sudah diterima shop atau No Replace; yang selesai lebih dari 12 bulan lalu ada di History → Arsip."
           action={
             <div className="flex flex-wrap items-center justify-end gap-2">
               <label className="flex min-h-9 cursor-pointer items-center gap-2 rounded-lg px-2 text-xs font-medium text-slate-600 dark:text-slate-300">
@@ -538,7 +538,7 @@ export function DemandPageClient() {
                   onChange={(e) => setShowDone(e.target.checked)}
                   className="h-3.5 w-3.5 rounded border-slate-300 text-blue-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-blue-500"
                 />
-                Tampilkan yang sudah selesai
+                Tampilkan yang selesai (12 bulan terakhir)
               </label>
               <Button variant="secondary" size="sm" onClick={exportReport} disabled={filteredDemands.length === 0}>
                 Laporan Excel

@@ -12,6 +12,43 @@
 import type { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
 import { createClient } from "./supabase/client";
 import { pushToast } from "./toast";
+import { logError } from "./errorLog";
+
+// ---------------------------------------------------------------------------
+// Which Supabase connection the stores (and the engine) use
+// ---------------------------------------------------------------------------
+
+type DataClient = ReturnType<typeof createClient>;
+let clientFactory: () => DataClient = createClient;
+
+/** The Supabase client the stores and the engine read and write with: the
+ * signed-in browser user's, or — while a server job runs — the one the job
+ * set with setDataClient. */
+export function dataClient(): DataClient {
+  return clientFactory();
+}
+
+/** For server jobs (see lib/jobs): use this client instead of the browser
+ * one; `null` switches back. */
+export function setDataClient(factory: (() => DataClient) | null): void {
+  clientFactory = factory ?? createClient;
+}
+
+// Every write and RPC still on its way, so a server job can wait for all of
+// them before it reports back.
+const inFlight = new Set<Promise<unknown>>();
+
+export function trackInFlight<P extends Promise<unknown>>(promise: P): P {
+  inFlight.add(promise);
+  void promise.finally(() => inFlight.delete(promise));
+  return promise;
+}
+
+/** Resolves once no write, transaction or tracked RPC is in flight —
+ * including ones started by others finishing. */
+export async function settleWrites(): Promise<void> {
+  while (inFlight.size > 0) await Promise.allSettled([...inFlight]);
+}
 
 type PgError = { message: string } | null;
 type WriteResult = { error: PgError };
@@ -55,6 +92,12 @@ export function getChangeVersion(): number {
   return changeVersion;
 }
 
+/** For data kept outside a store's own cache (e.g. snapshot employees
+ * loaded on demand): tells subscribed components to re-read. */
+export function notifyDataChanged(): void {
+  notify();
+}
+
 /**
  * Every table's `id` column is Postgres `uuid` (see supabase/schema.sql),
  * and the RPCs (set_review_result, set_demand_replacement) type their id
@@ -89,11 +132,18 @@ const TABLE_LABELS: Record<string, string> = {
 };
 
 let lastFailure = { text: "", at: 0 };
+let failureListener: ((table: string, message: string) => void) | null = null;
+
+/** Also hear about every refused write (a server job counts them). */
+export function onWriteFailure(listener: ((table: string, message: string) => void) | null): void {
+  failureListener = listener;
+}
 
 /** Tells the person a save didn't go through: the cache already showed it
  * as done, so without this they'd believe it was saved. A burst of the same
  * failure (e.g. a loop of inserts while offline) gives one toast. */
 function reportWriteFailure(table: string, message: string): void {
+  logError({ source: "save", message: `${table}: ${message}` });
   const text = `Gagal menyimpan ${TABLE_LABELS[table] ?? table}: ${message}. Perubahan dibatalkan.`;
   const now = Date.now();
   if (text === lastFailure.text && now - lastFailure.at < 4000) return;
@@ -155,7 +205,9 @@ function isMissingApplyChanges(message: string): boolean {
 }
 
 async function commit(changes: QueuedChange[]): Promise<void> {
-  const error = await Promise.resolve(createClient().rpc("apply_changes", { ops: changes.map((c) => c.change) })).then(
+  const error = await trackInFlight(
+    Promise.resolve(dataClient().rpc("apply_changes", { ops: changes.map((c) => c.change) }))
+  ).then(
     (res: { error: { message: string } | null }) => res.error?.message ?? null,
     (err: unknown) => errorMessage(err)
   );
@@ -168,6 +220,7 @@ async function commit(changes: QueuedChange[]): Promise<void> {
   console.error("apply_changes failed:", error);
   for (const c of [...changes].reverse()) c.rollback();
   notify();
+  failureListener?.(changes[0].change.table, error);
   reportWriteFailure(changes[0].change.table, error);
 }
 
@@ -189,39 +242,161 @@ export interface Store<T extends { id: string }> {
   ready(): boolean;
   /** Client-only, idempotent: hydrates the cache and opens the realtime subscription. */
   init(): void;
+  /** Reads the table into the cache once, without realtime — for server
+   * jobs, where init() does nothing. */
+  load(): Promise<void>;
+  /** Forgets the cache (after a server job). */
+  reset(): void;
   /** Forces a fresh select("*") from Supabase into the cache — use after a
    * server-side mutation (e.g. an RPC that inserts rows the client didn't
    * create locally) so the UI doesn't have to wait on realtime to catch up. */
   refetch(): void;
+  /** Whether the cache holds the whole table. False for a table read as a
+   * working set (see StoreOptions.workingSet): older rows are only in the
+   * database until something asks for them with fetchWhere. */
+  complete(): boolean;
+  /** Reads the rows matching `where` from the database (all of them, page
+   * by page) and adds them to the cache — for older rows outside the
+   * working set: a past month on the Dashboard, the batch being deleted,
+   * existing rows to check before inserting. Resolves to the rows read.
+   * With `once`, a query already made under that key isn't repeated. */
+  fetchWhere(where: (query: RowQuery) => RowQuery, options?: { once?: string }): Promise<T[]>;
   key: string;
 }
 
-export function createStore<T extends { id: string }>(table: string): Store<T> {
+/** The filters fetchWhere may use (a subset of Supabase's query builder). */
+export interface RowQuery {
+  eq(column: string, value: unknown): RowQuery;
+  neq(column: string, value: unknown): RowQuery;
+  in(column: string, values: readonly unknown[]): RowQuery;
+  gt(column: string, value: unknown): RowQuery;
+  gte(column: string, value: unknown): RowQuery;
+  lt(column: string, value: unknown): RowQuery;
+  lte(column: string, value: unknown): RowQuery;
+  ilike(column: string, pattern: string): RowQuery;
+  or(filters: string): RowQuery;
+}
+
+export interface StoreOptions {
+  /** Columns to read, instead of every column ("*"). */
+  select?: string;
+  /** Read this instead when `select` names a column the database doesn't
+   * have yet (a migration not run). */
+  fallbackSelect?: string;
+  /** Database function returning the rows to keep in the browser (see
+   * supabase/migration_20.sql) instead of the whole table. Until that
+   * migration is run, the whole table is read as before. */
+  workingSet?: string;
+}
+
+/** A select, ready to be read one page at a time. */
+interface PageQuery {
+  order(column: string): { range(from: number, to: number): PromiseLike<unknown> };
+}
+
+/** The working-set function isn't there yet (migration_20 not run). */
+function isMissingFunction(message: string, fn: string): boolean {
+  return message.includes(fn) && /could not find|does not exist/i.test(message);
+}
+
+export function createStore<T extends { id: string }>(table: string, options: StoreOptions = {}): Store<T> {
   let cache: T[] = [];
+  let columns = options.select ?? "*";
   let initialized = false;
   let started = false;
+  /** Still reading a working set — false once the function turned out to
+   * be missing (the whole table is read instead). */
+  let workingSet = options.workingSet ?? null;
+  /** Rows added by fetchWhere, kept when the working set is read again. */
+  const extraIds = new Set<string>();
+  const fetched = new Map<string, Promise<T[]>>();
 
   function client() {
-    return createClient();
+    return dataClient();
   }
 
   /** Supabase (PostgREST) returns at most 1000 rows per request by
    * default, silently — so read in pages until a short page comes back,
    * or tables past 1000 rows (Vokasi, reviews, demands) lose data. */
   async function fetchAll(): Promise<T[]> {
-    const supabase = client();
+    const fn = workingSet;
+    try {
+      return await fetchPages(() => {
+        const supabase = client();
+        return (fn ? supabase.rpc(fn).select(columns) : supabase.from(table).select(columns)) as unknown as PageQuery;
+      });
+    } catch (err) {
+      if (fn && isMissingFunction(errorMessage(err), fn)) {
+        console.warn(`${fn} is missing (migration_20 not run); reading all of ${table}`);
+        workingSet = null;
+        return fetchAll();
+      }
+      throw err;
+    }
+  }
+
+  /** Every row a query returns, a page at a time. */
+  async function fetchPages(query: () => PageQuery): Promise<T[]> {
     const all: T[] = [];
     for (let from = 0; ; from += PAGE_SIZE) {
-      const res: ReadResult<T> = await supabase
-        .from(table)
-        .select("*")
+      const res = (await query()
         .order("id")
-        .range(from, from + PAGE_SIZE - 1);
+        .range(from, from + PAGE_SIZE - 1)) as ReadResult<T>;
+      if (res.error && options.fallbackSelect && columns !== options.fallbackSelect && /column/i.test(res.error.message)) {
+        console.warn(`select ${columns} from ${table} failed (${res.error.message}); reading ${options.fallbackSelect} instead`);
+        columns = options.fallbackSelect;
+        return fetchPages(query);
+      }
       if (res.error) throw new Error(res.error.message);
       const page = res.data ?? [];
       all.push(...page);
       if (page.length < PAGE_SIZE) return all;
     }
+  }
+
+  /** The working set just read, plus rows fetchWhere added that it
+   * doesn't include (still in the cache, so not deleted meanwhile). */
+  function withExtras(rows: T[]): T[] {
+    if (extraIds.size === 0) return rows;
+    const ids = new Set(rows.map((r) => r.id));
+    const extras = cache.filter((r) => extraIds.has(r.id) && !ids.has(r.id));
+    return extras.length ? [...rows, ...extras] : rows;
+  }
+
+  /** Adds rows read outside the working set; a row already cached is
+   * replaced by the fresher copy. */
+  function merge(rows: T[]): void {
+    if (rows.length === 0) return;
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    cache = cache.map((r) => {
+      const fresh = byId.get(r.id);
+      if (!fresh) return r;
+      byId.delete(r.id);
+      return fresh;
+    });
+    for (const r of byId.values()) {
+      cache.push(r);
+      extraIds.add(r.id);
+    }
+    notify();
+  }
+
+  function fetchWhere(where: (query: RowQuery) => RowQuery, opts: { once?: string } = {}): Promise<T[]> {
+    const known = opts.once ? fetched.get(opts.once) : undefined;
+    if (known) return known;
+    const request = trackInFlight(
+      fetchPages(() => where(client().from(table).select(columns) as unknown as RowQuery) as unknown as PageQuery)
+    ).then((rows) => {
+      merge(rows);
+      return rows;
+    });
+    if (opts.once) {
+      const key = opts.once;
+      fetched.set(key, request);
+      // A failed read may be tried again.
+      request.catch(() => fetched.delete(key));
+    }
+    return request;
   }
 
   function start() {
@@ -231,7 +406,7 @@ export function createStore<T extends { id: string }>(table: string): Store<T> {
 
     fetchAll()
       .then((rows) => {
-        cache = rows;
+        cache = withExtras(rows);
         initialized = true;
         notify();
       })
@@ -266,7 +441,7 @@ export function createStore<T extends { id: string }>(table: string): Store<T> {
     if (typeof window === "undefined") return;
     fetchAll()
       .then((rows) => {
-        cache = rows;
+        cache = withExtras(rows);
         notify();
       })
       .catch((err: unknown) => console.error(`refetch ${table} failed:`, err));
@@ -281,7 +456,7 @@ export function createStore<T extends { id: string }>(table: string): Store<T> {
     rollback: () => void,
     report = true
   ): Promise<string | null> {
-    return Promise.resolve(request)
+    return trackInFlight(Promise.resolve(request))
       .then(
         (res) => res.error?.message ?? null,
         (err: unknown) => errorMessage(err)
@@ -291,6 +466,7 @@ export function createStore<T extends { id: string }>(table: string): Store<T> {
           console.error(`${label} ${table} failed:`, error);
           rollback();
           notify();
+          failureListener?.(table, error);
           if (report) reportWriteFailure(table, error);
         }
         return error;
@@ -321,7 +497,24 @@ export function createStore<T extends { id: string }>(table: string): Store<T> {
   return {
     key: table,
     init: start,
+    async load() {
+      cache = withExtras(await fetchAll());
+      initialized = true;
+      notify();
+    },
+    reset() {
+      cache = [];
+      initialized = false;
+      started = false;
+      workingSet = options.workingSet ?? null;
+      extraIds.clear();
+      fetched.clear();
+    },
     refetch,
+    complete() {
+      return !workingSet;
+    },
+    fetchWhere,
     ready() {
       return initialized;
     },

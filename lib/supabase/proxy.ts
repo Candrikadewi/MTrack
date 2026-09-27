@@ -1,7 +1,9 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-const PUBLIC_PATHS = ["/login", "/auth"];
+// /api/jobs checks its own secret (see app/api/jobs); it's called by Vercel
+// Cron, not a signed-in person.
+const PUBLIC_PATHS = ["/login", "/auth", "/api/jobs"];
 
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request });

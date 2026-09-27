@@ -14,7 +14,6 @@ import { effectiveDivisionScope, filterEmployees } from "@/lib/engine/dashboard"
 import { computeVokasiStatus } from "@/lib/engine/compute";
 import { isPermanenForRatio } from "@/lib/types";
 import { useRole } from "@/lib/RoleContext";
-import type { EmployeeRecord, ZparSnapshot } from "@/lib/types";
 import { ActionNeededBlock } from "./_components/ActionNeeded";
 import { AgeMovementBlock } from "./_components/AgeMovement";
 import { LaborTypeMovementBlock } from "./_components/LaborTypeMovement";
@@ -47,17 +46,6 @@ export default function DashboardPage() {
     () => new Set(demands.filter((d) => d.category === "Vokasi" && d.status === "Fulfilled").map((d) => d.origin_ref)),
     [demands]
   );
-
-  const snapshotsByPeriod = useMemo(() => {
-    const latestByPeriod = new Map<string, ZparSnapshot>();
-    for (const s of snapshots) {
-      const existing = latestByPeriod.get(s.period);
-      if (!existing || s.upload_date > existing.upload_date) latestByPeriod.set(s.period, s);
-    }
-    const map = new Map<string, EmployeeRecord[]>();
-    for (const [p, s] of latestByPeriod) map.set(p, s.employees);
-    return map;
-  }, [snapshots]);
 
   // Single org filter for the whole page — every section below reads off
   // this instead of carrying its own separate Directorate/Division/Dept
@@ -222,7 +210,6 @@ export default function DashboardPage() {
 
           {/* 2. Manpower Movement */}
           <ManpowerMovementBlock
-            snapshotsByPeriod={snapshotsByPeriod}
             vokasi={vokasi}
             reviews={reviews}
             demands={demands}
@@ -240,12 +227,7 @@ export default function DashboardPage() {
           />
 
           {/* 4. Labor Type Movement */}
-          <LaborTypeMovementBlock
-            snapshotsByPeriod={snapshotsByPeriod}
-            selDirectorates={selDirectorates}
-            selDivisions={selDivisions}
-            selDepts={selDepts}
-          />
+          <LaborTypeMovementBlock selDirectorates={selDirectorates} selDivisions={selDivisions} selDepts={selDepts} />
         </>
       ) : (
         <>

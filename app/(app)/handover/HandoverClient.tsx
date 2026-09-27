@@ -9,6 +9,7 @@ import { EmptyState, TableWrap, Td, Th } from "@/components/ui/Table";
 import { useStoreList } from "@/lib/useStore";
 import { handoverStore, zparStore } from "@/lib/repo";
 import { deptsOf } from "@/lib/engine/dashboard";
+import { pushToast } from "@/lib/toast";
 import { buildHandoverForm, finalizeHandoverForm } from "@/lib/engine/handover";
 import { fmtDate } from "@/lib/engine/compute";
 import { useSessionState } from "@/lib/useSessionState";
@@ -26,7 +27,9 @@ export function HandoverClient() {
 
   function generate() {
     if (!dept || !period) return;
-    buildHandoverForm(dept, period);
+    buildHandoverForm(dept, period).catch((err: unknown) =>
+      pushToast(`Gagal membuat form: ${err instanceof Error ? err.message : String(err)}`)
+    );
   }
 
   function finalize(id: string) {

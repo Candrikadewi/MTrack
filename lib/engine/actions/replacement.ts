@@ -1,7 +1,7 @@
 // Filling a demand: mapping a candidate, No Replace, the fulfilment date, verification
 // (contract signed / assigned) and the shop's confirmation.
-import { demandStore } from "../../repo";
-import { createClient } from "../../supabase/client";
+import { dataClient } from "../../storage";
+import { demandStore, vokasiStore } from "../../repo";
 import { pushToast } from "../../toast";
 import { computeFsStatus } from "../compute";
 import type { EmploymentStatus, ReplacementStatus } from "../../types";
@@ -18,6 +18,19 @@ import { syncProjectSeatDemands } from "./projects";
  * Hire / MP Excess / MP Back Up" flow; the Vokasi tab leaves it "".
  */
 export function setDemandReplacementByNoreg(demandId: string, noreg: string, replacementStatus: ReplacementStatus = ""): void {
+  // An alumnus from an older batch isn't in the browser (working set):
+  // look them up first, or they'd be saved as a plain ZPAR employee.
+  if (noreg && !getVokasiByNoreg(noreg) && !vokasiStore.complete()) {
+    vokasiStore
+      .fetchWhere((q) => q.eq("noreg", noreg), { once: `noreg:${noreg}` })
+      .catch((err: unknown) => console.error("looking up Vokasi noreg failed:", err))
+      .finally(() => saveReplacement(demandId, noreg, replacementStatus));
+    return;
+  }
+  saveReplacement(demandId, noreg, replacementStatus);
+}
+
+function saveReplacement(demandId: string, noreg: string, replacementStatus: ReplacementStatus): void {
   const demand = demandStore.get(demandId);
   if (!demand) return;
 
@@ -40,7 +53,7 @@ export function setDemandReplacementByNoreg(demandId: string, noreg: string, rep
     employmentStatus = replacementStatus === "PKWT New Hire" ? "Kontrak" : getEmploymentStatus(noreg);
   }
 
-  const supabase = createClient();
+  const supabase = dataClient();
   supabase
     .rpc("set_demand_replacement", {
       p_demand_id: demandId,
@@ -66,7 +79,7 @@ export function setDemandReplacementByNoreg(demandId: string, noreg: string, rep
 
 /** Kontrak tab "No Replace" path — clears any replacement info, records the reason. */
 export function setDemandNoReplace(demandId: string, reason: string): void {
-  const supabase = createClient();
+  const supabase = dataClient();
   supabase
     .rpc("set_demand_replacement", {
       p_demand_id: demandId,
@@ -109,7 +122,7 @@ export function confirmDemandFulfillment(demandId: string, confirmedDate: string
     fulfillment_confirmed_date: confirmedDate,
     status: confirmedDate ? "Fulfilled" : "Open",
   });
-  const supabase = createClient();
+  const supabase = dataClient();
   supabase
     .rpc("confirm_demand_fulfillment", { p_demand_id: demandId, p_confirmed_date: confirmedDate || null })
     .then((res: { error: { message: string } | null }) => {
@@ -143,7 +156,7 @@ export function confirmShopReceipt(demandId: string, confirmedDate: string): voi
   const previous = demandStore.get(demandId);
   if (!previous) return;
   demandStore.patchLocal(demandId, { shop_confirmed_date: confirmedDate });
-  const supabase = createClient();
+  const supabase = dataClient();
   supabase
     .rpc("confirm_shop_receipt", { p_demand_id: demandId, p_confirmed_date: confirmedDate || null })
     .then((res: { error: { message: string } | null }) => {

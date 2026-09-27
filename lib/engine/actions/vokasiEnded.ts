@@ -4,6 +4,7 @@ import { addDays, format, parseISO } from "date-fns";
 import { demandTargetDate } from "../enrollment";
 import { demandStore, utilPoolStore, vokasiStore } from "../../repo";
 import { pushToast } from "../../toast";
+import { inChunks } from "../../history";
 import type { Demand, UtilPoolEntry, VokasiRecord } from "../../types";
 import { baseDemand } from "./demands";
 import { setDemandReplacementByNoreg, setDemandNoReplace } from "./replacement";
@@ -64,9 +65,24 @@ export function pruneStaleVokasiDemands(): number {
  * (auto-matching) can find them. */
 export async function ensureVokasiEndedDemands(): Promise<number> {
   pruneStaleVokasiDemands();
+  const thisMonth = monthStartKey();
+  // The demand of a record normally sits in the working set (its end date
+  // is recent); if one ever doesn't, read it rather than create it twice.
+  if (!demandStore.complete()) {
+    const known = new Set(demandStore.list().map((d) => d.origin_ref));
+    const unmatched = vokasiStore
+      .list()
+      .filter((v) => v.tgl_ended && v.tgl_ended >= thisMonth && !known.has(v.id))
+      .map((v) => v.id);
+    try {
+      await inChunks(unmatched, (ids) => demandStore.fetchWhere((q) => q.eq("origin_type", "VokasiEnded").in("origin_ref", ids)));
+    } catch (err) {
+      pushToast(`Gagal memeriksa demand Vokasi: ${err instanceof Error ? err.message : String(err)}`);
+      return 0;
+    }
+  }
   const demands = demandStore.list();
   const existingRefs = new Set(demands.filter((d) => d.origin_type === "VokasiEnded").map((d) => d.origin_ref));
-  const thisMonth = monthStartKey();
   const toCreate: Demand[] = [];
   for (const v of vokasiStore.list()) {
     if (!v.tgl_ended || v.tgl_ended < thisMonth || existingRefs.has(v.id)) continue;

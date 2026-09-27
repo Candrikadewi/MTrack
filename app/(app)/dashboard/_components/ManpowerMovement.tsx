@@ -11,6 +11,8 @@ import { MultiSelect } from "@/components/ui/MultiSelect";
 import { CompositionChart } from "@/components/ui/CompositionChart";
 import { Badge, type Tone as BadgeTone } from "@/components/ui/Badge";
 import { EmptyState } from "@/components/ui/Table";
+import { Skeleton } from "@/components/ui/Skeleton";
+import { useEmployeesByPeriod, useSnapshotPeriods } from "@/lib/useSnapshotEmployees";
 import {
   diffEmployees,
   filterByLaborTypeStatus,
@@ -21,12 +23,14 @@ import {
   type MovementStatus,
 } from "@/lib/engine/dashboard";
 import { LABOR_TYPES } from "@/lib/types";
-import type { Demand, EmployeeRecord, PkwtReview, VokasiRecord } from "@/lib/types";
+import { demandStore, pkwtReviewStore, vokasiStore } from "@/lib/repo";
+import { beforeWorkingSet, inChunks, monthBounds } from "@/lib/history";
+import { useOlderRows } from "@/lib/useOlderRows";
+import type { Demand, PkwtReview, VokasiRecord } from "@/lib/types";
 
 const MOVEMENT_STATUSES: MovementStatus[] = ["Permanen", "Kontrak", "Vokasi"];
 
 export function ManpowerMovementBlock({
-  snapshotsByPeriod,
   vokasi,
   reviews,
   demands,
@@ -34,7 +38,6 @@ export function ManpowerMovementBlock({
   selDivisions,
   selDepts,
 }: {
-  snapshotsByPeriod: Map<string, EmployeeRecord[]>;
   vokasi: VokasiRecord[];
   reviews: PkwtReview[];
   demands: Demand[];
@@ -50,12 +53,57 @@ export function ManpowerMovementBlock({
   // filter swaps it for any mix of months — every uploaded snapshot (e.g.
   // Mar 2019…Mar 2025) plus this FY's months — drawn oldest → newest.
   const refDate = useMemo(() => new Date(), []);
+  const periodsWithData = useSnapshotPeriods();
   const periodOptions = useMemo(
     () =>
-      Array.from(new Set([...snapshotsByPeriod.keys(), ...fiscalYearMonths(refDate)]))
+      Array.from(new Set([...periodsWithData, ...fiscalYearMonths(refDate)]))
         .sort()
         .reverse(),
-    [snapshotsByPeriod, refDate]
+    [periodsWithData, refDate]
+  );
+  const chosenPeriods = useMemo(() => selPeriods.filter((p) => periodOptions.includes(p)), [selPeriods, periodOptions]);
+  const [diffMonth, setDiffMonth] = useSessionState<string>("dash.movement.diffMonth", "");
+  const prevMonth = diffMonth ? previousPeriodWithData(diffMonth, periodsWithData) : null;
+  // Only the months on screen (and the pair being compared) are loaded.
+  const shownMonths = chosenPeriods.length ? chosenPeriods : fiscalYearMonths(refDate);
+  const { byPeriod: snapshotsByPeriod, loading: loadingSnapshots } = useEmployeesByPeriod([
+    ...shownMonths,
+    ...(diffMonth && prevMonth ? [diffMonth, prevMonth] : []),
+  ]);
+
+  // Months older than the working set (lib/history.ts): who was a Vokasi
+  // then, and why people left then, may only be in the database.
+  const oldMonths = shownMonths.filter((m) => beforeWorkingSet(m)).sort();
+  const loadingOldVokasi = useOlderRows(
+    oldMonths.length && !vokasiStore.complete() ? `movement-vokasi:${oldMonths.join(",")}` : null,
+    () =>
+      Promise.all(
+        oldMonths.map((m) => {
+          const { end } = monthBounds(m);
+          return vokasiStore.fetchWhere((q) => q.lte("tgl_masuk", end).gt("tgl_ended", end), { once: `vokasi-active:${m}` });
+        })
+      )
+  );
+  const loading = loadingSnapshots || loadingOldVokasi;
+  const oldExitNoregs = useMemo(() => {
+    if (!diffMonth || !prevMonth || !beforeWorkingSet(prevMonth)) return [];
+    const before = snapshotsByPeriod.get(prevMonth);
+    const after = snapshotsByPeriod.get(diffMonth);
+    if (!before || !after) return [];
+    const stayed = new Set(after.map((e) => e.noreg));
+    return before.filter((e) => e.noreg && !stayed.has(e.noreg)).map((e) => e.noreg);
+  }, [diffMonth, prevMonth, snapshotsByPeriod]);
+  useOlderRows(oldExitNoregs.length ? `movement-exits:${prevMonth}:${diffMonth}` : null, () =>
+    Promise.all([
+      pkwtReviewStore.complete() ||
+        inChunks(oldExitNoregs, (chunk) =>
+          pkwtReviewStore.fetchWhere((q) => q.in("noreg", chunk).eq("review_result", "Terminate"))
+        ),
+      demandStore.complete() ||
+        inChunks(oldExitNoregs, (chunk) =>
+          demandStore.fetchWhere((q) => q.in("outgoing_noreg", chunk).in("origin_type", ["Pension", "Resign"]))
+        ),
+    ])
   );
   const movementRows = useMemo(
     () =>
@@ -68,30 +116,17 @@ export function ManpowerMovementBlock({
           statuses: selStatuses,
         },
         refDate,
-        selPeriods.filter((p) => periodOptions.includes(p))
+        chosenPeriods
       ),
-    [
-      snapshotsByPeriod,
-      vokasi,
-      selDirectorates,
-      selDivisions,
-      selDepts,
-      selLaborTypes,
-      selStatuses,
-      refDate,
-      selPeriods,
-      periodOptions,
-    ]
+    [snapshotsByPeriod, vokasi, selDirectorates, selDivisions, selDepts, selLaborTypes, selStatuses, refDate, chosenPeriods]
   );
 
-  const [diffMonth, setDiffMonth] = useSessionState<string>("dash.movement.diffMonth", "");
-  const availableMonths = useMemo(() => Array.from(snapshotsByPeriod.keys()).sort().reverse(), [snapshotsByPeriod]);
-  const prevMonth = diffMonth ? previousPeriodWithData(diffMonth, snapshotsByPeriod) : null;
+  const availableMonths = useMemo(() => Array.from(periodsWithData).sort().reverse(), [periodsWithData]);
   // "Lihat Perubahan" follows both the shared org filter AND this section's
   // own Labor Type/Status selection — narrowing the chart above should
   // narrow the diff panel below it the same way.
   const diff = useMemo(() => {
-    if (!diffMonth || !prevMonth) return null;
+    if (!diffMonth || !prevMonth || !snapshotsByPeriod.has(prevMonth) || !snapshotsByPeriod.has(diffMonth)) return null;
     const before = filterByLaborTypeStatus(snapshotsByPeriod.get(prevMonth)!, selLaborTypes, selStatuses);
     const after = filterByLaborTypeStatus(snapshotsByPeriod.get(diffMonth)!, selLaborTypes, selStatuses);
     return diffEmployees(before, after, reviews, demands, {
@@ -155,10 +190,12 @@ export function ManpowerMovementBlock({
           onChange={(v) => setSelStatuses(v as MovementStatus[])}
         />
       </div>
-      <CompositionChart data={movementRows} heightClass="h-56" />
+      {loading ? <Skeleton className="h-56 w-full" /> : <CompositionChart data={movementRows} heightClass="h-56" />}
       {diffMonth && (
         <div className="mt-5 border-t border-slate-100 pt-4 dark:border-slate-800">
-          {!diff ? (
+          {loading ? (
+            <Skeleton className="h-24 w-full" />
+          ) : !diff ? (
             <EmptyState text="Tidak ada data periode sebelumnya untuk dibandingkan." />
           ) : (
             <EmployeeDiffPanel diff={diff} fromMonth={prevMonth!} toMonth={diffMonth} />

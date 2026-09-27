@@ -39,6 +39,23 @@ Alur data:
 3. Aksi yang dibatasi per role (HR / shop / admin) lewat **RPC** — fungsi SQL di server —
    sehingga aturannya tetap berlaku walau tampilan diakali.
 
+### Data aktif (working set)
+
+Demand, review PKWT, Vokasi dan Supply Pool terus bertambah dan tidak pernah dihapus, jadi
+browser **tidak** memuat seluruh isinya — hanya "data aktif" (`supabase/migration_20.sql`):
+
+- yang masih berjalan (demand belum selesai, review belum diisi, Vokasi belum berakhir,
+  Supply Pool masih Open);
+- yang terjadi 12 bulan terakhir (garisnya: `workingSetSince()` di `lib/history.ts`, sama
+  dengan `working_set_since()` di database);
+- dan yang masih dirujuk olehnya (rantai kursi projek, review di balik demand aktif, dst.).
+
+Data yang lebih lama tetap di database dan dibaca saat dibutuhkan dengan
+`store.fetchWhere(...)`: bulan lama di Dashboard, cek dobel saat upload / generate review,
+hapus batch lama, dan **History → Arsip** (pencarian di seluruh data, per halaman). Kalau
+suatu fitur baru butuh data lama, pakai pola yang sama — jangan memuat seluruh tabel.
+Selama `migration_20` belum dijalankan, store otomatis membaca seluruh tabel seperti dulu.
+
 ## Struktur folder
 
 ```
@@ -81,6 +98,42 @@ Butuh Node.js 22.
    ```
    File ini tidak ikut di-commit.
 3. `npm run dev` lalu buka http://localhost:3000
+
+## Pekerjaan terjadwal (server)
+
+Setiap malam pukul 00:05 WIB, Vercel Cron memanggil `/api/jobs/daily` (`vercel.json`). Route
+ini menjalankan pekerjaan rutin engine di server: membuat review PKWT yang jatuh tempo,
+demand Vokasi Ended bulan ini, merilis MP projek yang tanggal rilisnya lewat, dan
+menyinkronkan demand projek (`lib/jobs/daily.ts`). Fungsinya sama persis dengan yang
+dijalankan halaman, jadi hasilnya tetap jalan walau tidak ada admin yang membuka CAMP.
+Halaman tetap menjalankannya juga; semuanya idempotent dan database menolak duplikat.
+
+Perlu dua environment variable **khusus server** di Vercel (Project → Settings →
+Environment Variables), jangan diawali `NEXT_PUBLIC_`:
+
+| Nama | Isi |
+|---|---|
+| `CRON_SECRET` | string acak panjang; Vercel Cron mengirimnya sebagai `Authorization: Bearer …` |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase → Project Settings → API → `service_role` |
+
+`service_role` melewati semua aturan akses — jangan pernah ditaruh di kode, di chat, atau di
+variabel `NEXT_PUBLIC_`. Tanpa kedua variabel ini route menolak (401/503) dan halaman tetap
+berjalan seperti biasa. Hasil tiap malam terlihat di Vercel → Logs (`daily jobs: …`).
+
+## Monitoring error
+
+Error yang dialami pengguna tercatat otomatis di tabel `app_errors` (migration_19) — tanpa
+layanan pihak ketiga — dan admin membacanya di menu **Log Error** (`/errors`):
+
+- halaman yang crash (`app/(app)/error.tsx`, `app/global-error.tsx` — pengguna melihat pesan
+  dan tombol "Coba lagi", bukan layar kosong);
+- error JavaScript yang tidak tertangani (`instrumentation-client.ts`);
+- penyimpanan yang ditolak database (`lib/storage.ts`);
+- request server yang gagal (`instrumentation.ts`) dan masalah job malam — dua ini butuh
+  `SUPABASE_SERVICE_ROLE_KEY`.
+
+Pencatatan dibatasi (kejadian sama maksimal sekali per menit, maksimal 20 per halaman) dan
+job malam menghapus catatan lebih dari 90 hari.
 
 ## Database
 

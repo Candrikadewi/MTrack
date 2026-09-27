@@ -1,4 +1,3 @@
-"use client";
 // Minimal global toast store — actions.ts functions are plain functions
 // (not components), so error feedback needs a channel outside React's tree,
 // the same reasoning that motivated the Store pattern in lib/storage.ts.

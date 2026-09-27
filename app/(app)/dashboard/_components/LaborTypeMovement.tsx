@@ -7,13 +7,14 @@ import { Card } from "@/components/ui/Card";
 import { MultiSelect } from "@/components/ui/MultiSelect";
 import { LaborTypeChart } from "@/components/ui/LaborTypeChart";
 import { EmptyState } from "@/components/ui/Table";
+import { Skeleton } from "@/components/ui/Skeleton";
+import { useEmployeesByPeriod, useSnapshotPeriods } from "@/lib/useSnapshotEmployees";
 import {
   fiscalYearMonths,
   laborTypeMovementByFiscalYear,
   laborTypeMovementDetail,
   previousPeriodWithData,
 } from "@/lib/engine/dashboard";
-import type { EmployeeRecord } from "@/lib/types";
 
 /** "Movement", not just a snapshot: one bar per FY month stacked by every
  * ZPAR labor_type code, plus a month-picker below splitting that month's
@@ -22,17 +23,27 @@ import type { EmployeeRecord } from "@/lib/types";
  * Manpower Movement's chart, but for labor_type instead of
  * Permanen/Kontrak/Vokasi. */
 export function LaborTypeMovementBlock({
-  snapshotsByPeriod,
   selDirectorates,
   selDivisions,
   selDepts,
 }: {
-  snapshotsByPeriod: Map<string, EmployeeRecord[]>;
   selDirectorates: string[];
   selDivisions: string[];
   selDepts: string[];
 }) {
   const refDate = useMemo(() => new Date(), []);
+  const periodsWithData = useSnapshotPeriods();
+  const monthsWithData = useMemo(
+    () => fiscalYearMonths(refDate).filter((m) => periodsWithData.has(m)),
+    [periodsWithData, refDate]
+  );
+  const latestMonth = monthsWithData[monthsWithData.length - 1] ?? "";
+  const [selMonth, setSelMonth] = useSessionState("dash.laborTypeMovement.month", latestMonth);
+  const effectiveMonth = monthsWithData.includes(selMonth) ? selMonth : latestMonth;
+  const prevMonth = effectiveMonth ? previousPeriodWithData(effectiveMonth, periodsWithData) : null;
+  // Only this fiscal year's months (and the month before the one being
+  // detailed) are loaded.
+  const { byPeriod: snapshotsByPeriod, loading } = useEmployeesByPeriod([...monthsWithData, ...(prevMonth ? [prevMonth] : [])]);
   const rows = useMemo(
     () =>
       laborTypeMovementByFiscalYear(
@@ -43,16 +54,10 @@ export function LaborTypeMovementBlock({
     [snapshotsByPeriod, selDirectorates, selDivisions, selDepts, refDate]
   );
 
-  const monthsWithData = useMemo(
-    () => fiscalYearMonths(refDate).filter((m) => snapshotsByPeriod.has(m)),
-    [snapshotsByPeriod, refDate]
-  );
-  const latestMonth = monthsWithData[monthsWithData.length - 1] ?? "";
-  const [selMonth, setSelMonth] = useSessionState("dash.laborTypeMovement.month", latestMonth);
-  const effectiveMonth = monthsWithData.includes(selMonth) ? selMonth : latestMonth;
-  const prevMonth = effectiveMonth ? previousPeriodWithData(effectiveMonth, snapshotsByPeriod) : null;
   const detail = useMemo(() => {
-    if (!effectiveMonth || !prevMonth) return { newIn: [], retagging: [] };
+    if (!effectiveMonth || !prevMonth || !snapshotsByPeriod.has(prevMonth) || !snapshotsByPeriod.has(effectiveMonth)) {
+      return { newIn: [], retagging: [] };
+    }
     return laborTypeMovementDetail(snapshotsByPeriod.get(prevMonth)!, snapshotsByPeriod.get(effectiveMonth)!, {
       directorates: selDirectorates,
       divisions: selDivisions,
@@ -93,7 +98,9 @@ export function LaborTypeMovementBlock({
       title="Labor Type Movement"
       subtitle="1 fiscal year berjalan, dari data ZPAR terbaru per bulan. Bulan bertanda “–” belum ada snapshot ZPAR-nya."
     >
-      {rows.length === 0 ? (
+      {loading ? (
+        <Skeleton className="h-64 w-full" />
+      ) : rows.length === 0 ? (
         <EmptyState text="Tidak ada data." />
       ) : (
         <div className="space-y-4">

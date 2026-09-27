@@ -113,3 +113,45 @@ describe("apply_changes", () => {
     expect((await db.query("select 1 from app_migrations where name = 'migration_15'")).rows).toHaveLength(1);
   });
 });
+
+describe("migration_17", () => {
+  it("counts a snapshot's employees in the database", async () => {
+    await asOwner(db);
+    const id = crypto.randomUUID();
+    await db.query("insert into zpar_snapshots (id, period, filename, employees) values ($1, '2026-09', 'z.csv', $2::jsonb)", [
+      id,
+      JSON.stringify([{ noreg: "1" }, { noreg: "2" }, { noreg: "3" }]),
+    ]);
+    const { rows } = await db.query<{ employee_count: number }>("select employee_count from zpar_snapshots where id = $1", [id]);
+    expect(rows[0].employee_count).toBe(3);
+  });
+});
+
+describe("migration_18", () => {
+  it("treats the service role (server jobs) as admin, and nobody else", async () => {
+    await asOwner(db);
+    await db.exec(`set request.jwt.claims = '{"role":"service_role"}'`);
+    expect((await db.query<{ r: string }>("select my_role() as r")).rows[0].r).toBe("admin");
+
+    await db.exec(`set request.jwt.claims = '{"role":"authenticated"}'`);
+    await actAs(db, "shop");
+    expect((await db.query<{ r: string }>("select my_role() as r")).rows[0].r).toBe("shop");
+    await asOwner(db);
+    await db.exec("reset request.jwt.claims");
+  });
+});
+
+describe("migration_19 (error log)", () => {
+  it("lets anyone signed in add their own errors, and only admins read them", async () => {
+    const shopId = await actAs(db, "shop");
+    await db.query("insert into app_errors (source, message) values ('client', 'boom')");
+    await expect(
+      db.query("insert into app_errors (source, message, user_id) values ('client', 'forged', $1)", [crypto.randomUUID()])
+    ).rejects.toThrow(/row-level security/);
+    expect((await db.query("select * from app_errors")).rows).toHaveLength(0); // shop can't read
+
+    await actAs(db, "admin");
+    const { rows } = await db.query<{ message: string; user_id: string }>("select message, user_id from app_errors");
+    expect(rows).toEqual([{ message: "boom", user_id: shopId }]);
+  });
+});

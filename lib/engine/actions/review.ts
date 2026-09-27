@@ -1,12 +1,12 @@
 // PKWT review: generating the reviews that fall due, and saving Continue / Terminate
 // (Terminate opens a replacement demand server-side).
-import { genId } from "../../storage";
-import { demandStore, pkwtReviewStore, getActiveSnapshot } from "../../repo";
-import { createClient } from "../../supabase/client";
+import { genId, dataClient } from "../../storage";
+import { demandStore, pkwtReviewStore, getActiveSnapshot, zparStore } from "../../repo";
 import { pushToast } from "../../toast";
 import { computeReviewDate } from "../compute";
 import { KONTRAK_REVIEW_STATUSES } from "../../types";
-import type { PkwtReview, ReviewResult } from "../../types";
+import type { EmployeeRecord, PkwtReview, ReviewResult } from "../../types";
+import { beforeWorkingSet, inChunks } from "../../history";
 
 export interface PkwtReviewRun {
   /** Active snapshot period the run read, or null when none is active. */
@@ -25,8 +25,17 @@ export interface PkwtReviewRun {
  * of only reaching the console, since it otherwise leaves the review chart
  * empty with no hint why. */
 export async function generatePkwtReviews(): Promise<PkwtReviewRun> {
+  // Just activated (Upload Center → "Use This Data"): its employees may
+  // still be on their way (lib/snapshots.ts).
+  const activeId = getActiveSnapshot()?.id;
+  if (activeId) await zparStore.loadEmployees([activeId]);
   const snap = getActiveSnapshot();
   if (!snap) return { period: null, eligible: 0, noTglMasuk: 0, created: 0 };
+  const lookupError = await loadOlderReviews(snap.employees);
+  if (lookupError) {
+    pushToast(`Gagal membaca review PKWT lama: ${lookupError}`);
+    return { period: snap.period, eligible: 0, noTglMasuk: 0, created: 0, error: lookupError };
+  }
   const existing = new Set(pkwtReviewStore.list().map((r) => `${r.noreg}|${r.tgl_review}`));
   const toCreate: PkwtReview[] = [];
   let eligible = 0;
@@ -71,6 +80,27 @@ export async function generatePkwtReviews(): Promise<PkwtReviewRun> {
   return { ...base, created: toCreate.length };
 }
 
+/** Reviews dated before the working set aren't in the browser (see
+ * lib/history.ts): read the ones these employees may already have, so
+ * they aren't created twice. Resolves to an error message, or null. */
+async function loadOlderReviews(employees: EmployeeRecord[]): Promise<string | null> {
+  if (pkwtReviewStore.complete()) return null;
+  const cached = new Set(pkwtReviewStore.list().map((r) => `${r.noreg}|${r.tgl_review}`));
+  const noregs = employees
+    .filter((e) => KONTRAK_REVIEW_STATUSES.includes(e.status_kontrak))
+    .filter((e) => {
+      const tgl = computeReviewDate(e.tgl_masuk, e.status_kontrak);
+      return tgl && beforeWorkingSet(tgl) && !cached.has(`${e.noreg}|${tgl}`);
+    })
+    .map((e) => e.noreg);
+  try {
+    await inChunks(noregs, (chunk) => pkwtReviewStore.fetchWhere((q) => q.in("noreg", chunk)));
+    return null;
+  } catch (err) {
+    return err instanceof Error ? err.message : String(err);
+  }
+}
+
 /**
  * Routed through the `set_review_result` Postgres RPC (see supabase/schema.sql)
  * so the Admin/HR-only rule is enforced in the database, not just the UI.
@@ -82,7 +112,7 @@ export async function generatePkwtReviews(): Promise<PkwtReviewRun> {
 export function setReviewResult(reviewId: string, result: ReviewResult): void {
   const previous = pkwtReviewStore.get(reviewId)?.review_result;
   pkwtReviewStore.patchLocal(reviewId, { review_result: result });
-  const supabase = createClient();
+  const supabase = dataClient();
   supabase
     .rpc("set_review_result", { p_review_id: reviewId, p_result: result })
     .then((res: { error: { message: string } | null }) => {
@@ -109,7 +139,7 @@ export async function setReviewResults(reviewIds: string[], result: ReviewResult
     .filter((r): r is PkwtReview => r !== undefined && r.review_result !== result);
   const previous = new Map(targets.map((r) => [r.id, r.review_result]));
   for (const r of targets) pkwtReviewStore.patchLocal(r.id, { review_result: result });
-  const supabase = createClient();
+  const supabase = dataClient();
   let saved = 0;
   let failed = 0;
   let lastError = "";

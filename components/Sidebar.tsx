@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Upload, LayoutDashboard, ArrowLeftRight, Boxes, History, FileStack, LogOut } from "lucide-react";
+import { Upload, LayoutDashboard, ArrowLeftRight, Boxes, History, FileStack, LogOut, Bug } from "lucide-react";
 import { logout } from "@/app/login/actions";
 import { canAccessModule, type Role } from "@/lib/roles";
 import { clearSessionState } from "@/lib/useSessionState";
@@ -20,7 +20,10 @@ const NAV_TOP = [
 // link on their batch rows in Demand/Supply's Ringkasan per Batch tiles
 // (see components/ui/BatchTileRow.tsx) instead of a separate menu — the
 // /projects and /takt routes still exist, just not in this nav.
-const NAV_BOTTOM = [{ href: "/handover", label: "Handover Form", icon: FileStack }];
+const NAV_BOTTOM = [
+  { href: "/handover", label: "Handover Form", icon: FileStack },
+  { href: "/errors", label: "Log Error", icon: Bug },
+];
 
 const ROLE_LABEL: Record<Role, string> = { admin: "Admin", shop: "Shop", hr: "HR", guest: "Guest" };
 const ROLE_TONE: Record<Role, string> = {
