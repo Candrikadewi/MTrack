@@ -10,6 +10,8 @@ import { useSessionState } from "@/lib/useSessionState";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { demandStore, projectStore, taktStore, utilPoolStore } from "@/lib/repo";
 import type { Plant, Project, TaktCase, UtilPoolEntry } from "@/lib/types";
+import { useOlderRows } from "@/lib/useOlderRows";
+import { ArchiveSearch } from "./_components/ArchiveSearch";
 
 type Jenis = "Project" | "Takt Up" | "Takt Down" | "Kaizen";
 
@@ -136,7 +138,12 @@ export function HistoryPageClient() {
   const projectsReady = useStoreReady(projectStore);
   const taktReady = useStoreReady(taktStore);
   const poolReady = useStoreReady(utilPoolStore);
-  const ready = projectsReady && taktReady && poolReady;
+  // Kaizen batches finished long ago are outside the Supply Pool working
+  // set: read them all here (a batch counts once every entry is utilized).
+  const loadingKaizen = useOlderRows(utilPoolStore.complete() ? null : "history-kaizen", () =>
+    utilPoolStore.fetchWhere((q) => q.eq("source", "Kaizen"), { once: "kaizen" })
+  );
+  const ready = projectsReady && taktReady && poolReady && !loadingKaizen;
 
   const allBatches = useMemo(
     () => buildHistoryBatches(projects, taktCases, demands, poolEntries),
@@ -221,8 +228,8 @@ export function HistoryPageClient() {
         <div>
           <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100">History</h1>
           <p className="text-sm text-slate-600 dark:text-slate-400">
-            Batch Project, Takt Up, Takt Down, dan Kaizen yang sudah selesai. Demand PKWT/Vokasi yang terpenuhi ada di Detail
-            Demand.
+            Batch Project, Takt Up, Takt Down, dan Kaizen yang sudah selesai. Data lama per orang (demand, review, Vokasi, Supply
+            Pool) bisa dicari di Arsip di bawah.
           </p>
         </div>
         <Button variant="secondary" onClick={exportCsv} disabled={filtered.length === 0}>
@@ -302,6 +309,8 @@ export function HistoryPageClient() {
           })}
         </div>
       )}
+
+      <ArchiveSearch />
     </div>
   );
 }

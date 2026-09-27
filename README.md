@@ -39,6 +39,23 @@ Alur data:
 3. Aksi yang dibatasi per role (HR / shop / admin) lewat **RPC** — fungsi SQL di server —
    sehingga aturannya tetap berlaku walau tampilan diakali.
 
+### Data aktif (working set)
+
+Demand, review PKWT, Vokasi dan Supply Pool terus bertambah dan tidak pernah dihapus, jadi
+browser **tidak** memuat seluruh isinya — hanya "data aktif" (`supabase/migration_20.sql`):
+
+- yang masih berjalan (demand belum selesai, review belum diisi, Vokasi belum berakhir,
+  Supply Pool masih Open);
+- yang terjadi 12 bulan terakhir (garisnya: `workingSetSince()` di `lib/history.ts`, sama
+  dengan `working_set_since()` di database);
+- dan yang masih dirujuk olehnya (rantai kursi projek, review di balik demand aktif, dst.).
+
+Data yang lebih lama tetap di database dan dibaca saat dibutuhkan dengan
+`store.fetchWhere(...)`: bulan lama di Dashboard, cek dobel saat upload / generate review,
+hapus batch lama, dan **History → Arsip** (pencarian di seluruh data, per halaman). Kalau
+suatu fitur baru butuh data lama, pakai pola yang sama — jangan memuat seluruh tabel.
+Selama `migration_20` belum dijalankan, store otomatis membaca seluruh tabel seperti dulu.
+
 ## Struktur folder
 
 ```

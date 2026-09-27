@@ -3,6 +3,7 @@
 import { genId } from "../../storage";
 import { demandStore, projectStore, taktStore } from "../../repo";
 import { pushToast } from "../../toast";
+import { inChunks } from "../../history";
 import type { Demand, DemandCategory, DemandOriginType, Project, ProjectMpNeedRow, TaktCase } from "../../types";
 import { mapMpStatusToDemandCategory } from "./people";
 
@@ -116,6 +117,22 @@ export async function repairMissingPlanDemands(): Promise<number> {
     }
   }
   if (toCreate.length === 0) return 0;
+  // Project / Takt Up demands are all in the working set; one that isn't
+  // in the browser is checked in the database before it is recreated.
+  if (!demandStore.complete()) {
+    try {
+      const found = await inChunks(
+        toCreate.map((d) => d.id),
+        (ids) => demandStore.fetchWhere((q) => q.in("id", ids))
+      );
+      const stored = new Set(found.map((d) => d.id));
+      toCreate.splice(0, toCreate.length, ...toCreate.filter((d) => !stored.has(d.id)));
+    } catch (err) {
+      pushToast(`Gagal memeriksa demand: ${err instanceof Error ? err.message : String(err)}`);
+      return 0;
+    }
+    if (toCreate.length === 0) return 0;
+  }
   const error = await demandStore.insertManyPersisted(toCreate);
   if (error) {
     demandStore.refetch();

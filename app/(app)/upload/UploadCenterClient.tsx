@@ -30,7 +30,9 @@ import {
   type PkwtReviewRun,
 } from "@/lib/engine/actions";
 import { computeVokasiEndedDate, fmtDate } from "@/lib/engine/compute";
+import { fetchVokasiBatches, type VokasiBatchRow } from "@/lib/vokasiBatches";
 import { pushToast } from "@/lib/toast";
+import { inChunks } from "@/lib/history";
 import { useSessionState } from "@/lib/useSessionState";
 import type { VokasiRecord } from "@/lib/types";
 import { BlankTglPanel } from "./_components/BlankTglPanel";
@@ -103,11 +105,12 @@ export function UploadCenterClient() {
   // active snapshot are (re)generated — a single bad Tgl Masuk used to abort
   // the whole run — and stale history demands from an earlier Vokasi
   // starting upload are cleaned up. Both are idempotent.
+  const vokasiReady = useStoreReady(vokasiStore);
   const storesReady = [
     useStoreReady(zparStore),
     useStoreReady(pkwtReviewStore),
     useStoreReady(demandStore),
-    useStoreReady(vokasiStore),
+    vokasiReady,
     useStoreReady(utilPoolStore),
   ].every(Boolean);
   const reviews = useStoreList(pkwtReviewStore);
@@ -133,10 +136,21 @@ export function UploadCenterClient() {
     runReviews();
   }
 
-  const batches = Array.from(new Set(vokasiRecords.map((v) => v.batch))).map((batch) => {
-    const rows = vokasiRecords.filter((v) => v.batch === batch);
-    return { batch, count: rows.length, upload_date: rows[0]?.upload_date ?? "" };
-  });
+  // Every batch ever uploaded, counted by the database; read again when
+  // the Vokasi records change (an upload, a delete, another admin).
+  const [batches, setBatches] = useState<VokasiBatchRow[]>([]);
+  const [batchesVersion, setBatchesVersion] = useState(0);
+  const refreshBatches = useCallback(() => setBatchesVersion((v) => v + 1), []);
+  useEffect(() => {
+    if (!vokasiReady) return;
+    let cancelled = false;
+    fetchVokasiBatches()
+      .then((rows) => !cancelled && setBatches(rows))
+      .catch((err: unknown) => console.error("reading Vokasi batches failed:", err));
+    return () => {
+      cancelled = true;
+    };
+  }, [vokasiReady, vokasiRecords, batchesVersion]);
 
   function handleZparFileChange(file: File | null) {
     setZparFile(file);
@@ -231,12 +245,20 @@ export function UploadCenterClient() {
     setVokasiMsg("");
   }
 
+  function loadExistingBatches(names: string[]): Promise<unknown> {
+    if (vokasiStore.complete()) return Promise.resolve();
+    return inChunks(names, (chunk) => vokasiStore.fetchWhere((q) => q.in("batch", chunk)));
+  }
+
   async function handleCheckVokasi() {
     if (!vokasiFile || !vokasiTglMasuk) return;
     setVokasiBusy(true);
     setVokasiMsg("");
     try {
       const result = await parseVokasiFile(vokasiFile, vokasiTglMasuk);
+      // Rows of these batches uploaded long ago aren't in the browser: read
+      // them, so the duplicate check below sees them.
+      await loadExistingBatches(result.batches.map((b) => b.batch));
       setVokasiPreview(result);
       setVokasiTglFill(Object.fromEntries(result.blankTglBatches.map((b) => [b.batch, b.suggested])));
     } catch (e) {
@@ -297,15 +319,29 @@ export function UploadCenterClient() {
     if (!vokasiFile || !vokasiPreview || vokasiBlocked || vokasiBusy) return;
     const used = usedColumns("vokasi", vokasiPreview.columns.extra, decisions);
     const upload_date = new Date().toISOString();
-    const full: VokasiRecord[] = vokasiNew.map(({ extra, ...r }) => {
+    const candidates: VokasiRecord[] = vokasiNew.map(({ extra, ...r }) => {
       const kept = keepUsedExtra(extra, used);
       return { ...r, ...(kept ? { extra: kept } : {}), id: genId("vokasi"), upload_date };
     });
     const batchCount = vokasiNewBatches.size;
-    const duplicates = vokasiDuplicates;
     setVokasiBusy(true);
     setVokasiMsg("Menyimpan data Vokasi…");
     try {
+      // The batch may have been typed after the check (file without a
+      // batch column): make sure its older rows are known too.
+      try {
+        await loadExistingBatches([...vokasiNewBatches]);
+      } catch (err) {
+        setVokasiMsg(`Gagal memeriksa data lama: ${err instanceof Error ? err.message : String(err)}`);
+        return;
+      }
+      const existing = new Set(vokasiStore.list().map((v) => `${v.noreg}|${v.batch}`));
+      const full = candidates.filter((r) => !existing.has(`${r.noreg}|${r.batch}`));
+      const duplicates = vokasiDuplicates + candidates.length - full.length;
+      if (full.length === 0) {
+        setVokasiMsg(`Tidak ada record baru: ${duplicates} baris sudah ada (noreg + batch sama).`);
+        return;
+      }
       // Each step waits for the previous one to land in the database: the
       // auto-match RPC looks the new demands up server-side, and firing it
       // before their insert finished is what produced "Demand not found".
@@ -335,10 +371,11 @@ export function UploadCenterClient() {
     }
   }
 
-  function handleDeleteBatch(batch: string) {
+  async function handleDeleteBatch(batch: string) {
     if (!confirm(`Hapus semua record Vokasi batch "${batch}"? Tindakan ini tidak bisa dibatalkan.`)) return;
-    const result = deleteVokasiBatch(batch);
+    const result = await deleteVokasiBatch(batch);
     if (!result.ok) pushToast(result.error ?? "Gagal menghapus batch.");
+    else refreshBatches();
   }
 
   function resetAll() {

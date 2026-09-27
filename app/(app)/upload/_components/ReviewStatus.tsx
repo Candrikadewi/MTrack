@@ -39,7 +39,8 @@ export function ReviewStatus({
                 · <b>{run.noTglMasuk}</b> tanpa Tgl Masuk (tidak bisa dijadwalkan)
               </>
             )}{" "}
-            · <b>{reviewCount}</b> review tersimpan{run.created > 0 && <> · {run.created} baru dibuat</>}
+            · <b>{reviewCount}</b> review aktif (12 bulan terakhir + belum diisi)
+            {run.created > 0 && <> · {run.created} baru dibuat</>}
             {run.error && <div className="mt-1 font-semibold">Gagal menyimpan review: {run.error}</div>}
           </div>
         )}

@@ -23,6 +23,9 @@ import {
   type MovementStatus,
 } from "@/lib/engine/dashboard";
 import { LABOR_TYPES } from "@/lib/types";
+import { demandStore, pkwtReviewStore, vokasiStore } from "@/lib/repo";
+import { beforeWorkingSet, inChunks, monthBounds } from "@/lib/history";
+import { useOlderRows } from "@/lib/useOlderRows";
 import type { Demand, PkwtReview, VokasiRecord } from "@/lib/types";
 
 const MOVEMENT_STATUSES: MovementStatus[] = ["Permanen", "Kontrak", "Vokasi"];
@@ -62,10 +65,46 @@ export function ManpowerMovementBlock({
   const [diffMonth, setDiffMonth] = useSessionState<string>("dash.movement.diffMonth", "");
   const prevMonth = diffMonth ? previousPeriodWithData(diffMonth, periodsWithData) : null;
   // Only the months on screen (and the pair being compared) are loaded.
-  const { byPeriod: snapshotsByPeriod, loading } = useEmployeesByPeriod([
-    ...(chosenPeriods.length ? chosenPeriods : fiscalYearMonths(refDate)),
+  const shownMonths = chosenPeriods.length ? chosenPeriods : fiscalYearMonths(refDate);
+  const { byPeriod: snapshotsByPeriod, loading: loadingSnapshots } = useEmployeesByPeriod([
+    ...shownMonths,
     ...(diffMonth && prevMonth ? [diffMonth, prevMonth] : []),
   ]);
+
+  // Months older than the working set (lib/history.ts): who was a Vokasi
+  // then, and why people left then, may only be in the database.
+  const oldMonths = shownMonths.filter((m) => beforeWorkingSet(m)).sort();
+  const loadingOldVokasi = useOlderRows(
+    oldMonths.length && !vokasiStore.complete() ? `movement-vokasi:${oldMonths.join(",")}` : null,
+    () =>
+      Promise.all(
+        oldMonths.map((m) => {
+          const { end } = monthBounds(m);
+          return vokasiStore.fetchWhere((q) => q.lte("tgl_masuk", end).gt("tgl_ended", end), { once: `vokasi-active:${m}` });
+        })
+      )
+  );
+  const loading = loadingSnapshots || loadingOldVokasi;
+  const oldExitNoregs = useMemo(() => {
+    if (!diffMonth || !prevMonth || !beforeWorkingSet(prevMonth)) return [];
+    const before = snapshotsByPeriod.get(prevMonth);
+    const after = snapshotsByPeriod.get(diffMonth);
+    if (!before || !after) return [];
+    const stayed = new Set(after.map((e) => e.noreg));
+    return before.filter((e) => e.noreg && !stayed.has(e.noreg)).map((e) => e.noreg);
+  }, [diffMonth, prevMonth, snapshotsByPeriod]);
+  useOlderRows(oldExitNoregs.length ? `movement-exits:${prevMonth}:${diffMonth}` : null, () =>
+    Promise.all([
+      pkwtReviewStore.complete() ||
+        inChunks(oldExitNoregs, (chunk) =>
+          pkwtReviewStore.fetchWhere((q) => q.in("noreg", chunk).eq("review_result", "Terminate"))
+        ),
+      demandStore.complete() ||
+        inChunks(oldExitNoregs, (chunk) =>
+          demandStore.fetchWhere((q) => q.in("outgoing_noreg", chunk).in("origin_type", ["Pension", "Resign"]))
+        ),
+    ])
+  );
   const movementRows = useMemo(
     () =>
       manpowerMovementByFiscalYear(

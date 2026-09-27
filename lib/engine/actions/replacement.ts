@@ -1,7 +1,7 @@
 // Filling a demand: mapping a candidate, No Replace, the fulfilment date, verification
 // (contract signed / assigned) and the shop's confirmation.
 import { dataClient } from "../../storage";
-import { demandStore } from "../../repo";
+import { demandStore, vokasiStore } from "../../repo";
 import { pushToast } from "../../toast";
 import { computeFsStatus } from "../compute";
 import type { EmploymentStatus, ReplacementStatus } from "../../types";
@@ -18,6 +18,19 @@ import { syncProjectSeatDemands } from "./projects";
  * Hire / MP Excess / MP Back Up" flow; the Vokasi tab leaves it "".
  */
 export function setDemandReplacementByNoreg(demandId: string, noreg: string, replacementStatus: ReplacementStatus = ""): void {
+  // An alumnus from an older batch isn't in the browser (working set):
+  // look them up first, or they'd be saved as a plain ZPAR employee.
+  if (noreg && !getVokasiByNoreg(noreg) && !vokasiStore.complete()) {
+    vokasiStore
+      .fetchWhere((q) => q.eq("noreg", noreg), { once: `noreg:${noreg}` })
+      .catch((err: unknown) => console.error("looking up Vokasi noreg failed:", err))
+      .finally(() => saveReplacement(demandId, noreg, replacementStatus));
+    return;
+  }
+  saveReplacement(demandId, noreg, replacementStatus);
+}
+
+function saveReplacement(demandId: string, noreg: string, replacementStatus: ReplacementStatus): void {
   const demand = demandStore.get(demandId);
   if (!demand) return;
 

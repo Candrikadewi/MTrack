@@ -2,6 +2,7 @@
 import { transaction } from "../../storage";
 import { demandStore, vokasiStore, zparStore } from "../../repo";
 import { pruneStaleVokasiDemands } from "./vokasiEnded";
+import { inChunks } from "../../history";
 
 export interface DeleteResult {
   ok: boolean;
@@ -26,8 +27,21 @@ export function deleteZparSnapshot(id: string): DeleteResult {
 
 /** Refuses to delete a Vokasi batch once any of its records already
  * produced a VokasiEnded demand (ensureVokasiEndedDemands) — deleting the
- * source record out from under a live demand would orphan it. */
-export function deleteVokasiBatch(batch: string): DeleteResult {
+ * source record out from under a live demand would orphan it. An older
+ * batch may not be in the browser (working set): its records and their
+ * demands are read first. */
+export async function deleteVokasiBatch(batch: string): Promise<DeleteResult> {
+  if (!vokasiStore.complete() || !demandStore.complete()) {
+    try {
+      const records = await vokasiStore.fetchWhere((q) => q.eq("batch", batch));
+      await inChunks(
+        records.map((r) => r.id),
+        (ids) => demandStore.fetchWhere((q) => q.eq("origin_type", "VokasiEnded").in("origin_ref", ids))
+      );
+    } catch (err) {
+      return { ok: false, error: `Gagal membaca batch: ${err instanceof Error ? err.message : String(err)}` };
+    }
+  }
   return transaction(() => {
     const records = vokasiStore.list().filter((v) => v.batch === batch);
     if (records.length === 0) return { ok: false, error: "Batch tidak ditemukan." };
