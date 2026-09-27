@@ -251,7 +251,30 @@ export interface Store<T extends { id: string }> {
    * server-side mutation (e.g. an RPC that inserts rows the client didn't
    * create locally) so the UI doesn't have to wait on realtime to catch up. */
   refetch(): void;
+  /** Whether the cache holds the whole table. False for a table read as a
+   * working set (see StoreOptions.workingSet): older rows are only in the
+   * database until something asks for them with fetchWhere. */
+  complete(): boolean;
+  /** Reads the rows matching `where` from the database (all of them, page
+   * by page) and adds them to the cache — for older rows outside the
+   * working set: a past month on the Dashboard, the batch being deleted,
+   * existing rows to check before inserting. Resolves to the rows read.
+   * With `once`, a query already made under that key isn't repeated. */
+  fetchWhere(where: (query: RowQuery) => RowQuery, options?: { once?: string }): Promise<T[]>;
   key: string;
+}
+
+/** The filters fetchWhere may use (a subset of Supabase's query builder). */
+export interface RowQuery {
+  eq(column: string, value: unknown): RowQuery;
+  neq(column: string, value: unknown): RowQuery;
+  in(column: string, values: readonly unknown[]): RowQuery;
+  gt(column: string, value: unknown): RowQuery;
+  gte(column: string, value: unknown): RowQuery;
+  lt(column: string, value: unknown): RowQuery;
+  lte(column: string, value: unknown): RowQuery;
+  ilike(column: string, pattern: string): RowQuery;
+  or(filters: string): RowQuery;
 }
 
 export interface StoreOptions {
@@ -260,6 +283,20 @@ export interface StoreOptions {
   /** Read this instead when `select` names a column the database doesn't
    * have yet (a migration not run). */
   fallbackSelect?: string;
+  /** Database function returning the rows to keep in the browser (see
+   * supabase/migration_20.sql) instead of the whole table. Until that
+   * migration is run, the whole table is read as before. */
+  workingSet?: string;
+}
+
+/** A select, ready to be read one page at a time. */
+interface PageQuery {
+  order(column: string): { range(from: number, to: number): PromiseLike<unknown> };
+}
+
+/** The working-set function isn't there yet (migration_20 not run). */
+function isMissingFunction(message: string, fn: string): boolean {
+  return message.includes(fn) && /could not find|does not exist/i.test(message);
 }
 
 export function createStore<T extends { id: string }>(table: string, options: StoreOptions = {}): Store<T> {
@@ -267,6 +304,12 @@ export function createStore<T extends { id: string }>(table: string, options: St
   let columns = options.select ?? "*";
   let initialized = false;
   let started = false;
+  /** Still reading a working set — false once the function turned out to
+   * be missing (the whole table is read instead). */
+  let workingSet = options.workingSet ?? null;
+  /** Rows added by fetchWhere, kept when the working set is read again. */
+  const extraIds = new Set<string>();
+  const fetched = new Map<string, Promise<T[]>>();
 
   function client() {
     return dataClient();
@@ -276,24 +319,84 @@ export function createStore<T extends { id: string }>(table: string, options: St
    * default, silently — so read in pages until a short page comes back,
    * or tables past 1000 rows (Vokasi, reviews, demands) lose data. */
   async function fetchAll(): Promise<T[]> {
-    const supabase = client();
+    const fn = workingSet;
+    try {
+      return await fetchPages(() => {
+        const supabase = client();
+        return (fn ? supabase.rpc(fn).select(columns) : supabase.from(table).select(columns)) as unknown as PageQuery;
+      });
+    } catch (err) {
+      if (fn && isMissingFunction(errorMessage(err), fn)) {
+        console.warn(`${fn} is missing (migration_20 not run); reading all of ${table}`);
+        workingSet = null;
+        return fetchAll();
+      }
+      throw err;
+    }
+  }
+
+  /** Every row a query returns, a page at a time. */
+  async function fetchPages(query: () => PageQuery): Promise<T[]> {
     const all: T[] = [];
     for (let from = 0; ; from += PAGE_SIZE) {
-      const res: ReadResult<T> = await supabase
-        .from(table)
-        .select(columns)
+      const res = (await query()
         .order("id")
-        .range(from, from + PAGE_SIZE - 1);
+        .range(from, from + PAGE_SIZE - 1)) as ReadResult<T>;
       if (res.error && options.fallbackSelect && columns !== options.fallbackSelect && /column/i.test(res.error.message)) {
         console.warn(`select ${columns} from ${table} failed (${res.error.message}); reading ${options.fallbackSelect} instead`);
         columns = options.fallbackSelect;
-        return fetchAll();
+        return fetchPages(query);
       }
       if (res.error) throw new Error(res.error.message);
       const page = res.data ?? [];
       all.push(...page);
       if (page.length < PAGE_SIZE) return all;
     }
+  }
+
+  /** The working set just read, plus rows fetchWhere added that it
+   * doesn't include (still in the cache, so not deleted meanwhile). */
+  function withExtras(rows: T[]): T[] {
+    if (extraIds.size === 0) return rows;
+    const ids = new Set(rows.map((r) => r.id));
+    const extras = cache.filter((r) => extraIds.has(r.id) && !ids.has(r.id));
+    return extras.length ? [...rows, ...extras] : rows;
+  }
+
+  /** Adds rows read outside the working set; a row already cached is
+   * replaced by the fresher copy. */
+  function merge(rows: T[]): void {
+    if (rows.length === 0) return;
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    cache = cache.map((r) => {
+      const fresh = byId.get(r.id);
+      if (!fresh) return r;
+      byId.delete(r.id);
+      return fresh;
+    });
+    for (const r of byId.values()) {
+      cache.push(r);
+      extraIds.add(r.id);
+    }
+    notify();
+  }
+
+  function fetchWhere(where: (query: RowQuery) => RowQuery, opts: { once?: string } = {}): Promise<T[]> {
+    const known = opts.once ? fetched.get(opts.once) : undefined;
+    if (known) return known;
+    const request = trackInFlight(
+      fetchPages(() => where(client().from(table).select(columns) as unknown as RowQuery) as unknown as PageQuery)
+    ).then((rows) => {
+      merge(rows);
+      return rows;
+    });
+    if (opts.once) {
+      const key = opts.once;
+      fetched.set(key, request);
+      // A failed read may be tried again.
+      request.catch(() => fetched.delete(key));
+    }
+    return request;
   }
 
   function start() {
@@ -303,7 +406,7 @@ export function createStore<T extends { id: string }>(table: string, options: St
 
     fetchAll()
       .then((rows) => {
-        cache = rows;
+        cache = withExtras(rows);
         initialized = true;
         notify();
       })
@@ -338,7 +441,7 @@ export function createStore<T extends { id: string }>(table: string, options: St
     if (typeof window === "undefined") return;
     fetchAll()
       .then((rows) => {
-        cache = rows;
+        cache = withExtras(rows);
         notify();
       })
       .catch((err: unknown) => console.error(`refetch ${table} failed:`, err));
@@ -395,7 +498,7 @@ export function createStore<T extends { id: string }>(table: string, options: St
     key: table,
     init: start,
     async load() {
-      cache = await fetchAll();
+      cache = withExtras(await fetchAll());
       initialized = true;
       notify();
     },
@@ -403,8 +506,15 @@ export function createStore<T extends { id: string }>(table: string, options: St
       cache = [];
       initialized = false;
       started = false;
+      workingSet = options.workingSet ?? null;
+      extraIds.clear();
+      fetched.clear();
     },
     refetch,
+    complete() {
+      return !workingSet;
+    },
+    fetchWhere,
     ready() {
       return initialized;
     },

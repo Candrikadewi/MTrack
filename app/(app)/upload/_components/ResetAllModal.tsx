@@ -48,7 +48,12 @@ export function ResetAllModal({ open, onClose }: { open: boolean; onClose: () =>
       setBusy(false);
       return;
     }
-    clearAllData();
+    const failure = await clearAllData();
+    if (failure) {
+      setError(`Sebagian data gagal dihapus (${failure}).`);
+      setBusy(false);
+      return;
+    }
     handleClose();
   }
 

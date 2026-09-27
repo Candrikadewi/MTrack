@@ -126,6 +126,8 @@ export function createSnapshotStore(): SnapshotStore {
       version++;
     },
     refetch: details.refetch,
+    complete: details.complete,
+    fetchWhere: details.fetchWhere,
     ready() {
       if (!details.ready()) return false;
       const active = details.list().find((s) => s.is_active);

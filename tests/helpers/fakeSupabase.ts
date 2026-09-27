@@ -42,7 +42,15 @@ export function failSelect(columns: RegExp, message: string): void {
   selectFailure = { columns, message };
 }
 
+/** Working sets answered by rpcResponder instead of the table rows. */
+let workingSetResponder = false;
+
+export function answerWorkingSetsWithRpcResponder(on: boolean): void {
+  workingSetResponder = on;
+}
+
 export function resetFakeSupabase(): void {
+  workingSetResponder = false;
   tableRows.clear();
   selectFailure = null;
   calls.length = 0;
@@ -50,7 +58,7 @@ export function resetFakeSupabase(): void {
   writeResponder = () => ({ data: null, error: null });
 }
 
-function queryBuilder(table: string) {
+function queryBuilder(table: string, readOp = "select") {
   let write: string | null = null;
   let columns = "*";
   const filters: ((row: Record<string, unknown>) => boolean)[] = [];
@@ -61,7 +69,7 @@ function queryBuilder(table: string) {
   };
   function selectResult(): Result {
     if (selectFailure && selectFailure.columns.test(columns)) return { data: null, error: { message: selectFailure.message } };
-    calls.push({ table, op: "select", payload: columns });
+    calls.push({ table, op: readOp, payload: columns });
     const rows = (tableRows.get(table) ?? []).filter((row) => filters.every((f) => f(row)));
     if (columns === "*") return { data: rows, error: null };
     const keys = columns.split(",").map((c) => c.trim());
@@ -74,6 +82,22 @@ function queryBuilder(table: string) {
     eq: (column: string, value: unknown) => (filters.push((row) => row[column] === value), builder),
     in: (column: string, values: unknown[]) => (filters.push((row) => values.includes(row[column])), builder),
     lt: (column: string, value: unknown) => (filters.push((row) => String(row[column]) < String(value)), builder),
+    lte: (column: string, value: unknown) => (filters.push((row) => String(row[column]) <= String(value)), builder),
+    gt: (column: string, value: unknown) => (filters.push((row) => String(row[column]) > String(value)), builder),
+    gte: (column: string, value: unknown) => (filters.push((row) => String(row[column]) >= String(value)), builder),
+    neq: (column: string, value: unknown) => (filters.push((row) => row[column] !== value), builder),
+    not: () => builder,
+    or: () => builder,
+    ilike: (column: string, pattern: string) => {
+      const needle = pattern.replace(/%/g, "").toLowerCase();
+      filters.push((row) =>
+        String(row[column] ?? "")
+          .toLowerCase()
+          .includes(needle)
+      );
+      return builder;
+    },
+    limit: () => builder,
     insert: (payload: unknown) => record("insert", payload),
     update: (payload: unknown) => record("update", payload),
     upsert: (payload: unknown) => record("upsert", payload),
@@ -86,9 +110,18 @@ function queryBuilder(table: string) {
 
 export const fakeClient = {
   from: (table: string) => queryBuilder(table),
-  rpc: (fn: string, args: unknown) => {
+  rpc: (fn: string, args?: unknown) => {
+    // A working set (migration_20) reads like its table: every row set with
+    // setTableRows, unless a test's rpcResponder answers it.
+    const workingSet = /^(\w+)_working_set$/.exec(fn);
+    if (workingSet && !workingSetResponder) {
+      calls.push({ op: `rpc:${fn}`, payload: args });
+      return queryBuilder(workingSet[1], "working_set");
+    }
     calls.push({ op: `rpc:${fn}`, payload: args });
-    return Promise.resolve(rpcResponder(fn, args));
+    const result = Promise.resolve(rpcResponder(fn, args));
+    const chain = { select: () => chain, order: () => chain, range: () => chain, then: result.then.bind(result) };
+    return chain;
   },
   channel: () => {
     const channel = { on: () => channel, subscribe: () => channel };

@@ -51,13 +51,33 @@ export interface DailyJobReport {
   failures: string[];
 }
 
+/** An RPC call that is tracked once it actually runs — when something
+ * awaits it — so it can still be chained first (.select().order().range()
+ * for a working set). */
+function trackWhenRun<B extends object>(builder: B): B {
+  return new Proxy(builder, {
+    get(target, prop) {
+      const value = Reflect.get(target, prop, target);
+      if (typeof value !== "function") return value;
+      if (prop === "then") {
+        return (onFulfilled?: (v: unknown) => unknown, onRejected?: (e: unknown) => unknown) =>
+          trackInFlight(Promise.resolve(value.call(target, (v: unknown) => v))).then(onFulfilled, onRejected);
+      }
+      return (...args: unknown[]) => {
+        const out = value.apply(target, args);
+        return out && typeof out === "object" && "then" in out ? trackWhenRun(out) : out;
+      };
+    },
+  });
+}
+
 /** The engine calls rpc(...).then(...) without keeping the promise; this
  * client keeps each one so the job can wait for it before reporting. */
 function trackingClient(client: SupabaseClient): SupabaseClient {
   return new Proxy(client, {
     get(target, prop, receiver) {
       if (prop === "rpc") {
-        return (...args: Parameters<SupabaseClient["rpc"]>) => trackInFlight(Promise.resolve(target.rpc(...args)));
+        return (...args: Parameters<SupabaseClient["rpc"]>) => trackWhenRun(target.rpc(...args));
       }
       const value = Reflect.get(target, prop, receiver);
       return typeof value === "function" ? value.bind(target) : value;
