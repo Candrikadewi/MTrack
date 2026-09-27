@@ -89,4 +89,8 @@ select
 union all
 select
   'migration_19 (error log)',
-  exists (select 1 from information_schema.tables where table_name = 'app_errors');
+  exists (select 1 from information_schema.tables where table_name = 'app_errors')
+union all
+select
+  'migration_20 (working sets for large tables)',
+  exists (select 1 from pg_proc where proname = 'demands_working_set');
