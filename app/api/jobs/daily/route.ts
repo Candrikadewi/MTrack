@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { runDailyJobs } from "@/lib/jobs/daily";
+import { recordServerError } from "@/lib/serverErrors";
 
 // Called by Vercel Cron once a day (vercel.json), which sends
 // "Authorization: Bearer <CRON_SECRET>". Anyone else gets 401.
@@ -26,10 +27,12 @@ export async function GET(request: Request) {
   try {
     const report = await runDailyJobs(client);
     console.log("daily jobs:", JSON.stringify(report));
+    for (const failure of report.failures) await recordServerError("job", failure, { url: "/api/jobs/daily" });
     return Response.json(report, { status: report.failures.length ? 207 : 200 });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error("daily jobs failed:", message);
+    await recordServerError("job", message, { stack: err instanceof Error ? err.stack : undefined, url: "/api/jobs/daily" });
     return Response.json({ error: message }, { status: 500 });
   }
 }

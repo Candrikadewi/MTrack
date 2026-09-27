@@ -73,6 +73,7 @@ function queryBuilder(table: string) {
     range: () => builder,
     eq: (column: string, value: unknown) => (filters.push((row) => row[column] === value), builder),
     in: (column: string, values: unknown[]) => (filters.push((row) => values.includes(row[column])), builder),
+    lt: (column: string, value: unknown) => (filters.push((row) => String(row[column]) < String(value)), builder),
     insert: (payload: unknown) => record("insert", payload),
     update: (payload: unknown) => record("update", payload),
     upsert: (payload: unknown) => record("upsert", payload),

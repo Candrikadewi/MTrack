@@ -5,6 +5,6 @@ export type Role = "admin" | "shop" | "hr" | "guest";
 export const canAccessModule = (role: Role, path: string): boolean => {
   if (role === "admin") return true;
   if (role === "guest") return path.startsWith("/dashboard");
-  if (path.startsWith("/upload") || path.startsWith("/handover")) return false;
+  if (path.startsWith("/upload") || path.startsWith("/handover") || path.startsWith("/errors")) return false;
   return true;
 };

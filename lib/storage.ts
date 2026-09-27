@@ -12,6 +12,7 @@
 import type { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
 import { createClient } from "./supabase/client";
 import { pushToast } from "./toast";
+import { logError } from "./errorLog";
 
 // ---------------------------------------------------------------------------
 // Which Supabase connection the stores (and the engine) use
@@ -142,6 +143,7 @@ export function onWriteFailure(listener: ((table: string, message: string) => vo
  * as done, so without this they'd believe it was saved. A burst of the same
  * failure (e.g. a loop of inserts while offline) gives one toast. */
 function reportWriteFailure(table: string, message: string): void {
+  logError({ source: "save", message: `${table}: ${message}` });
   const text = `Gagal menyimpan ${TABLE_LABELS[table] ?? table}: ${message}. Perubahan dibatalkan.`;
   const now = Date.now();
   if (text === lastFailure.text && now - lastFailure.at < 4000) return;

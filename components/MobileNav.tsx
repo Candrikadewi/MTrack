@@ -11,6 +11,7 @@ const NAV = [
   { href: "/supply", label: "Supply" },
   { href: "/history", label: "History" },
   { href: "/handover", label: "Handover Form" },
+  { href: "/errors", label: "Log Error" },
 ];
 
 export function MobileNav({ role }: { role: Role }) {

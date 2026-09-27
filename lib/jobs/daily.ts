@@ -25,6 +25,8 @@ import {
 } from "../repo";
 import { onWriteFailure, setDataClient, settleWrites, trackInFlight } from "../storage";
 
+const ERROR_LOG_DAYS = 90;
+
 const JOB_STORES = [
   zparStore,
   vokasiStore,
@@ -87,6 +89,9 @@ export async function runDailyJobs(client: SupabaseClient): Promise<DailyJobRepo
     const missingPlanDemandsRepaired = await repairMissingPlanDemands();
     autoProjectFinishCheck();
     syncProjectSeatDemands();
+    // The error log keeps 90 days.
+    const cutoff = new Date(Date.now() - ERROR_LOG_DAYS * 86_400_000).toISOString();
+    void trackInFlight(Promise.resolve(tracked.from("app_errors").delete().lt("created_at", cutoff)));
     await settleWrites();
 
     return {

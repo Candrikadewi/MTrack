@@ -103,6 +103,21 @@ Environment Variables), jangan diawali `NEXT_PUBLIC_`:
 variabel `NEXT_PUBLIC_`. Tanpa kedua variabel ini route menolak (401/503) dan halaman tetap
 berjalan seperti biasa. Hasil tiap malam terlihat di Vercel → Logs (`daily jobs: …`).
 
+## Monitoring error
+
+Error yang dialami pengguna tercatat otomatis di tabel `app_errors` (migration_19) — tanpa
+layanan pihak ketiga — dan admin membacanya di menu **Log Error** (`/errors`):
+
+- halaman yang crash (`app/(app)/error.tsx`, `app/global-error.tsx` — pengguna melihat pesan
+  dan tombol "Coba lagi", bukan layar kosong);
+- error JavaScript yang tidak tertangani (`instrumentation-client.ts`);
+- penyimpanan yang ditolak database (`lib/storage.ts`);
+- request server yang gagal (`instrumentation.ts`) dan masalah job malam — dua ini butuh
+  `SUPABASE_SERVICE_ROLE_KEY`.
+
+Pencatatan dibatasi (kejadian sama maksimal sekali per menit, maksimal 20 per halaman) dan
+job malam menghapus catatan lebih dari 90 hari.
+
 ## Database
 
 Untuk database baru: jalankan `supabase/schema.sql`, lalu `migration_2.sql` sampai migration
