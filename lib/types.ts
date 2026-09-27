@@ -111,7 +111,11 @@ export interface ZparSnapshot {
   filename: string;
   upload_date: string; // ISO datetime
   is_active: boolean;
+  /** Only loaded for the active snapshot and months something asks for
+   * (see lib/snapshots.ts); [] until then — use employee_count for size. */
   employees: EmployeeRecord[];
+  /** Computed by the database (migration_17); absent before that. */
+  employee_count?: number;
 }
 
 // ---------------------------------------------------------------------------

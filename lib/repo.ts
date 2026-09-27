@@ -1,4 +1,5 @@
-import { createStore } from "./storage";
+import { createStore, transaction } from "./storage";
+import { createSnapshotStore } from "./snapshots";
 import type {
   ZparSnapshot,
   VokasiRecord,
@@ -12,7 +13,7 @@ import type {
   ValueMapping,
 } from "./types";
 
-export const zparStore = createStore<ZparSnapshot>("zpar_snapshots");
+export const zparStore = createSnapshotStore();
 export const vokasiStore = createStore<VokasiRecord>("vokasi_records");
 export const pkwtReviewStore = createStore<PkwtReview>("pkwt_reviews");
 export const demandStore = createStore<Demand>("demands");
@@ -28,10 +29,12 @@ export function getActiveSnapshot(): ZparSnapshot | undefined {
 }
 
 export function activateSnapshot(id: string): void {
-  for (const s of zparStore.list()) {
-    const shouldBeActive = s.id === id;
-    if (s.is_active !== shouldBeActive) zparStore.update(s.id, { is_active: shouldBeActive });
-  }
+  transaction(() => {
+    for (const s of zparStore.list()) {
+      const shouldBeActive = s.id === id;
+      if (s.is_active !== shouldBeActive) zparStore.update(s.id, { is_active: shouldBeActive });
+    }
+  });
 }
 
 export function clearAllData(): void {

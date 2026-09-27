@@ -1,7 +1,7 @@
 // PKWT review: generating the reviews that fall due, and saving Continue / Terminate
 // (Terminate opens a replacement demand server-side).
 import { genId } from "../../storage";
-import { demandStore, pkwtReviewStore, getActiveSnapshot } from "../../repo";
+import { demandStore, pkwtReviewStore, getActiveSnapshot, zparStore } from "../../repo";
 import { createClient } from "../../supabase/client";
 import { pushToast } from "../../toast";
 import { computeReviewDate } from "../compute";
@@ -25,6 +25,10 @@ export interface PkwtReviewRun {
  * of only reaching the console, since it otherwise leaves the review chart
  * empty with no hint why. */
 export async function generatePkwtReviews(): Promise<PkwtReviewRun> {
+  // Just activated (Upload Center → "Use This Data"): its employees may
+  // still be on their way (lib/snapshots.ts).
+  const activeId = getActiveSnapshot()?.id;
+  if (activeId) await zparStore.loadEmployees([activeId]);
   const snap = getActiveSnapshot();
   if (!snap) return { period: null, eligible: 0, noTglMasuk: 0, created: 0 };
   const existing = new Set(pkwtReviewStore.list().map((r) => `${r.noreg}|${r.tgl_review}`));

@@ -494,7 +494,7 @@ export function UploadCenterClient() {
                       <Td>{s.period}</Td>
                       <Td>{s.filename}</Td>
                       <Td>{fmtDate(s.upload_date.slice(0, 10))}</Td>
-                      <Td>{s.employees.length}</Td>
+                      <Td>{s.employee_count ?? s.employees.length}</Td>
                       <Td>{s.is_active ? <Badge tone="green">Active</Badge> : <Badge>Inactive</Badge>}</Td>
                       <Td>
                         <div className="flex gap-2">

@@ -55,6 +55,12 @@ export function getChangeVersion(): number {
   return changeVersion;
 }
 
+/** For data kept outside a store's own cache (e.g. snapshot employees
+ * loaded on demand): tells subscribed components to re-read. */
+export function notifyDataChanged(): void {
+  notify();
+}
+
 /**
  * Every table's `id` column is Postgres `uuid` (see supabase/schema.sql),
  * and the RPCs (set_review_result, set_demand_replacement) type their id
@@ -196,8 +202,17 @@ export interface Store<T extends { id: string }> {
   key: string;
 }
 
-export function createStore<T extends { id: string }>(table: string): Store<T> {
+export interface StoreOptions {
+  /** Columns to read, instead of every column ("*"). */
+  select?: string;
+  /** Read this instead when `select` names a column the database doesn't
+   * have yet (a migration not run). */
+  fallbackSelect?: string;
+}
+
+export function createStore<T extends { id: string }>(table: string, options: StoreOptions = {}): Store<T> {
   let cache: T[] = [];
+  let columns = options.select ?? "*";
   let initialized = false;
   let started = false;
 
@@ -214,9 +229,14 @@ export function createStore<T extends { id: string }>(table: string): Store<T> {
     for (let from = 0; ; from += PAGE_SIZE) {
       const res: ReadResult<T> = await supabase
         .from(table)
-        .select("*")
+        .select(columns)
         .order("id")
         .range(from, from + PAGE_SIZE - 1);
+      if (res.error && options.fallbackSelect && columns !== options.fallbackSelect && /column/i.test(res.error.message)) {
+        console.warn(`select ${columns} from ${table} failed (${res.error.message}); reading ${options.fallbackSelect} instead`);
+        columns = options.fallbackSelect;
+        return fetchAll();
+      }
       if (res.error) throw new Error(res.error.message);
       const page = res.data ?? [];
       all.push(...page);

@@ -107,7 +107,7 @@ export function fiscalYearMonths(refDate: Date = new Date()): string[] {
  * calendar month that has a ZPAR snapshot, up to 24 months — the "what
  * changed this month" comparison always wants the last month WITH data, not
  * necessarily the literal previous calendar month if a period was skipped. */
-export function previousPeriodWithData(month: string, snapshotsByPeriod: Map<string, EmployeeRecord[]>): string | null {
+export function previousPeriodWithData(month: string, snapshotsByPeriod: { has(period: string): boolean }): string | null {
   let cursor = subMonths(new Date(`${month}-01T00:00:00`), 1);
   for (let i = 0; i < 24; i++) {
     const key = format(cursor, "yyyy-MM");
