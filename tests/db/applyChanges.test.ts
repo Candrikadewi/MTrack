@@ -113,3 +113,16 @@ describe("apply_changes", () => {
     expect((await db.query("select 1 from app_migrations where name = 'migration_15'")).rows).toHaveLength(1);
   });
 });
+
+describe("migration_17", () => {
+  it("counts a snapshot's employees in the database", async () => {
+    await asOwner(db);
+    const id = crypto.randomUUID();
+    await db.query("insert into zpar_snapshots (id, period, filename, employees) values ($1, '2026-09', 'z.csv', $2::jsonb)", [
+      id,
+      JSON.stringify([{ noreg: "1" }, { noreg: "2" }, { noreg: "3" }]),
+    ]);
+    const { rows } = await db.query<{ employee_count: number }>("select employee_count from zpar_snapshots where id = $1", [id]);
+    expect(rows[0].employee_count).toBe(3);
+  });
+});

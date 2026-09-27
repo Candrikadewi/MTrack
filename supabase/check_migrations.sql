@@ -77,4 +77,8 @@ select
 union all
 select
   'migration_16 (no duplicate rows)',
-  exists (select 1 from pg_indexes where indexname = 'pkwt_reviews_one_per_review_date');
+  exists (select 1 from pg_indexes where indexname = 'pkwt_reviews_one_per_review_date')
+union all
+select
+  'migration_17 (snapshot employee_count)',
+  exists (select 1 from information_schema.columns where table_name = 'zpar_snapshots' and column_name = 'employee_count');

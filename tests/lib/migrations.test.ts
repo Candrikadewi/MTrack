@@ -19,8 +19,8 @@ describe("required migrations", () => {
   });
 
   it("names what is still to be run, in order", () => {
-    expect(missingMigrations(null)).toEqual(["migration_15", "migration_16"]);
-    expect(missingMigrations(["migration_15"])).toEqual(["migration_16"]);
-    expect(missingMigrations(["migration_15", "migration_16"])).toEqual([]);
+    expect(missingMigrations(null)).toEqual(["migration_15", "migration_16", "migration_17"]);
+    expect(missingMigrations(["migration_15", "migration_16"])).toEqual(["migration_17"]);
+    expect(missingMigrations(["migration_15", "migration_16", "migration_17"])).toEqual([]);
   });
 });
