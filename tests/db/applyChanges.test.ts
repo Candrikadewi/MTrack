@@ -140,3 +140,18 @@ describe("migration_18", () => {
     await db.exec("reset request.jwt.claims");
   });
 });
+
+describe("migration_19 (error log)", () => {
+  it("lets anyone signed in add their own errors, and only admins read them", async () => {
+    const shopId = await actAs(db, "shop");
+    await db.query("insert into app_errors (source, message) values ('client', 'boom')");
+    await expect(
+      db.query("insert into app_errors (source, message, user_id) values ('client', 'forged', $1)", [crypto.randomUUID()])
+    ).rejects.toThrow(/row-level security/);
+    expect((await db.query("select * from app_errors")).rows).toHaveLength(0); // shop can't read
+
+    await actAs(db, "admin");
+    const { rows } = await db.query<{ message: string; user_id: string }>("select message, user_id from app_errors");
+    expect(rows).toEqual([{ message: "boom", user_id: shopId }]);
+  });
+});

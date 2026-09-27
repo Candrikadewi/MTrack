@@ -85,4 +85,8 @@ select
 union all
 select
   'migration_18 (server jobs act as admin)',
-  exists (select 1 from app_migrations where name = 'migration_18');
+  exists (select 1 from app_migrations where name = 'migration_18')
+union all
+select
+  'migration_19 (error log)',
+  exists (select 1 from information_schema.tables where table_name = 'app_errors');
