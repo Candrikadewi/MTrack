@@ -1,7 +1,7 @@
 // Filling a demand: mapping a candidate, No Replace, the fulfilment date, verification
 // (contract signed / assigned) and the shop's confirmation.
+import { dataClient } from "../../storage";
 import { demandStore } from "../../repo";
-import { createClient } from "../../supabase/client";
 import { pushToast } from "../../toast";
 import { computeFsStatus } from "../compute";
 import type { EmploymentStatus, ReplacementStatus } from "../../types";
@@ -40,7 +40,7 @@ export function setDemandReplacementByNoreg(demandId: string, noreg: string, rep
     employmentStatus = replacementStatus === "PKWT New Hire" ? "Kontrak" : getEmploymentStatus(noreg);
   }
 
-  const supabase = createClient();
+  const supabase = dataClient();
   supabase
     .rpc("set_demand_replacement", {
       p_demand_id: demandId,
@@ -66,7 +66,7 @@ export function setDemandReplacementByNoreg(demandId: string, noreg: string, rep
 
 /** Kontrak tab "No Replace" path — clears any replacement info, records the reason. */
 export function setDemandNoReplace(demandId: string, reason: string): void {
-  const supabase = createClient();
+  const supabase = dataClient();
   supabase
     .rpc("set_demand_replacement", {
       p_demand_id: demandId,
@@ -109,7 +109,7 @@ export function confirmDemandFulfillment(demandId: string, confirmedDate: string
     fulfillment_confirmed_date: confirmedDate,
     status: confirmedDate ? "Fulfilled" : "Open",
   });
-  const supabase = createClient();
+  const supabase = dataClient();
   supabase
     .rpc("confirm_demand_fulfillment", { p_demand_id: demandId, p_confirmed_date: confirmedDate || null })
     .then((res: { error: { message: string } | null }) => {
@@ -143,7 +143,7 @@ export function confirmShopReceipt(demandId: string, confirmedDate: string): voi
   const previous = demandStore.get(demandId);
   if (!previous) return;
   demandStore.patchLocal(demandId, { shop_confirmed_date: confirmedDate });
-  const supabase = createClient();
+  const supabase = dataClient();
   supabase
     .rpc("confirm_shop_receipt", { p_demand_id: demandId, p_confirmed_date: confirmedDate || null })
     .then((res: { error: { message: string } | null }) => {

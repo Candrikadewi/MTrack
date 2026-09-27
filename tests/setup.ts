@@ -4,6 +4,10 @@ import { resetStores } from "./helpers/stores";
 
 // Every store talks to Supabase through this one module; swap it for the
 // in-memory fake so tests run offline and never write real data.
+// "server-only" refuses to load outside Next's server build; tests run the
+// server modules directly.
+vi.mock("server-only", () => ({}));
+
 vi.mock("@/lib/supabase/client", async () => {
   const { fakeClient } = await import("./helpers/fakeSupabase");
   return { createClient: () => fakeClient };

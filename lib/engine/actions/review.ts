@@ -1,8 +1,7 @@
 // PKWT review: generating the reviews that fall due, and saving Continue / Terminate
 // (Terminate opens a replacement demand server-side).
-import { genId } from "../../storage";
+import { genId, dataClient } from "../../storage";
 import { demandStore, pkwtReviewStore, getActiveSnapshot, zparStore } from "../../repo";
-import { createClient } from "../../supabase/client";
 import { pushToast } from "../../toast";
 import { computeReviewDate } from "../compute";
 import { KONTRAK_REVIEW_STATUSES } from "../../types";
@@ -86,7 +85,7 @@ export async function generatePkwtReviews(): Promise<PkwtReviewRun> {
 export function setReviewResult(reviewId: string, result: ReviewResult): void {
   const previous = pkwtReviewStore.get(reviewId)?.review_result;
   pkwtReviewStore.patchLocal(reviewId, { review_result: result });
-  const supabase = createClient();
+  const supabase = dataClient();
   supabase
     .rpc("set_review_result", { p_review_id: reviewId, p_result: result })
     .then((res: { error: { message: string } | null }) => {
@@ -113,7 +112,7 @@ export async function setReviewResults(reviewIds: string[], result: ReviewResult
     .filter((r): r is PkwtReview => r !== undefined && r.review_result !== result);
   const previous = new Map(targets.map((r) => [r.id, r.review_result]));
   for (const r of targets) pkwtReviewStore.patchLocal(r.id, { review_result: result });
-  const supabase = createClient();
+  const supabase = dataClient();
   let saved = 0;
   let failed = 0;
   let lastError = "";

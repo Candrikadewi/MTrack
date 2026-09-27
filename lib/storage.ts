@@ -13,6 +13,42 @@ import type { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
 import { createClient } from "./supabase/client";
 import { pushToast } from "./toast";
 
+// ---------------------------------------------------------------------------
+// Which Supabase connection the stores (and the engine) use
+// ---------------------------------------------------------------------------
+
+type DataClient = ReturnType<typeof createClient>;
+let clientFactory: () => DataClient = createClient;
+
+/** The Supabase client the stores and the engine read and write with: the
+ * signed-in browser user's, or — while a server job runs — the one the job
+ * set with setDataClient. */
+export function dataClient(): DataClient {
+  return clientFactory();
+}
+
+/** For server jobs (see lib/jobs): use this client instead of the browser
+ * one; `null` switches back. */
+export function setDataClient(factory: (() => DataClient) | null): void {
+  clientFactory = factory ?? createClient;
+}
+
+// Every write and RPC still on its way, so a server job can wait for all of
+// them before it reports back.
+const inFlight = new Set<Promise<unknown>>();
+
+export function trackInFlight<P extends Promise<unknown>>(promise: P): P {
+  inFlight.add(promise);
+  void promise.finally(() => inFlight.delete(promise));
+  return promise;
+}
+
+/** Resolves once no write, transaction or tracked RPC is in flight —
+ * including ones started by others finishing. */
+export async function settleWrites(): Promise<void> {
+  while (inFlight.size > 0) await Promise.allSettled([...inFlight]);
+}
+
 type PgError = { message: string } | null;
 type WriteResult = { error: PgError };
 type ReadResult<T> = { data: T[] | null; error: PgError };
@@ -95,6 +131,12 @@ const TABLE_LABELS: Record<string, string> = {
 };
 
 let lastFailure = { text: "", at: 0 };
+let failureListener: ((table: string, message: string) => void) | null = null;
+
+/** Also hear about every refused write (a server job counts them). */
+export function onWriteFailure(listener: ((table: string, message: string) => void) | null): void {
+  failureListener = listener;
+}
 
 /** Tells the person a save didn't go through: the cache already showed it
  * as done, so without this they'd believe it was saved. A burst of the same
@@ -161,7 +203,9 @@ function isMissingApplyChanges(message: string): boolean {
 }
 
 async function commit(changes: QueuedChange[]): Promise<void> {
-  const error = await Promise.resolve(createClient().rpc("apply_changes", { ops: changes.map((c) => c.change) })).then(
+  const error = await trackInFlight(
+    Promise.resolve(dataClient().rpc("apply_changes", { ops: changes.map((c) => c.change) }))
+  ).then(
     (res: { error: { message: string } | null }) => res.error?.message ?? null,
     (err: unknown) => errorMessage(err)
   );
@@ -174,6 +218,7 @@ async function commit(changes: QueuedChange[]): Promise<void> {
   console.error("apply_changes failed:", error);
   for (const c of [...changes].reverse()) c.rollback();
   notify();
+  failureListener?.(changes[0].change.table, error);
   reportWriteFailure(changes[0].change.table, error);
 }
 
@@ -195,6 +240,11 @@ export interface Store<T extends { id: string }> {
   ready(): boolean;
   /** Client-only, idempotent: hydrates the cache and opens the realtime subscription. */
   init(): void;
+  /** Reads the table into the cache once, without realtime — for server
+   * jobs, where init() does nothing. */
+  load(): Promise<void>;
+  /** Forgets the cache (after a server job). */
+  reset(): void;
   /** Forces a fresh select("*") from Supabase into the cache — use after a
    * server-side mutation (e.g. an RPC that inserts rows the client didn't
    * create locally) so the UI doesn't have to wait on realtime to catch up. */
@@ -217,7 +267,7 @@ export function createStore<T extends { id: string }>(table: string, options: St
   let started = false;
 
   function client() {
-    return createClient();
+    return dataClient();
   }
 
   /** Supabase (PostgREST) returns at most 1000 rows per request by
@@ -301,7 +351,7 @@ export function createStore<T extends { id: string }>(table: string, options: St
     rollback: () => void,
     report = true
   ): Promise<string | null> {
-    return Promise.resolve(request)
+    return trackInFlight(Promise.resolve(request))
       .then(
         (res) => res.error?.message ?? null,
         (err: unknown) => errorMessage(err)
@@ -311,6 +361,7 @@ export function createStore<T extends { id: string }>(table: string, options: St
           console.error(`${label} ${table} failed:`, error);
           rollback();
           notify();
+          failureListener?.(table, error);
           if (report) reportWriteFailure(table, error);
         }
         return error;
@@ -341,6 +392,16 @@ export function createStore<T extends { id: string }>(table: string, options: St
   return {
     key: table,
     init: start,
+    async load() {
+      cache = await fetchAll();
+      initialized = true;
+      notify();
+    },
+    reset() {
+      cache = [];
+      initialized = false;
+      started = false;
+    },
     refetch,
     ready() {
       return initialized;

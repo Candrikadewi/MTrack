@@ -30,8 +30,8 @@ export function setWriteResponder(fn: typeof writeResponder): void {
  * list and .eq/.in filters are applied). */
 const tableRows = new Map<string, Record<string, unknown>[]>();
 
-export function setTableRows(table: string, rows: Record<string, unknown>[]): void {
-  tableRows.set(table, rows);
+export function setTableRows(table: string, rows: object[]): void {
+  tableRows.set(table, rows as Record<string, unknown>[]);
 }
 
 /** Makes a select fail when its column list matches, e.g. a column that a

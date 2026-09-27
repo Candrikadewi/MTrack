@@ -9,8 +9,7 @@
 //
 // To the rest of the app it is still a Store<ZparSnapshot>: a snapshot
 // whose employees haven't been loaded yet simply has `employees: []`.
-import { createClient } from "./supabase/client";
-import { createStore, notifyDataChanged, subscribeStorage, type Store } from "./storage";
+import { createStore, dataClient, notifyDataChanged, subscribeStorage, trackInFlight, type Store } from "./storage";
 import type { EmployeeRecord, ZparSnapshot } from "./types";
 
 const DETAIL_COLUMNS = "id, period, filename, upload_date, is_active, employee_count";
@@ -65,7 +64,9 @@ export function createSnapshotStore(): SnapshotStore {
     const pending = wanted.map((id) => loading.get(id)).filter((p): p is Promise<void> => Boolean(p));
     const toFetch = wanted.filter((id) => !loading.has(id));
     if (toFetch.length > 0) {
-      const request = Promise.resolve(createClient().from("zpar_snapshots").select("id, employees").in("id", toFetch)).then(
+      const request = trackInFlight(
+        Promise.resolve(dataClient().from("zpar_snapshots").select("id, employees").in("id", toFetch))
+      ).then(
         (res: { data: { id: string; employees: EmployeeRecord[] }[] | null; error: { message: string } | null }) => {
           for (const id of toFetch) loading.delete(id);
           if (res.error) {
@@ -112,6 +113,17 @@ export function createSnapshotStore(): SnapshotStore {
         subscribeStorage(loadActive);
       }
       loadActive();
+    },
+    async load() {
+      await details.load();
+      const active = details.list().find((s) => s.is_active);
+      if (active) await loadEmployees([active.id]);
+    },
+    reset() {
+      details.reset();
+      employeesById.clear();
+      failed.clear();
+      version++;
     },
     refetch: details.refetch,
     ready() {

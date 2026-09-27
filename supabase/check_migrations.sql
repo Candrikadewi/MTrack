@@ -81,4 +81,8 @@ select
 union all
 select
   'migration_17 (snapshot employee_count)',
-  exists (select 1 from information_schema.columns where table_name = 'zpar_snapshots' and column_name = 'employee_count');
+  exists (select 1 from information_schema.columns where table_name = 'zpar_snapshots' and column_name = 'employee_count')
+union all
+select
+  'migration_18 (server jobs act as admin)',
+  exists (select 1 from app_migrations where name = 'migration_18');

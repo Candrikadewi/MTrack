@@ -1,8 +1,7 @@
 // Supply (Utilization) Pool: adding people, Kaizen supply, proposing a pool candidate for a
 // demand, and natural release.
-import { genId, transaction } from "../../storage";
+import { genId, transaction, dataClient } from "../../storage";
 import { demandStore, utilPoolStore } from "../../repo";
-import { createClient } from "../../supabase/client";
 import { pushToast } from "../../toast";
 import { computeFsStatus, today } from "../compute";
 import type { KaizenLaborGroup, MpStatusKategori, ReplacementStatus, UtilPoolEntry } from "../../types";
@@ -134,7 +133,7 @@ export function proposePoolCandidate(poolEntryId: string | null, demandId: strin
     });
   }
 
-  createClient()
+  dataClient()
     .rpc("propose_pool_candidate", { p_demand_id: demandId, p_pool_entry_id: poolEntryId, p_fs_status: fs_status })
     .then((res: { error: { message: string } | null }) => {
       if (res.error) {

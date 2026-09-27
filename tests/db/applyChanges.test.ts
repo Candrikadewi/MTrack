@@ -126,3 +126,17 @@ describe("migration_17", () => {
     expect(rows[0].employee_count).toBe(3);
   });
 });
+
+describe("migration_18", () => {
+  it("treats the service role (server jobs) as admin, and nobody else", async () => {
+    await asOwner(db);
+    await db.exec(`set request.jwt.claims = '{"role":"service_role"}'`);
+    expect((await db.query<{ r: string }>("select my_role() as r")).rows[0].r).toBe("admin");
+
+    await db.exec(`set request.jwt.claims = '{"role":"authenticated"}'`);
+    await actAs(db, "shop");
+    expect((await db.query<{ r: string }>("select my_role() as r")).rows[0].r).toBe("shop");
+    await asOwner(db);
+    await db.exec("reset request.jwt.claims");
+  });
+});
